@@ -18,7 +18,7 @@ android {
     applicationId = "com.igng.tokenmonitor.android"
     minSdk = 26
     targetSdk = 36
-    val releaseVersion = providers.gradleProperty("tokenMonitorVersion").orElse("0.45.0-rev.17").get()
+    val releaseVersion = providers.gradleProperty("tokenMonitorVersion").orElse("0.45.0-rev.18").get()
     versionCode = releaseVersionCode(releaseVersion)
     versionName = releaseVersion
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

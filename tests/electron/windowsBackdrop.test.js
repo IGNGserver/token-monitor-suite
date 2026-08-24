@@ -243,9 +243,18 @@ test('Windows exposes automatic glass without a material selector', () => {
   assert.doesNotMatch(css, /windows-native-blur-only/);
   assert.match(css, /--windows-popover-alpha/);
   assert.match(css, /--windows-popover-blur/);
+  assert.match(css, /html, body[\s\S]*font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace/);
+  assert.doesNotMatch(css, /html\.is-windows, html\.is-windows body \{[^}]*font-family:/);
   assert.match(css, /html\.is-windows\[data-windows-surface="mica"\] \.shell[\s\S]*background:\s*transparent/);
   assert.match(css, /html\.is-windows\[data-windows-surface="win10-fallback"\] \.shell[\s\S]*windows-fallback-alpha/);
   assert.match(css, /html\.is-windows\[data-windows-surface\] \.floating-bubble-tab[\s\S]*windows-popover-alpha/);
+  assert.match(css, /html\.is-windows\[data-windows-surface="mica"\] \.view-switcher-menu[\s\S]*rgba\(var\(--panel-rgb\), 0\.74\)/);
+  assert.match(css, /html\.is-windows\[data-windows-surface="mica"\] \.view-switcher-menu[\s\S]*blur\(36px\) saturate\(140%\)/);
+  assert.match(css, /html\.is-windows\[data-windows-surface="win10-fallback"\] \.view-switcher-menu[\s\S]*rgba\(var\(--panel-rgb\), 0\.88\)/);
+  assert.match(css, /html\.is-windows\[data-windows-surface\] \.view-switcher-menu-item[\s\S]*height: 32px/);
+  assert.match(html, /id="titleIconRow"/);
+  assert.match(app, /els\.titleIconRow\?\.classList\.toggle\('hidden', isWindows\)/);
+  assert.match(app, /title-icon-only', isWindows \|\| settings\?\.titleIconOnly === true/);
   assert.match(app, /nativePopoverAlpha/);
   assert.match(app, /nativePopoverBlur/);
   assert.match(app, /const themeColors = settings && 'themeColors' in settings/);

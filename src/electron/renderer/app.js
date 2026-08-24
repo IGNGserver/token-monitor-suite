@@ -357,6 +357,7 @@ Object.assign(els, {
   appUpdateNotesBody: document.getElementById('appUpdateNotesBody'),
   appUpdateReleaseNotesButton: document.getElementById('appUpdateReleaseNotesButton'),
   appUpdateMessage: document.getElementById('appUpdateMessage'),
+  titleIconRow: document.getElementById('titleIconRow'),
   titleIconInput: document.getElementById('titleIconInput'),
   showCompactTotalTokensInput: document.getElementById('showCompactTotalTokensInput'),
   swapSettingsRefreshInput: document.getElementById('swapSettingsRefreshInput'),
@@ -5332,7 +5333,13 @@ function applyAppearanceSettings(settings) {
   applyReduceMotionPreference(settings?.reduceMotion);
   els.liveDot.style.display = (settings?.showLiveDot !== false) ? '' : 'none';
   els.shell.classList.toggle('desktop-mode', settings?.windowBehavior === 'desktop');
-  els.shell.classList.toggle('title-icon-only', settings?.titleIconOnly === true);
+  // Windows frameless chrome has very little room beside the native window
+  // buttons. Keep the compact brand mark there even for older saved settings
+  // that selected the full text title; the text option remains available on
+  // platforms where it can fit naturally.
+  els.titleIconRow?.classList.toggle('hidden', isWindows);
+  if (els.titleIconInput) els.titleIconInput.disabled = isWindows;
+  els.shell.classList.toggle('title-icon-only', isWindows || settings?.titleIconOnly === true);
   const trayMode = settings && 'trayMode' in settings
     ? settings.trayMode === true
     : state.settings?.trayMode === true;

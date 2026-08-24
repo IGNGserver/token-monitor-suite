@@ -137,6 +137,61 @@ test('hub web UI stays reachable when a secret protects the API', async () => {
   }
 });
 
+test('hub web management APIs expose subscription concurrency and pricing contracts', async () => {
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: 'management-secret',
+    repository: new MemoryRepository(),
+    logger: { error() {}, warn() {} }
+  });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const base = `http://127.0.0.1:${port}`;
+    const headers = {
+      authorization: 'Bearer management-secret',
+      'content-type': 'application/json'
+    };
+    const initial = await (await fetch(`${base}/api/subscriptions`, { headers })).json();
+    const saved = await fetch(`${base}/api/subscriptions`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        baseUpdatedAt: initial.updatedAt,
+        subscriptions: [{ provider: 'codex', kind: 'subscription', amountMinor: 2000, currency: 'USD', startDate: '2026-08-01' }]
+      })
+    });
+    assert.equal(saved.status, 200);
+    const stored = await saved.json();
+    assert.equal(stored.subscriptions.length, 1);
+
+    const stale = await fetch(`${base}/api/subscriptions`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ baseUpdatedAt: initial.updatedAt, subscriptions: [] })
+    });
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json()).error, 'stale_write');
+
+    const pricing = await fetch(`${base}/api/pricing/gpt-5`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ inputPricePerMillion: 1, outputPricePerMillion: 2, cacheReadPricePerMillion: 0, cacheWritePricePerMillion: 0 })
+    });
+    assert.equal(pricing.status, 200);
+    const listed = await (await fetch(`${base}/api/pricing`, { headers })).json();
+    assert.equal(listed.pricing[0].model, 'gpt-5');
+
+    const stats = await (await fetch(`${base}/api/stats`, { headers })).json();
+    assert.equal(typeof stats.historyRevision, 'string');
+    assert.equal(typeof stats.deviceHistoryRevision, 'string');
+    assert.equal(typeof stats.subscriptionsUpdatedAt, 'string');
+  } finally {
+    await hub.stop();
+  }
+});
+
 test('tryServeStatic refuses non-GET methods and API paths', async () => {
   const fakeRes = {
     writeHead() {},

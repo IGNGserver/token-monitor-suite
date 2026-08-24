@@ -53,6 +53,11 @@ test('hub web app wires status, heatmap, and active-days controls', () => {
   assert.match(app, /homeLimitAccountCount/);
   assert.match(app, /limitRemainingTone/);
   assert.match(app, /projects\.incomplete|sessions\.truncated/);
+  assert.match(app, /id: 'subscriptions'/);
+  assert.match(app, /id: 'pricing'/);
+  assert.match(app, /historyRevision|deviceHistoryRevision/);
+  assert.match(app, /data-subscription-form/);
+  assert.match(app, /data-pricing-form/);
 });
 
 test('devicePlatformLabel / countActiveDays / heatmapValue behavior', () => {

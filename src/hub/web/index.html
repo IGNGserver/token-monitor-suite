@@ -18,6 +18,7 @@
     <link rel="stylesheet" href="/css/app.css" />
   </head>
   <body>
+    <a class="skip-link" href="#content" data-i18n="nav.skip">Skip to content</a>
     <div id="app" class="app">
       <aside class="sidebar" aria-label="Primary">
         <div class="brand">
@@ -48,6 +49,10 @@
             </div>
           </div>
           <div class="topbar-actions">
+            <label class="device-filter">
+              <span data-i18n="filters.device">Device</span>
+              <select id="deviceFilter" aria-label="Device filter"><option value="" data-i18n="filters.allDevices">All devices</option></select>
+            </label>
             <div class="period-tabs" id="periodTabs" role="tablist" aria-label="Period"></div>
             <button type="button" id="customRangeBtn" class="icon-btn" title="Custom range" aria-label="Custom range">▦</button>
             <button type="button" id="refreshBtn" class="icon-btn" title="Refresh" aria-label="Refresh">↻</button>

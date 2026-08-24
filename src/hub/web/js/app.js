@@ -50,7 +50,9 @@ const VIEWS = [
   { id: 'session', icon: '☰' },
   { id: 'limits', icon: '◔' },
   { id: 'status', icon: '◉' },
-  { id: 'trends', icon: '∿' }
+  { id: 'trends', icon: '∿' },
+  { id: 'subscriptions', icon: '◌' },
+  { id: 'pricing', icon: '¤' }
 ];
 
 const PERIODS = ['today', 'month', 'allTime'];
@@ -77,6 +79,7 @@ const els = {
   totalCost: document.getElementById('totalCost'),
   deviceCount: document.getElementById('deviceCount'),
   liveLabel: document.getElementById('liveLabel'),
+  deviceFilter: document.getElementById('deviceFilter'),
   content: document.getElementById('content'),
   authGate: document.getElementById('authGate'),
   authForm: document.getElementById('authForm'),
@@ -113,9 +116,11 @@ const state = {
     period: 'today',
     trendsRange: '30',
     trendsStack: 'client',
+    trendsMetric: 'tokens',
     heatmapMetric: 'cost',
     activeDaysWindow: 'all',
     homeLimitAccountCount: 3,
+    deviceFilter: '',
     selectedDeviceId: '',
     selectedToolId: '',
     deviceDetailPeriod: 'today',
@@ -126,6 +131,19 @@ const state = {
   health: null,
   stats: null,
   history: null,
+  historyRequest: null,
+  historyLoading: false,
+  subscriptions: null,
+  subscriptionsLoading: false,
+  subscriptionsError: null,
+  subscriptionsSaving: false,
+  pricing: null,
+  pricingLoading: false,
+  pricingError: null,
+  pricingSaving: false,
+  limitProvider: '',
+  loading: true,
+  error: null,
   customRange: null,
   customPeriod: null,
   stream: 'offline',
@@ -140,9 +158,24 @@ function tr(key, params) {
   return t(state.locale, key, params);
 }
 
+function viewStats() {
+  const stats = state.stats;
+  const deviceId = String(state.prefs.deviceFilter || '').trim();
+  if (!stats || !deviceId) return stats;
+  const device = (stats.devices || []).find((entry) => String(entry?.deviceId || '') === deviceId);
+  if (!device) return stats;
+  return {
+    ...stats,
+    devices: [device],
+    periods: device.periods || {},
+    limits: device.limits || { providers: [] },
+    projectsIncomplete: Boolean(device.allTimeProjectsOmitted || device.allTimeProjectsIncomplete)
+  };
+}
+
 function activePeriod() {
   if (state.customPeriod) return state.customPeriod;
-  return state.stats?.periods?.[state.prefs.period] || {
+  return viewStats()?.periods?.[state.prefs.period] || {
     totalTokens: 0,
     costUsd: 0,
     clients: {},
@@ -152,6 +185,17 @@ function activePeriod() {
     projects: {},
     sessions: {}
   };
+}
+
+function formatDuration(milliseconds) {
+  const totalMinutes = Math.max(0, Math.round(Number(milliseconds || 0) / 60_000));
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours < 24) return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const remainder = hours % 24;
+  return remainder ? `${days}d ${remainder}h` : `${days}d`;
 }
 
 function showToast(message) {
@@ -165,6 +209,7 @@ function setStreamStatus(status) {
   state.stream = status;
   const map = {
     connecting: 'status.connecting',
+    retrying: 'status.retrying',
     live: 'status.live',
     disconnected: 'status.offline',
     offline: 'status.offline',
@@ -175,6 +220,7 @@ function setStreamStatus(status) {
   els.streamStatus.dataset.state = live ? 'live' : (status === 'unauthorized' || status === 'error' ? 'error' : 'offline');
   els.streamStatusText.textContent = tr(map[status] || 'status.offline');
   els.liveLabel.textContent = live ? tr('stats.live.on') : tr('stats.live.off');
+  if (live || status === 'unauthorized') els.streamStatus.title = '';
   if (status === 'unauthorized') showAuth(true);
 }
 
@@ -298,11 +344,22 @@ function renderChrome() {
   ].join('');
 
   els.pageTitle.textContent = tr(`nav.${state.prefs.view}`);
-  const devices = state.stats?.devices?.length || 0;
+  const allDevices = state.stats?.devices || [];
+  const devices = allDevices.length;
   const periodLabel = state.customPeriod
     ? tr('period.custom')
     : tr(`period.${state.prefs.period}`);
-  els.pageMeta.textContent = `${periodLabel} · ${devices} ${tr('stats.devices').toLowerCase()}`;
+  const selectedDevice = allDevices.find((device) => device.deviceId === state.prefs.deviceFilter);
+  const selectedLabel = selectedDevice ? ` · ${selectedDevice.hostname || selectedDevice.deviceId}` : '';
+  els.pageMeta.textContent = `${periodLabel} · ${devices} ${tr('stats.devices').toLowerCase()}${selectedLabel}`;
+  if (els.deviceFilter) {
+    const current = state.prefs.deviceFilter || '';
+    els.deviceFilter.innerHTML = [
+      `<option value="">${escapeHtml(tr('filters.allDevices'))}</option>`,
+      ...allDevices.map((device) => `<option value="${escapeHtml(device.deviceId || '')}">${escapeHtml(device.hostname || device.deviceId || tr('devices.title'))}</option>`)
+    ].join('');
+    els.deviceFilter.value = allDevices.some((device) => device.deviceId === current) ? current : '';
+  }
   if (els.homeReturnBtn) {
     const onHome = state.prefs.view === 'home';
     els.homeReturnBtn.classList.toggle('hidden', onHome);
@@ -391,10 +448,29 @@ function shareBarHtml(rows) {
 
 function renderHero() {
   const period = activePeriod();
+  const stats = viewStats();
   els.totalTokens.textContent = formatCompact(period.totalTokens || 0);
   els.totalTokens.title = formatNumber(period.totalTokens || 0);
   els.totalCost.textContent = formatCost(period.costUsd || 0, state.prefs.currency);
-  els.deviceCount.textContent = formatNumber(state.stats?.devices?.length || 0);
+  els.deviceCount.textContent = formatNumber(stats?.devices?.length || 0);
+}
+
+function renderCompletenessNotice(stats, periodName) {
+  if (!stats) return '';
+  const notes = [];
+  if (periodName === 'allTime' && stats.projectsIncomplete) notes.push(tr('data.projectsIncomplete'));
+  const omittedSessions = Number(stats.sessionDetailsOmitted?.[periodName] || 0);
+  if (omittedSessions > 0) notes.push(tr('data.sessionsOmitted', { count: omittedSessions }));
+  const omittedProjects = Number(stats.periodProjectsOmitted?.[periodName] || 0);
+  if (omittedProjects > 0) notes.push(tr('data.projectsOmitted', { count: omittedProjects }));
+  if (!notes.length) return '';
+  return `<div class="notice warn completeness-notice" role="status"><strong>${escapeHtml(tr('data.partial'))}</strong><span>${escapeHtml(notes.join(' '))}</span></div>`;
+}
+
+function renderHistoryScopeNotice() {
+  return state.prefs.deviceFilter
+    ? `<div class="notice" role="status">${escapeHtml(tr('data.historyGlobal'))}</div>`
+    : '';
 }
 
 
@@ -444,10 +520,11 @@ function tipText(parts) {
 
 function renderHome() {
   const period = activePeriod();
+  const stats = viewStats();
   const tools = toolRows(period).slice(0, 5);
   const models = modelRows(period).slice(0, 5);
-  const devices = deviceRows(state.stats, state.customPeriod ? 'today' : state.prefs.period).slice(0, 5);
-  const limits = limitCards(state.stats, state.locale).slice(0, clampHomeLimitAccountCount(state.prefs.homeLimitAccountCount, 3));
+  const devices = deviceRows(stats, state.customPeriod ? 'today' : state.prefs.period).slice(0, 5);
+  const limits = limitCards(stats, state.locale).slice(0, clampHomeLimitAccountCount(state.prefs.homeLimitAccountCount, 3));
   const history = historySource();
   const daily = historyDaily(history, 14);
   const heatDaily = historyDaily(history, 90);
@@ -487,12 +564,15 @@ function renderHome() {
       `).join('')}</div>`
     : emptyHtml('empty.limits');
 
+  const activeTime = Number(summary?.activeTimeMs || 0);
+  const completeness = renderCompletenessNotice(stats, state.prefs.period);
   const summaryBody = (summary || heatDaily.length)
     ? `
       <div class="summary-grid">
         <div class="summary-chip"><span class="summary-label">${tr('home.activeDays')}</span><strong>${formatNumber(activeDaysValue)}</strong></div>
         <div class="summary-chip"><span class="summary-label">${tr('home.streak')}</span><strong>${formatNumber(summary?.currentStreak || 0)}</strong></div>
         <div class="summary-chip"><span class="summary-label">${tr('home.peakDay')}</span><strong>${formatCompact(summary?.peakDayTokens || 0)}</strong></div>
+        <div class="summary-chip"><span class="summary-label">${tr('home.activeTime')}</span><strong>${formatDuration(activeTime)}</strong></div>
       </div>
       <div class="toolbar-row">
         <div class="seg" role="group" aria-label="${tr('home.heatmapMetric')}">
@@ -507,6 +587,8 @@ function renderHome() {
     : emptyHtml('empty.history');
 
   return `
+    ${completeness}
+    ${renderHistoryScopeNotice()}
     <div class="grid-2">
       ${panel(tr('home.tools'), toolsBody)}
       ${panel(tr('home.models'), modelsBody)}
@@ -600,7 +682,8 @@ function renderDeviceStatusBlocks(device) {
 
 function renderDevices() {
   const periodKey = state.customPeriod ? 'today' : (state.prefs.deviceDetailPeriod || state.prefs.period || 'today');
-  const rows = deviceRows(state.stats, periodKey);
+  const stats = viewStats();
+  const rows = deviceRows(stats, periodKey);
   if (!rows.length) return emptyHtml('empty.usage');
   const selectedId = state.prefs.selectedDeviceId || rows[0].key;
   const selected = rows.find((row) => row.key === selectedId) || rows[0];
@@ -733,11 +816,28 @@ function renderLimitCards(cards, { compact = false } = {}) {
 }
 
 function renderLimits() {
-  return renderLimitCards(limitCards(state.stats, state.locale));
+  const stats = viewStats();
+  const allCards = limitCards(stats, state.locale);
+  const providers = [...new Set(allCards.map((card) => card.provider))].sort();
+  const cards = state.limitProvider
+    ? allCards.filter((card) => card.provider === state.limitProvider)
+    : allCards;
+  const filter = `
+    <div class="toolbar-row view-toolbar">
+      <label class="field inline-field">
+        <span>${tr('limits.filter')}</span>
+        <select data-limit-provider>
+          <option value="">${tr('filters.allProviders')}</option>
+          ${providers.map((provider) => `<option value="${escapeHtml(provider)}"${provider === state.limitProvider ? ' selected' : ''}>${escapeHtml(clientLabel(provider))}</option>`).join('')}
+        </select>
+      </label>
+      <span class="panel-meta tiny">${tr('limits.accountsCount', { count: cards.length })}</span>
+    </div>`;
+  return filter + renderLimitCards(cards);
 }
 
 function renderStatus() {
-  const rows = statusRows(state.stats, state.locale);
+  const rows = statusRows(viewStats(), state.locale);
   if (!rows.length) return emptyHtml('empty.status');
   const summary = `
     <div class="summary-grid" style="margin-bottom:16px">
@@ -746,6 +846,173 @@ function renderStatus() {
       <div class="summary-chip"><span class="summary-label">${tr('status.warnCount')}</span><strong>${rows.filter((r) => r.health !== 'ok').length}</strong></div>
     </div>`;
   return panel(tr('nav.status'), summary + renderLimitCards(rows, { compact: true }));
+}
+
+function formatSubscriptionMoney(amountMinor, currency) {
+  const code = ['USD', 'CNY', 'TWD', 'HKD'].includes(String(currency || '').toUpperCase())
+    ? String(currency).toUpperCase()
+    : 'USD';
+  try {
+    return new Intl.NumberFormat(state.locale, { style: 'currency', currency: code }).format(Number(amountMinor || 0) / 100);
+  } catch {
+    return `${(Number(amountMinor || 0) / 100).toFixed(2)} ${code}`;
+  }
+}
+
+function subscriptionToday() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+function nextSubscriptionRenewal(record) {
+  if (!record || record.kind === 'topup' || record.autoRenew === false) return '';
+  const today = subscriptionToday();
+  const override = String(record.nextRenewalOverride || '');
+  if (override >= today) return override;
+  const start = String(record.startDate || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return '';
+  const [year, month, day] = start.split('-').map(Number);
+  const step = Math.max(1, Number(record.intervalCount || 1)) * (record.interval === 'year' ? 12 : 1);
+  const todayDate = new Date(`${today}T00:00:00Z`);
+  let index = Math.max(0, ((todayDate.getUTCFullYear() - year) * 12 + todayDate.getUTCMonth() + 1 - month) / step | 0);
+  const candidate = () => {
+    const total = (year * 12) + (month - 1) + index * step;
+    const nextYear = Math.floor(total / 12);
+    const nextMonth = total % 12;
+    const maxDay = new Date(Date.UTC(nextYear, nextMonth + 1, 0)).getUTCDate();
+    return `${nextYear}-${String(nextMonth + 1).padStart(2, '0')}-${String(Math.min(day, maxDay)).padStart(2, '0')}`;
+  };
+  let result = candidate();
+  while (result < today) {
+    index += 1;
+    result = candidate();
+  }
+  return result;
+}
+
+function subscriptionRecords() {
+  return Array.isArray(state.subscriptions?.subscriptions) ? state.subscriptions.subscriptions : [];
+}
+
+function subscriptionMonthlyTotals(records) {
+  const totals = {};
+  const month = subscriptionToday().slice(0, 7);
+  for (const record of records) {
+    if (record?.endDate && String(record.endDate) <= subscriptionToday()) continue;
+    let minor = Number(record.amountMinor || 0);
+    if (record.kind === 'topup') {
+      minor = (record.topUps || [])
+        .filter((entry) => String(entry?.date || '').startsWith(month))
+        .reduce((sum, entry) => sum + Number(entry?.amountMinor || 0), 0);
+    } else if (record.interval === 'year') {
+      minor /= Math.max(1, Number(record.intervalCount || 1) * 12);
+    } else {
+      minor /= Math.max(1, Number(record.intervalCount || 1));
+    }
+    const currency = String(record.currency || 'USD').toUpperCase();
+    totals[currency] = (totals[currency] || 0) + minor;
+  }
+  return totals;
+}
+
+function subscriptionField(record, key, fallback = '') {
+  const value = record?.[key];
+  return escapeHtml(value === undefined || value === null ? fallback : value);
+}
+
+function renderSubscriptions() {
+  if (state.subscriptionsLoading && !state.subscriptions) return loadingHtml();
+  if (state.subscriptionsError && !state.subscriptions) {
+    return managementError(tr('subscriptions.title'), state.subscriptionsError, 'subscriptions-retry');
+  }
+  const records = subscriptionRecords();
+  const totals = subscriptionMonthlyTotals(records);
+  const editing = records.find((record) => record.id === state.subscriptionEditId) || null;
+  const firstTopUp = editing?.topUps?.[0] || null;
+  const amount = editing?.kind === 'topup' ? Number(firstTopUp?.amountMinor || 0) / 100 : Number(editing?.amountMinor || 0) / 100;
+  const summary = Object.entries(totals).length
+    ? Object.entries(totals).map(([currency, minor]) => `<div class="summary-chip"><span class="summary-label">${escapeHtml(tr('subscriptions.monthly'))} · ${currency}</span><strong>${escapeHtml(formatSubscriptionMoney(minor, currency))}</strong></div>`).join('')
+    : `<div class="summary-chip"><span class="summary-label">${tr('subscriptions.monthly')}</span><strong>—</strong></div>`;
+  const list = records.length
+    ? `<div class="management-list">${records.map((record) => {
+      const topUp = record.kind === 'topup';
+      const renewal = nextSubscriptionRenewal(record);
+      const detail = [
+        record.planName || '',
+        record.binding?.accountEmail || '',
+        topUp ? tr('subscriptions.topup') : (record.interval === 'year' ? tr('subscriptions.yearly') : tr('subscriptions.monthly')),
+        renewal ? `${tr('subscriptions.next')} ${renewal}` : ''
+      ].filter(Boolean).join(' · ');
+      const recordAmount = topUp
+        ? (record.topUps || []).reduce((sum, entry) => sum + Number(entry?.amountMinor || 0), 0)
+        : Number(record.amountMinor || 0);
+      return `<article class="management-row ${record.id === state.subscriptionEditId ? 'is-editing' : ''}">
+        <div class="row-main">
+          <span class="management-icon">${topUp ? '↗' : '↻'}</span>
+          <div class="row-copy"><div class="row-name">${escapeHtml(record.provider || tr('subscriptions.untitled'))}</div><div class="row-sub">${escapeHtml(detail || tr('subscriptions.noDetails'))}</div></div>
+        </div>
+        <div class="row-metrics"><div class="row-value">${escapeHtml(formatSubscriptionMoney(recordAmount, record.currency))}</div><div class="row-cost">${escapeHtml(record.currency || 'USD')}</div></div>
+        <div class="management-actions"><button type="button" class="ghost-btn" data-subscription-edit="${escapeHtml(record.id)}">${tr('actions.edit')}</button><button type="button" class="danger-btn" data-subscription-delete="${escapeHtml(record.id)}">${tr('actions.delete')}</button></div>
+      </article>`;
+    }).join('')}</div>`
+    : emptyHtml('subscriptions.empty');
+  const form = `<form class="management-form" data-subscription-form>
+    <div class="form-section-head"><div><h3>${editing ? tr('subscriptions.edit') : tr('subscriptions.add')}</h3><p class="muted tiny">${tr('subscriptions.formHint')}</p></div>${editing ? `<button type="button" class="ghost-btn" data-subscription-reset>${tr('actions.cancel')}</button>` : ''}</div>
+    <div class="form-grid">
+      <label class="field"><span>${tr('subscriptions.provider')}</span><input name="provider" required value="${subscriptionField(editing, 'provider')}" placeholder="codex" /></label>
+      <label class="field"><span>${tr('subscriptions.kind')}</span><select name="kind"><option value="subscription"${editing?.kind !== 'topup' ? ' selected' : ''}>${tr('subscriptions.plan')}</option><option value="topup"${editing?.kind === 'topup' ? ' selected' : ''}>${tr('subscriptions.topup')}</option></select></label>
+      <label class="field"><span>${tr('subscriptions.planName')}</span><input name="planName" value="${subscriptionField(editing, 'planName')}" placeholder="Pro" /></label>
+      <label class="field"><span>${tr('subscriptions.amount')}</span><input name="amount" type="number" min="0" step="0.01" value="${escapeHtml(amount || '')}" required /></label>
+      <label class="field"><span>${tr('subscriptions.currency')}</span><select name="currency">${['USD', 'CNY', 'TWD', 'HKD'].map((code) => `<option value="${code}"${(editing?.currency || 'USD') === code ? ' selected' : ''}>${code}</option>`).join('')}</select></label>
+      <label class="field"><span>${tr('subscriptions.interval')}</span><select name="interval"><option value="month"${editing?.interval !== 'year' ? ' selected' : ''}>${tr('subscriptions.monthly')}</option><option value="year"${editing?.interval === 'year' ? ' selected' : ''}>${tr('subscriptions.yearly')}</option></select></label>
+      <label class="field"><span>${tr('subscriptions.intervalCount')}</span><input name="intervalCount" type="number" min="1" max="24" step="1" value="${subscriptionField(editing, 'intervalCount', '1')}" /></label>
+      <label class="field"><span>${tr('subscriptions.startDate')}</span><input name="startDate" type="date" value="${subscriptionField(editing?.kind === 'topup' ? firstTopUp : editing, editing?.kind === 'topup' ? 'date' : 'startDate')}" /></label>
+      <label class="field"><span>${tr('subscriptions.nextRenewal')}</span><input name="nextRenewalOverride" type="date" value="${subscriptionField(editing, 'nextRenewalOverride')}" /></label>
+      <label class="field"><span>${tr('subscriptions.endDate')}</span><input name="endDate" type="date" value="${subscriptionField(editing, 'endDate')}" /></label>
+      <label class="field"><span>${tr('subscriptions.accountEmail')}</span><input name="accountEmail" type="email" value="${subscriptionField(editing?.binding, 'accountEmail')}" /></label>
+      <label class="field"><span>${tr('subscriptions.profileName')}</span><input name="profileName" value="${subscriptionField(editing?.binding, 'profileName')}" /></label>
+      <label class="field field-wide"><span>${tr('subscriptions.note')}</span><input name="note" value="${subscriptionField(editing, 'note')}" /></label>
+    </div>
+    <label class="check-row"><input name="autoRenew" type="checkbox"${editing?.autoRenew !== false ? ' checked' : ''} /><span>${tr('subscriptions.autoRenew')}</span></label>
+    <div class="drawer-actions"><button type="submit" class="primary-btn"${state.subscriptionsSaving ? ' disabled' : ''}>${state.subscriptionsSaving ? tr('actions.saving') : tr('actions.save')}</button></div>
+  </form>`;
+  return `${renderCompletenessNotice(viewStats(), state.prefs.period)}${panel(tr('subscriptions.title'), `<div class="summary-grid subscription-summary">${summary}</div>${list}`)}${panel(tr('subscriptions.manage'), form)}`;
+}
+
+function renderPricing() {
+  if (state.pricingLoading && !state.pricing) return loadingHtml();
+  if (state.pricingError && !state.pricing) return managementError(tr('pricing.title'), state.pricingError, 'pricing-retry');
+  const entries = Array.isArray(state.pricing) ? state.pricing : [];
+  const rows = entries.length
+    ? `<div class="pricing-list">${entries.map((entry) => pricingForm(entry)).join('')}</div>`
+    : emptyHtml('pricing.empty');
+  const add = pricingForm(null);
+  return `${panel(tr('pricing.title'), `<div class="toolbar-row view-toolbar"><span class="muted tiny">${tr('pricing.hint')}</span><button type="button" class="ghost-btn" data-pricing-refresh-all>${tr('pricing.refreshAll')}</button></div>${rows}`)}${panel(tr('pricing.add'), add)}`;
+}
+
+function pricingForm(entry) {
+  const model = entry?.model || '';
+  const value = (field) => escapeHtml(entry?.[field] ?? '');
+  return `<form class="pricing-form" data-pricing-form data-pricing-model="${escapeHtml(model)}">
+    <div class="pricing-form-head"><div><h3>${escapeHtml(model || tr('pricing.newModel'))}</h3><p class="muted tiny">${entry?.source ? `${escapeHtml(entry.source)} · ${escapeHtml(entry.updatedAt || '')}` : tr('pricing.formHint')}</p></div>${entry ? `<button type="button" class="ghost-btn" data-pricing-upstream="${escapeHtml(model)}">${tr('pricing.fetch')}</button>` : ''}</div>
+    <div class="form-grid pricing-grid">
+      <label class="field${entry ? '' : ' field-wide'}"><span>${tr('pricing.model')}</span><input name="model" required value="${escapeHtml(model)}" placeholder="gpt-5"${entry ? ' readonly' : ''} /></label>
+      <label class="field"><span>${tr('pricing.input')}</span><input name="inputPricePerMillion" type="number" min="0" step="any" required value="${value('inputPricePerMillion')}" /></label>
+      <label class="field"><span>${tr('pricing.output')}</span><input name="outputPricePerMillion" type="number" min="0" step="any" required value="${value('outputPricePerMillion')}" /></label>
+      <label class="field"><span>${tr('pricing.cacheRead')}</span><input name="cacheReadPricePerMillion" type="number" min="0" step="any" required value="${value('cacheReadPricePerMillion')}" /></label>
+      <label class="field"><span>${tr('pricing.cacheWrite')}</span><input name="cacheWritePricePerMillion" type="number" min="0" step="any" required value="${value('cacheWritePricePerMillion')}" /></label>
+    </div>
+    <div class="drawer-actions"><button type="submit" class="primary-btn"${state.pricingSaving ? ' disabled' : ''}>${state.pricingSaving ? tr('actions.saving') : tr('actions.save')}</button></div>
+  </form>`;
+}
+
+function loadingHtml() {
+  return `<div class="loading-stack" aria-live="polite"><div class="skeleton skeleton-title"></div><div class="skeleton-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div><div class="skeleton skeleton-panel"></div><span class="muted tiny">${tr('loading')}</span></div>`;
+}
+
+function managementError(title, error, retryAction) {
+  return `<section class="error-card"><div class="error-kicker">${escapeHtml(title)}</div><h2>${escapeHtml(tr('error.title'))}</h2><p>${escapeHtml(error?.message || tr('error.generic'))}</p><button type="button" class="primary-btn" data-management-retry="${retryAction}">${tr('actions.retry')}</button></section>`;
 }
 
 function renderSparkline(daily) {
@@ -835,7 +1102,21 @@ function renderHeatmap(daily, metric = 'tokens') {
   `;
 }
 
-function renderStackedBars(daily, stackBy) {
+function trendValue(value, metric) {
+  if (metric === 'cost') return Number(value?.cost ?? value ?? 0);
+  if (metric === 'activeTime') return Number(value?.activeTimeMs || 0);
+  return Number(value?.tokens ?? value ?? 0);
+}
+
+function formatTrendValue(value, metric) {
+  return metric === 'cost'
+    ? formatCost(value, state.prefs.currency)
+    : metric === 'activeTime'
+      ? formatDuration(value)
+      : formatNumber(value);
+}
+
+function renderStackedBars(daily, stackBy, metric = 'tokens') {
   if (!daily.length) return emptyHtml('empty.history');
   const width = 760;
   const height = 280;
@@ -844,8 +1125,8 @@ function renderStackedBars(daily, stackBy) {
   for (const day of daily) {
     const map = stackBy === 'model' ? (day.perModel || {}) : (day.perClient || {});
     for (const [key, value] of Object.entries(map)) {
-      const tokens = Number(value?.tokens ?? value ?? 0);
-      if (tokens > 0) seriesKeys.set(key, (seriesKeys.get(key) || 0) + tokens);
+      const amount = trendValue(value, metric);
+      if (amount > 0) seriesKeys.set(key, (seriesKeys.get(key) || 0) + amount);
     }
   }
   let topKeys = [...seriesKeys.entries()]
@@ -856,15 +1137,15 @@ function renderStackedBars(daily, stackBy) {
   if (useTotalsFallback) {
     topKeys = ['total'];
     for (const day of daily) {
-      const tokens = Number(day.tokens || 0);
-      if (tokens > 0) seriesKeys.set('total', (seriesKeys.get('total') || 0) + tokens);
+      const amount = trendValue(day, metric);
+      if (amount > 0) seriesKeys.set('total', (seriesKeys.get('total') || 0) + amount);
     }
   }
 
   const dayTotals = daily.map((day) => {
-    if (useTotalsFallback) return Number(day.tokens || 0);
+    if (useTotalsFallback) return trendValue(day, metric);
     const map = stackBy === 'model' ? (day.perModel || {}) : (day.perClient || {});
-    return topKeys.reduce((sum, key) => sum + Number(map[key]?.tokens ?? map[key] ?? 0), 0);
+    return topKeys.reduce((sum, key) => sum + trendValue(map[key], metric), 0);
   });
   const { top, ticks } = yAxisScale(Math.max(1, ...dayTotals, 1));
   const slot = (width - pad.left - pad.right) / Math.max(1, daily.length);
@@ -874,27 +1155,27 @@ function renderStackedBars(daily, stackBy) {
 
   const bars = daily.map((day, index) => {
     const map = useTotalsFallback
-      ? { total: { tokens: Number(day.tokens || 0), cost: Number(day.cost || 0) } }
+      ? { total: day }
       : (stackBy === 'model' ? (day.perModel || {}) : (day.perClient || {}));
     let y = height - pad.bottom;
     const x = pad.left + index * slot + (slot - barW) / 2;
     const parts = [];
     const tipLines = [];
     for (const key of topKeys) {
-      const tokens = Number(map[key]?.tokens ?? map[key] ?? 0);
-      if (tokens <= 0) continue;
-      const h = Math.max(1, ((height - pad.top - pad.bottom) * tokens) / top);
+      const amount = trendValue(map[key], metric);
+      if (amount <= 0) continue;
+      const h = Math.max(1, ((height - pad.top - pad.bottom) * amount) / top);
       y -= h;
       const label = useTotalsFallback
         ? tr('stats.tokens')
         : (stackBy === 'model' ? key : clientLabel(key));
-      tipLines.push(`${label}: ${formatNumber(tokens)}`);
-      parts.push(`<rect class="bar-seg chart-hit" x="${x}" y="${y}" width="${barW}" height="${h}" fill="${colorMap[key]}" data-tip="${escapeHtml(tipText([day.date || '', `${label}: ${formatNumber(tokens)}`]))}"></rect>`);
+      tipLines.push(`${label}: ${formatTrendValue(amount, metric)}`);
+      parts.push(`<rect class="bar-seg chart-hit" x="${x}" y="${y}" width="${barW}" height="${h}" fill="${colorMap[key]}" data-tip="${escapeHtml(tipText([day.date || '', `${label}: ${formatTrendValue(amount, metric)}`]))}"></rect>`);
     }
     const total = dayTotals[index];
     const totalTip = tipText([
       day.date || '',
-      `${formatNumber(total)} ${tr('stats.tokens')}`,
+      formatTrendValue(total, metric),
       Number(day.cost || 0) ? formatCost(day.cost, state.prefs.currency) : '',
       ...tipLines
     ]);
@@ -916,7 +1197,7 @@ function renderStackedBars(daily, stackBy) {
         <span class="swatch" style="background:${colorMap[key]}"></span>
         <div class="row-name">${escapeHtml(useTotalsFallback ? tr('stats.tokens') : (stackBy === 'model' ? key : clientLabel(key)))}</div>
       </div>
-      <div class="row-value">${formatNumber(seriesKeys.get(key) || 0)}</div>
+      <div class="row-value">${escapeHtml(formatTrendValue(seriesKeys.get(key) || 0, metric))}</div>
     </div>
   `).join('');
 
@@ -938,7 +1219,9 @@ function renderStackedBars(daily, stackBy) {
 function renderTrends() {
   const heatMetric = state.prefs.heatmapMetric === 'tokens' ? 'tokens' : 'cost';
   const daily = historyDaily(historySource(), state.prefs.trendsRange === 'all' ? 0 : state.prefs.trendsRange);
+  const trendMetric = ['tokens', 'cost', 'activeTime'].includes(state.prefs.trendsMetric) ? state.prefs.trendsMetric : 'tokens';
   return `
+    ${renderHistoryScopeNotice()}
     <div class="toolbar-row">
       <div class="seg">
         <button type="button" class="seg-btn ${state.prefs.trendsStack === 'client' ? 'active' : ''}" data-stack="client">${tr('trends.stack.client')}</button>
@@ -952,14 +1235,25 @@ function renderTrends() {
       <div class="seg" role="group" aria-label="${tr('home.heatmapMetric')}">
         ${segButtons([['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')]], heatMetric, 'heatmap-metric')}
       </div>
+      <div class="seg" role="group" aria-label="${tr('trends.metric')}">
+        ${segButtons([['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')], ['activeTime', tr('home.activeTime')]], trendMetric, 'trends-metric')}
+      </div>
     </div>
-    ${panel(tr('nav.trends'), renderStackedBars(daily, state.prefs.trendsStack))}
+    ${panel(tr('nav.trends'), renderStackedBars(daily, state.prefs.trendsStack, trendMetric))}
     ${panel(tr('home.heatmap'), renderHeatmap(historyDaily(historySource(), 90), heatMetric))}
   `;
 }
 
 function render() {
   renderChrome();
+  if (state.loading && !state.stats) {
+    els.content.innerHTML = loadingHtml();
+    return;
+  }
+  if (state.error && !state.stats) {
+    els.content.innerHTML = `<section class="error-card"><div class="error-kicker">Token Monitor</div><h2>${escapeHtml(tr('error.title'))}</h2><p>${escapeHtml(state.error.message || tr('error.generic'))}</p><button type="button" class="primary-btn" data-retry-dashboard>${tr('actions.retry')}</button></section>`;
+    return;
+  }
   renderHero();
   const period = activePeriod();
   let html;
@@ -974,7 +1268,7 @@ function render() {
       html = panel(tr('nav.model'), renderListView(modelRows(period), 'empty.usage'));
       break;
     case 'project': {
-      const projectData = projectRows(period, { incomplete: Boolean(state.stats?.projectsIncomplete) && state.prefs.period === 'allTime' });
+      const projectData = projectRows(period, { incomplete: Boolean(viewStats()?.projectsIncomplete) && state.prefs.period === 'allTime' });
       const incompleteBanner = projectData.incomplete
         ? `<div class="notice warn" style="margin-bottom:12px">${escapeHtml(tr('projects.incomplete'))}</div>`
         : '';
@@ -1008,6 +1302,12 @@ function render() {
     case 'trends':
       html = renderTrends();
       break;
+    case 'subscriptions':
+      html = renderSubscriptions();
+      break;
+    case 'pricing':
+      html = renderPricing();
+      break;
     default:
       html = renderHome();
   }
@@ -1019,18 +1319,49 @@ async function ensureHistory({ force = false } = {}) {
   // historyPreview from /api/stats is totals-only and must NOT block this fetch.
   if (!state.secret && state.health?.secretRequired) return;
   if (!force && historyHasBreakdown(state.history)) return;
-  try {
-    const full = await fetchJson('/api/history', { secret: state.secret });
-    if (full && Array.isArray(full.daily)) state.history = full;
-  } catch {
-    // Keep any previously loaded full history; charts fall back to historyPreview totals.
+  if (state.historyRequest) return state.historyRequest;
+  state.historyLoading = true;
+  state.historyRequest = (async () => {
+    try {
+      const full = await fetchJson('/api/history', { secret: state.secret });
+      if (full && Array.isArray(full.daily)) state.history = full;
+    } catch (error) {
+      if (error.status === 401) showAuth(true);
+      // Keep any previously loaded full history; charts fall back to historyPreview totals.
+    } finally {
+      state.historyLoading = false;
+      state.historyRequest = null;
+    }
+  })();
+  return state.historyRequest;
+}
+
+function applyStatsSnapshot(stats) {
+  if (!stats || typeof stats !== 'object') return;
+  const previous = state.stats;
+  const historyChanged = Boolean(previous)
+    && (previous.historyRevision !== stats.historyRevision
+      || previous.deviceHistoryRevision !== stats.deviceHistoryRevision);
+  const subscriptionsChanged = Boolean(previous)
+    && previous.subscriptionsUpdatedAt !== stats.subscriptionsUpdatedAt;
+  state.stats = stats;
+  state.loading = false;
+  state.error = null;
+  if (historyChanged) {
+    state.history = null;
+    if (state.prefs.view === 'home' || state.prefs.view === 'trends') {
+      void ensureHistory({ force: true }).then(() => render());
+    }
   }
+  if (subscriptionsChanged && state.subscriptions) void loadSubscriptions({ force: true });
+  render();
 }
 
 async function refreshStats() {
+  state.error = null;
   const stats = await fetchJson('/api/stats', { secret: state.secret });
-  state.stats = stats;
-  render();
+  applyStatsSnapshot(stats);
+  return stats;
 }
 
 function connectStream() {
@@ -1042,16 +1373,59 @@ function connectStream() {
     secret: state.secret,
     onStatus: setStreamStatus,
     onStats: (stats) => {
-      state.stats = stats;
-      render();
+      applyStatsSnapshot(stats);
+    },
+    onRetry: (delay) => {
+      if (state.stream !== 'live') setStreamStatus('retrying');
+      if (delay) els.streamStatus.title = `${tr('status.retrying')} · ${Math.ceil(delay / 1000)}s`;
     }
   });
 }
 
+async function loadSubscriptions({ force = false } = {}) {
+  if (!force && state.subscriptions) return state.subscriptions;
+  if (state.subscriptionsLoading) return state.subscriptions;
+  state.subscriptionsLoading = true;
+  state.subscriptionsError = null;
+  try {
+    state.subscriptions = await fetchJson('/api/subscriptions', { secret: state.secret });
+    return state.subscriptions;
+  } catch (error) {
+    state.subscriptionsError = error;
+    if (error.status === 401) showAuth(true);
+    return null;
+  } finally {
+    state.subscriptionsLoading = false;
+    if (state.prefs.view === 'subscriptions') render();
+  }
+}
+
+async function loadPricing({ force = false } = {}) {
+  if (!force && state.pricing) return state.pricing;
+  if (state.pricingLoading) return state.pricing;
+  state.pricingLoading = true;
+  state.pricingError = null;
+  try {
+    const payload = await fetchJson('/api/pricing', { secret: state.secret });
+    state.pricing = Array.isArray(payload?.pricing) ? payload.pricing : [];
+    return state.pricing;
+  } catch (error) {
+    state.pricingError = error;
+    if (error.status === 401) showAuth(true);
+    return null;
+  } finally {
+    state.pricingLoading = false;
+    if (state.prefs.view === 'pricing') render();
+  }
+}
+
 async function bootstrapAuthorized() {
   showAuth(false);
+  state.loading = true;
+  state.error = null;
+  render();
   await refreshStats();
-  await ensureHistory();
+  await Promise.all([ensureHistory(), loadSubscriptions(), loadPricing()]);
   connectStream();
   render();
 }
@@ -1071,7 +1445,11 @@ async function tryConnect(secret, remember = true) {
       showAuth(true);
       return false;
     }
-    throw error;
+    state.error = error;
+    state.loading = false;
+    showAuth(false);
+    render();
+    return false;
   }
 }
 
@@ -1084,6 +1462,144 @@ async function deleteDevice(deviceId) {
   });
   showToast(tr('toast.deleted'));
   await refreshStats();
+}
+
+function subscriptionFromForm(form) {
+  const values = new FormData(form);
+  const id = String(state.subscriptionEditId || '').trim();
+  const existing = subscriptionRecords().find((record) => record.id === id) || null;
+  const kind = values.get('kind') === 'topup' ? 'topup' : 'subscription';
+  const startDate = String(values.get('startDate') || '').trim();
+  const amountMinor = Math.max(0, Math.round(Number(values.get('amount') || 0) * 100));
+  if (!String(values.get('provider') || '').trim()) throw new Error(tr('subscriptions.providerRequired'));
+  if (!startDate) throw new Error(tr('subscriptions.dateRequired'));
+  const topUps = kind === 'topup'
+    ? [{ id: existing?.topUps?.[0]?.id || `top_${Date.now()}`, date: startDate, amountMinor }, ...(existing?.topUps || []).slice(1)]
+    : [];
+  return {
+    ...(existing || {}),
+    id: id || undefined,
+    provider: String(values.get('provider') || '').trim(),
+    kind,
+    binding: {
+      ...(existing?.binding || {}),
+      profileName: String(values.get('profileName') || '').trim(),
+      accountEmail: String(values.get('accountEmail') || '').trim()
+    },
+    planName: String(values.get('planName') || '').trim(),
+    amountMinor,
+    currency: String(values.get('currency') || 'USD').toUpperCase(),
+    interval: values.get('interval') === 'year' ? 'year' : 'month',
+    intervalCount: Math.max(1, Math.min(24, Math.round(Number(values.get('intervalCount') || 1)))),
+    startDate: kind === 'topup' ? null : startDate,
+    topUps,
+    autoRenew: kind === 'subscription' && values.get('autoRenew') === 'on',
+    nextRenewalOverride: String(values.get('nextRenewalOverride') || '').trim() || null,
+    endDate: String(values.get('endDate') || '').trim() || null,
+    note: String(values.get('note') || '').trim()
+  };
+}
+
+async function saveSubscriptions(next) {
+  state.subscriptionsSaving = true;
+  render();
+  try {
+    const response = await fetchJson('/api/subscriptions', {
+      secret: state.secret,
+      method: 'PUT',
+      body: {
+        baseUpdatedAt: state.subscriptions?.updatedAt || '',
+        subscriptions: next
+      }
+    });
+    state.subscriptions = response;
+    state.subscriptionEditId = '';
+    state.subscriptionsError = null;
+    showToast(tr('toast.saved'));
+  } catch (error) {
+    if (error.status === 409 && error.payload?.subscriptions) {
+      state.subscriptions = error.payload;
+      showToast(tr('subscriptions.conflict'));
+    } else {
+      state.subscriptionsError = error;
+      showToast(error.message || tr('error.generic'));
+    }
+  } finally {
+    state.subscriptionsSaving = false;
+    render();
+  }
+}
+
+async function deleteSubscription(id) {
+  const record = subscriptionRecords().find((entry) => entry.id === id);
+  if (!record || !window.confirm(tr('subscriptions.confirmDelete'))) return;
+  await saveSubscriptions(subscriptionRecords().filter((entry) => entry.id !== id));
+}
+
+async function savePricingForm(form) {
+  const values = new FormData(form);
+  const model = String(values.get('model') || '').trim();
+  if (!model) return;
+  const fields = ['inputPricePerMillion', 'outputPricePerMillion', 'cacheReadPricePerMillion', 'cacheWritePricePerMillion'];
+  const prices = {};
+  for (const field of fields) {
+    const value = Number(values.get(field));
+    if (!Number.isFinite(value) || value < 0) {
+      showToast(tr('pricing.invalid'));
+      return;
+    }
+    prices[field] = value;
+  }
+  state.pricingSaving = true;
+  render();
+  try {
+    await fetchJson(`/api/pricing/${encodeURIComponent(model)}`, {
+      secret: state.secret,
+      method: 'PUT',
+      body: prices
+    });
+    await loadPricing({ force: true });
+    showToast(tr('toast.saved'));
+  } catch (error) {
+    showToast(error.message || tr('error.generic'));
+  } finally {
+    state.pricingSaving = false;
+    render();
+  }
+}
+
+async function fetchPricingUpstream(model) {
+  if (!model) return;
+  state.pricingSaving = true;
+  render();
+  try {
+    await fetchJson(`/api/pricing/${encodeURIComponent(model)}/fetch-upstream`, {
+      secret: state.secret,
+      method: 'POST'
+    });
+    await loadPricing({ force: true });
+    showToast(tr('pricing.updated'));
+  } catch (error) {
+    showToast(error.message || tr('pricing.fetchFailed'));
+  } finally {
+    state.pricingSaving = false;
+    render();
+  }
+}
+
+async function fetchAllPricing() {
+  state.pricingSaving = true;
+  render();
+  try {
+    await fetchJson('/api/pricing/fetch-upstream-all', { secret: state.secret, method: 'POST' });
+    await loadPricing({ force: true });
+    showToast(tr('pricing.updated'));
+  } catch (error) {
+    showToast(error.message || tr('pricing.fetchFailed'));
+  } finally {
+    state.pricingSaving = false;
+    render();
+  }
 }
 
 async function applyCustomRange() {
@@ -1147,12 +1663,22 @@ function bindEvents() {
     state.prefs.view = btn.dataset.view;
     savePrefs({ view: state.prefs.view });
     openNav(false);
+    if (state.prefs.view === 'subscriptions') void loadSubscriptions().then(() => render());
+    if (state.prefs.view === 'pricing') void loadPricing().then(() => render());
     if (state.prefs.view === 'trends' || state.prefs.view === 'home') {
       void ensureHistory().then(() => render());
       return;
     }
     render();
   });
+
+  if (els.deviceFilter) {
+    els.deviceFilter.addEventListener('change', () => {
+      state.prefs.deviceFilter = els.deviceFilter.value || '';
+      savePrefs({ deviceFilter: state.prefs.deviceFilter });
+      render();
+    });
+  }
 
   els.periodTabs.addEventListener('click', (event) => {
     const btn = event.target.closest('[data-period]');
@@ -1214,9 +1740,56 @@ function bindEvents() {
   });
 
   els.content.addEventListener('click', (event) => {
+    const retryDashboard = event.target.closest('[data-retry-dashboard]');
+    if (retryDashboard) {
+      void bootstrapAuthorized().catch((error) => {
+        state.error = error;
+        state.loading = false;
+        render();
+      });
+      return;
+    }
+    const managementRetry = event.target.closest('[data-management-retry]');
+    if (managementRetry) {
+      if (managementRetry.dataset.managementRetry === 'subscriptions-retry') void loadSubscriptions({ force: true });
+      if (managementRetry.dataset.managementRetry === 'pricing-retry') void loadPricing({ force: true });
+      return;
+    }
+    const subscriptionEdit = event.target.closest('[data-subscription-edit]');
+    if (subscriptionEdit) {
+      state.subscriptionEditId = subscriptionEdit.dataset.subscriptionEdit || '';
+      render();
+      return;
+    }
+    const subscriptionReset = event.target.closest('[data-subscription-reset]');
+    if (subscriptionReset) {
+      state.subscriptionEditId = '';
+      render();
+      return;
+    }
+    const subscriptionDelete = event.target.closest('[data-subscription-delete]');
+    if (subscriptionDelete) {
+      void deleteSubscription(subscriptionDelete.dataset.subscriptionDelete);
+      return;
+    }
+    const pricingUpstream = event.target.closest('[data-pricing-upstream]');
+    if (pricingUpstream) {
+      void fetchPricingUpstream(pricingUpstream.dataset.pricingUpstream);
+      return;
+    }
+    const pricingRefresh = event.target.closest('[data-pricing-refresh-all]');
+    if (pricingRefresh) {
+      void fetchAllPricing();
+      return;
+    }
+    const limitProvider = event.target.closest('[data-limit-provider]');
+    if (limitProvider) return;
     const del = event.target.closest('[data-delete-device]');
     if (del) {
-      void deleteDevice(del.getAttribute('data-delete-device'));
+      void deleteDevice(del.getAttribute('data-delete-device')).catch((error) => {
+        if (error.status === 401) showAuth(true);
+        else showToast(error.message || tr('error.generic'));
+      });
       return;
     }
     const heatmapMetric = event.target.closest('[data-heatmap-metric]');
@@ -1266,6 +1839,42 @@ function bindEvents() {
       state.prefs.trendsRange = range.dataset.range;
       savePrefs({ trendsRange: state.prefs.trendsRange });
       render();
+      return;
+    }
+    const trendMetric = event.target.closest('[data-trends-metric]');
+    if (trendMetric) {
+      state.prefs.trendsMetric = ['tokens', 'cost', 'activeTime'].includes(trendMetric.dataset.trendsMetric)
+        ? trendMetric.dataset.trendsMetric
+        : 'tokens';
+      savePrefs({ trendsMetric: state.prefs.trendsMetric });
+      render();
+    }
+  });
+
+  els.content.addEventListener('change', (event) => {
+    const provider = event.target.closest('[data-limit-provider]');
+    if (!provider) return;
+    state.limitProvider = provider.value || '';
+    render();
+  });
+
+  els.content.addEventListener('submit', (event) => {
+    const subscriptionForm = event.target.closest('[data-subscription-form]');
+    if (subscriptionForm) {
+      event.preventDefault();
+      try {
+        const next = subscriptionRecords().filter((record) => record.id !== state.subscriptionEditId);
+        next.push(subscriptionFromForm(subscriptionForm));
+        void saveSubscriptions(next);
+      } catch (error) {
+        showToast(error.message || tr('error.generic'));
+      }
+      return;
+    }
+    const pricingFormElement = event.target.closest('[data-pricing-form]');
+    if (pricingFormElement) {
+      event.preventDefault();
+      void savePricingForm(pricingFormElement);
     }
   });
 
@@ -1274,9 +1883,14 @@ function bindEvents() {
       await refreshStats();
       state.history = null;
       await ensureHistory();
+      await Promise.all([loadSubscriptions({ force: true }), loadPricing({ force: true })]);
       showToast(tr('toast.refreshed'));
     } catch (error) {
       if (error.status === 401) showAuth(true);
+      else {
+        state.error = error;
+        render();
+      }
     }
   });
 

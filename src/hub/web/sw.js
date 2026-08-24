@@ -1,5 +1,5 @@
 /* Token Monitor hub web shell — cache app shell for offline reopen on mobile. */
-const CACHE = 'token-monitor-web-v3';
+const CACHE = 'token-monitor-web-v4';
 const PRECACHE = [
   '/',
   '/index.html',

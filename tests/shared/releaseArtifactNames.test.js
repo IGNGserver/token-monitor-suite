@@ -91,12 +91,12 @@ test('mac release scripts build native Apple Silicon and Intel artifacts', () =>
     .split('\n')
     .filter((line) => line.startsWith('<summary><strong>Full Changelog:</strong>'));
   assert.equal(fullChangelogSummaries.length, 1);
-  assert.match(fullChangelogSummaries[0], />v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+(?:-rev\.\d+)?<\/a>/);
-  assert.match(fullChangelogSummaries[0], /https:\/\/github\.com\/Javis603\/token-monitor\/compare\/v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+(?:-rev\.\d+)?/);
+  assert.match(fullChangelogSummaries[0], />v\d+\.\d+\.\d+(?:-rev\.\d+)?\.\.\.v\d+\.\d+\.\d+(?:-rev\.\d+)?<\/a>/);
+  assert.match(fullChangelogSummaries[0], /https:\/\/github\.com\/IGNGserver\/token-monitor-suite\/compare\/v\d+\.\d+\.\d+(?:-rev\.\d+)?\.\.\.v\d+\.\d+\.\d+(?:-rev\.\d+)?/);
   assert.ok(fullChangelogSummaries[0].includes(`v${rootPackage.version}`));
   assert.match(
     releaseTemplate,
-    /---\s*<details>\s*<summary><strong>Full Changelog:<\/strong> <a href="[^"]+">v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+(?:-rev\.\d+)?<\/a><\/summary>\s*<!-- github-generated-release-notes -->\s*<\/details>\s*<details>\s*<summary>繁體中文 · 한국어 · 日本語<\/summary>/
+    /---\s*<details>\s*<summary><strong>Full Changelog:<\/strong> <a href="[^"]+">v\d+\.\d+\.\d+(?:-rev\.\d+)?\.\.\.v\d+\.\d+\.\d+(?:-rev\.\d+)?<\/a><\/summary>\s*<!-- github-generated-release-notes -->\s*<\/details>\s*<details>\s*<summary>繁體中文 · 한국어 · 日本語<\/summary>/
   );
 });
 

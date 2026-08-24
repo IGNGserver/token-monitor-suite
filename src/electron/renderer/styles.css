@@ -17,6 +17,9 @@
   /* Native Mica/Acrylic owns the BrowserWindow base layer. This variable is
      reserved for transient HTML surfaces such as menus and tooltips. */
   --windows-popover-alpha: 0.88;
+  --windows-popover-blur: 28px;
+  --windows-fallback-alpha: 0.79;
+  --windows-fallback-blur: 28px;
   --glass: rgba(var(--glass-rgb), var(--glass-alpha));
   --glass-filter: blur(32px) saturate(115%);
   --floating-bubble-radius: 17px;
@@ -85,6 +88,7 @@ input, textarea, [contenteditable="true"] {
 }
 html.is-windows, html.is-windows body {
   border-radius: 8px;
+  font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
 }
 html.is-windows .shell {
   border-radius: 8px;
@@ -94,13 +98,24 @@ html.is-windows .shell {
      blur) with proper anti-aliasing instead. */
   clip-path: none;
 }
-/* In native-material mode the OS backdrop is the app's base layer. Do not
-   paint a second full-window CSS surface over it. */
-html.is-windows[data-windows-backdrop] .shell,
-body.is-windows[data-windows-backdrop] .shell {
+/* Windows 11 Mica is the quiet, low-contrast canvas. Do not paint a second
+   full-window CSS surface over DWM's material. */
+html.is-windows[data-windows-surface="mica"] .shell,
+body.is-windows[data-windows-surface="mica"] .shell {
   background: transparent;
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
+}
+/* Windows 10 (and unsupported Windows 11 builds) keep a deterministic CSS
+   surface. Native Accent Blur may enhance the desktop behind this layer, but
+   the app remains readable if that undocumented API is unavailable. */
+html.is-windows[data-windows-surface="win10-fallback"] .shell,
+body.is-windows[data-windows-surface="win10-fallback"] .shell {
+  background:
+    linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)),
+    rgba(var(--glass-rgb), var(--windows-fallback-alpha));
+  -webkit-backdrop-filter: blur(var(--windows-fallback-blur)) saturate(112%);
+  backdrop-filter: blur(var(--windows-fallback-blur)) saturate(112%);
 }
 html.is-mac-legacy, html.is-mac-legacy body {
   border-radius: 10px;
@@ -149,11 +164,15 @@ body[data-macos-glass="liquid-glass"] .floating-bubble-tab {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
-html.is-windows[data-windows-backdrop] .floating-bubble-tab,
-body.is-windows[data-windows-backdrop] .floating-bubble-tab {
-  background: transparent;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
+html.is-windows[data-windows-surface] .floating-bubble-tab,
+body.is-windows[data-windows-surface] .floating-bubble-tab {
+  background:
+    linear-gradient(180deg, rgba(var(--overlay-rgb), 0.1), rgba(var(--overlay-rgb), 0.035)),
+    rgba(var(--glass-rgb), var(--windows-popover-alpha));
+  border: 1px solid rgba(var(--line-rgb), 0.28);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(var(--overlay-rgb), 0.1);
+  -webkit-backdrop-filter: blur(var(--windows-popover-blur)) saturate(122%);
+  backdrop-filter: blur(var(--windows-popover-blur)) saturate(122%);
 }
 .floating-bubble-tab span {
   display: block;
@@ -505,8 +524,6 @@ body.is-windows:not(.settings-open) .title-controls:has(.window-actions:focus-wi
   color: var(--text);
   cursor: pointer;
   box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.08);
-  -webkit-backdrop-filter: blur(18px);
-  backdrop-filter: blur(18px);
 }
 .icon-button { width: 34px; height: 28px; padding: 0; font-size: 14px; line-height: 1; }
 .settings-icon-button {
@@ -695,7 +712,6 @@ body.is-windows #closeButton:focus-visible {
   border-top: 1px solid rgba(var(--line-rgb), 0.06);
 }
 .settings-panel .settings-item.hidden { display: none; }
-#windowsBackdropNote.hidden { display: none; }
 #macosGlassNote.hidden { display: none; }
 .settings-item-text {
   flex: 1 1 auto;
@@ -3764,44 +3780,29 @@ html.is-windows .limit-live-badge {
     visibility 0s linear 0s;
   will-change: opacity, transform, filter;
 }
-html.is-windows[data-windows-backdrop="mica"] .view-switcher-menu,
-body.is-windows[data-windows-backdrop="mica"] .view-switcher-menu {
+html.is-windows[data-windows-surface] .view-switcher-menu,
+body.is-windows[data-windows-surface] .view-switcher-menu {
   background:
     linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)),
     rgba(var(--glass-rgb), var(--windows-popover-alpha));
   border: 1px solid rgba(var(--line-rgb), 0.3);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
-  -webkit-backdrop-filter: blur(18px) saturate(112%);
-  backdrop-filter: blur(18px) saturate(112%);
-}
-html.is-windows[data-windows-backdrop="acrylic"] .view-switcher-menu,
-body.is-windows[data-windows-backdrop="acrylic"] .view-switcher-menu {
-  background:
-    linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)),
-    rgba(var(--glass-rgb), var(--windows-popover-alpha));
-  border: 1px solid rgba(var(--line-rgb), 0.3);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
-  -webkit-backdrop-filter: blur(30px) saturate(125%);
-  backdrop-filter: blur(30px) saturate(125%);
+  -webkit-backdrop-filter: blur(var(--windows-popover-blur)) saturate(122%);
+  backdrop-filter: blur(var(--windows-popover-blur)) saturate(122%);
 }
 
-/* The same window-level native material is also behind tooltips and the two
-   fixed popovers. Give them the same readable themed surface so they do not
-   become accidental see-through layers on Windows. */
-html.is-windows[data-windows-backdrop="mica"] :is(.limit-detail-tooltip, .app-update-popover, .tray-composer-popover, .tray-composer-picker-menu),
-body.is-windows[data-windows-backdrop="mica"] :is(.limit-detail-tooltip, .app-update-popover, .tray-composer-popover, .tray-composer-picker-menu),
-html.is-windows[data-windows-backdrop="acrylic"] :is(.limit-detail-tooltip, .app-update-popover, .tray-composer-popover, .tray-composer-picker-menu),
-body.is-windows[data-windows-backdrop="acrylic"] :is(.limit-detail-tooltip, .app-update-popover, .tray-composer-popover, .tray-composer-picker-menu) {
+/* Tooltips and fixed popovers use one more transparent Acrylic-like surface
+   above both the Mica and Win10 canvases. */
+html.is-windows[data-windows-surface] :is(.limit-detail-tooltip, .app-update-popover, .tray-composer-popover, .tray-composer-picker-menu),
+body.is-windows[data-windows-surface] :is(.limit-detail-tooltip, .app-update-popover, .tray-composer-popover, .tray-composer-picker-menu) {
   background:
     linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)),
     rgba(var(--glass-rgb), var(--windows-popover-alpha));
-  -webkit-backdrop-filter: blur(26px) saturate(120%);
-  backdrop-filter: blur(26px) saturate(120%);
+  -webkit-backdrop-filter: blur(var(--windows-popover-blur)) saturate(120%);
+  backdrop-filter: blur(var(--windows-popover-blur)) saturate(120%);
 }
-html.is-windows[data-windows-backdrop="mica"] .limit-detail-tooltip::after,
-body.is-windows[data-windows-backdrop="mica"] .limit-detail-tooltip::after,
-html.is-windows[data-windows-backdrop="acrylic"] .limit-detail-tooltip::after,
-body.is-windows[data-windows-backdrop="acrylic"] .limit-detail-tooltip::after {
+html.is-windows[data-windows-surface] .limit-detail-tooltip::after,
+body.is-windows[data-windows-surface] .limit-detail-tooltip::after {
   background: rgba(var(--glass-rgb), var(--windows-popover-alpha));
 }
 .view-switcher-menu.hidden {
@@ -5486,4 +5487,18 @@ body.is-windows[data-windows-backdrop="acrylic"] .limit-detail-tooltip::after {
 }
 @media (prefers-reduced-motion: reduce) {
   .tray-composer-item { transition: none; }
+}
+
+/* These components are declared in later feature sections, so keep the
+   Windows Acrylic treatment at the end of the stylesheet where it wins over
+   their platform-neutral opaque defaults. */
+html.is-windows[data-windows-surface] :is(.custom-range-popover, .limit-detail-tooltip, .app-update-popover, .tray-composer-popover, .tray-composer-picker-menu, .tray-composer-editor),
+body.is-windows[data-windows-surface] :is(.custom-range-popover, .limit-detail-tooltip, .app-update-popover, .tray-composer-popover, .tray-composer-picker-menu, .tray-composer-editor) {
+  background:
+    linear-gradient(180deg, rgba(var(--overlay-rgb), 0.1), rgba(var(--overlay-rgb), 0.035)),
+    rgba(var(--glass-rgb), var(--windows-popover-alpha));
+  border-color: rgba(var(--line-rgb), 0.3);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(var(--overlay-rgb), 0.1);
+  -webkit-backdrop-filter: blur(var(--windows-popover-blur)) saturate(122%);
+  backdrop-filter: blur(var(--windows-popover-blur)) saturate(122%);
 }

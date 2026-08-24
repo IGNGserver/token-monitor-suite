@@ -179,11 +179,12 @@ const {
   moveFloatingBubbleBounds
 } = require('./floatingBubble');
 const { applyWindowsChrome } = require('./windowsChrome');
+const { applyWindowsAccentBlur } = require('./windowsBackdrop');
 const { applyMacosNativeWindowButtons } = require('./macosWindowChrome');
 const { setMoveToActiveSpace } = require('./macosSpaceBehavior');
 const {
   normalizeWindowsBackdropMode,
-  windowsElectronBackgroundMaterial
+  windowsSurfaceProfile
 } = require('./windowsBackdropMode');
 const {
   MACOS_GLASS_VIBRANCY,
@@ -2183,16 +2184,6 @@ function macosLiquidGlassIsAvailable() {
   }) && macosLiquidGlassSupported();
 }
 
-// Electron's backgroundMaterial requires Windows 11 22H2 (build 22621); on
-// older Windows it is silently ignored and the window stays opaque, which
-// reads as a solid white slab behind the translucent surface. Fall back to
-// the transparent CSS-blur window there instead of forcing the material.
-function windowsNativeBackdropSupported() {
-  if (process.platform !== 'win32') return false;
-  const build = Number(String(os.release()).split('.')[2] || 0);
-  return Number.isFinite(build) && build >= 22621;
-}
-
 function keepNativeBlurActive() {
   if (!mainWindow) return;
   if (!nativeBlurEnabled()) return;
@@ -2967,6 +2958,14 @@ function settingsForRenderer() {
   });
   return {
     ...settings,
+    // Renderer CSS needs the same OS decision as BrowserWindow creation. Keep
+    // this derived and read-only; the legacy windowsBackdrop setting remains
+    // persisted only so older profiles can still be loaded safely.
+    windowsSurface: windowsSurfaceProfile({
+      platform: process.platform,
+      osRelease: os.release(),
+      systemGlass: settings?.systemGlass !== false
+    }).kind,
     ...redactedCredentials,
     zaiApiRegion: normalizeZaiApiRegion(settings?.zaiApiRegion || 'global'),
     zaiTeamOrganizationId: settings?.zaiTeamOrganizationId ? 'set' : '',
@@ -3911,9 +3910,12 @@ function createWindow(boundsOverride, options = {}) {
   const collapsedFloatingBubble = options.collapsedFloatingBubble === true;
   const glass = nativeBlurEnabled();
   const macosGlassStyle = macosGlassStyleFor(settings);
-  const windowsBackdrop = normalizeWindowsBackdropMode(settings?.windowsBackdrop);
-  const windowsMaterial = windowsElectronBackgroundMaterial(windowsBackdrop);
-  const nativeWindowsBackdrop = glass && windowsNativeBackdropSupported();
+  const windowsSurface = windowsSurfaceProfile({
+    platform: process.platform,
+    osRelease: os.release(),
+    systemGlass: glass
+  });
+  const nativeWindowsBackdrop = windowsSurface.nativeBackdrop;
   const bounds = boundsOverride || restoredBounds() || DEFAULT_WINDOW;
   const collapsedSizeLimits = {
     minWidth: bounds.width,
@@ -3938,7 +3940,9 @@ function createWindow(boundsOverride, options = {}) {
     ...(process.platform === 'darwin' && glass && macosGlassStyle === MACOS_GLASS_VIBRANCY
       ? { vibrancy: 'hud', visualEffectState: 'active' }
       : {}),
-    ...(process.platform === 'win32' && nativeWindowsBackdrop ? { backgroundMaterial: windowsMaterial } : {}),
+    ...(process.platform === 'win32' && nativeWindowsBackdrop
+      ? { backgroundMaterial: windowsSurface.nativeMaterial }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -3950,6 +3954,7 @@ function createWindow(boundsOverride, options = {}) {
   applyMacosNativeWindowButtons(win, { visible: !collapsedFloatingBubble });
   applyMacSpaceBehavior();
   applyWindowsChrome(win, { round: true });
+  if (windowsSurface.useLegacyAccent) applyWindowsAccentBlur(win);
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -3996,7 +4001,7 @@ function createWindow(boundsOverride, options = {}) {
         viewState: rendererViewState
       }),
       ...(settings?.systemGlass === false ? { systemGlassDisabled: '1' } : {}),
-      ...(process.platform === 'win32' && glass && !nativeWindowsBackdrop ? { windowsBackdropUnsupported: '1' } : {})
+      ...(process.platform === 'win32' ? { windowsSurface: windowsSurface.kind } : {})
     }
   });
 }
@@ -4052,7 +4057,12 @@ function createDashboardWindow() {
   }
   const glass = nativeBlurEnabled();
   const macosGlassStyle = macosGlassStyleFor(settings);
-  const nativeWindowsBackdrop = glass && windowsNativeBackdropSupported();
+  const windowsSurface = windowsSurfaceProfile({
+    platform: process.platform,
+    osRelease: os.release(),
+    systemGlass: glass
+  });
+  const nativeWindowsBackdrop = windowsSurface.nativeBackdrop;
   const win = new BrowserWindow({
     width: 920,
     height: 620,
@@ -4067,7 +4077,9 @@ function createDashboardWindow() {
     ...(process.platform === 'darwin' && glass && macosGlassStyle === MACOS_GLASS_VIBRANCY
       ? { vibrancy: 'hud', visualEffectState: 'active' }
       : {}),
-    ...(process.platform === 'win32' && nativeWindowsBackdrop ? { backgroundMaterial: windowsElectronBackgroundMaterial(settings?.windowsBackdrop) } : {}),
+    ...(process.platform === 'win32' && nativeWindowsBackdrop
+      ? { backgroundMaterial: windowsSurface.nativeMaterial }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -4077,6 +4089,7 @@ function createDashboardWindow() {
   dashboardWindow = win;
   applyMacosNativeWindowButtons(win);
   applyWindowsChrome(win, { round: true });
+  if (windowsSurface.useLegacyAccent) applyWindowsAccentBlur(win);
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -4099,8 +4112,8 @@ function createDashboardWindow() {
     if (!win.isVisible()) discardFailedDashboardWindow(win, 'renderer became unresponsive while opening');
   });
   win.on('closed', () => { dashboardWindow = null; });
-  const dashboardQuery = process.platform === 'win32' && glass && !nativeWindowsBackdrop
-    ? { windowsBackdropUnsupported: '1' }
+  const dashboardQuery = process.platform === 'win32'
+    ? { windowsSurface: windowsSurface.kind }
     : undefined;
   win.loadFile(
     path.join(__dirname, 'renderer', 'dashboard.html'),
@@ -4263,7 +4276,11 @@ app.whenReady().then(() => {
     const previousSettingsState = settings;
     const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
     const previousNativeMaterial = nativeBlurEnabled();
-    const previousWindowsBackdrop = normalizeWindowsBackdropMode(settings?.windowsBackdrop);
+    const previousWindowsSurface = windowsSurfaceProfile({
+      platform: process.platform,
+      osRelease: os.release(),
+      systemGlass: previousNativeMaterial
+    }).kind;
     const previousClients = settings.clients;
     const previousDiscordRpcEnabled = settings.discordRpcEnabled;
     const previousShowTrayIcon = settings.showTrayIcon;
@@ -4428,10 +4445,15 @@ app.whenReady().then(() => {
     applyWindowSettings();
     syncFloatingBubbleAvailability();
     const nextNativeMaterial = nativeBlurEnabled();
-    const nextWindowsBackdrop = normalizeWindowsBackdropMode(settings?.windowsBackdrop);
-    const windowsBackdropChanged = previousWindowsBackdrop !== nextWindowsBackdrop
-      && (previousNativeMaterial || nextNativeMaterial);
-    if (process.platform === 'win32' && (previousNativeMaterial !== nextNativeMaterial || windowsBackdropChanged)) {
+    const nextWindowsSurface = windowsSurfaceProfile({
+      platform: process.platform,
+      osRelease: os.release(),
+      systemGlass: nextNativeMaterial
+    }).kind;
+    if (process.platform === 'win32' && (
+      previousNativeMaterial !== nextNativeMaterial
+      || previousWindowsSurface !== nextWindowsSurface
+    )) {
       rebuildWindow();
       rebuildDashboardWindow();
     } else {

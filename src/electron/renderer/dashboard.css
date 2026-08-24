@@ -12,6 +12,10 @@
   --line-alpha: 0.14;
   --line: rgba(var(--line-rgb), var(--line-alpha));
   --panel-rgb: 16, 21, 30;
+  --windows-popover-alpha: 0.78;
+  --windows-popover-blur: 28px;
+  --windows-fallback-alpha: 0.79;
+  --windows-fallback-blur: 28px;
   --text: #eef5fb;
 }
 html, body { margin: 0; height: 100%; }
@@ -24,12 +28,20 @@ body {
   overflow: hidden;
 }
 body.flat { background: rgb(var(--glass-rgb)); }
-/* The native BrowserWindow backdrop is the dashboard's base layer too. Keep
-   the document transparent so the dashboard does not cover Mica/Acrylic with
-   the legacy full-window CSS glass fill. */
-html.is-windows[data-windows-backdrop] body,
-body.is-windows[data-windows-backdrop] {
+/* Mica remains the dashboard's open base layer. */
+html.is-windows[data-windows-surface="mica"] body,
+body.is-windows[data-windows-surface="mica"] {
   background: transparent;
+}
+/* Unsupported Windows builds use the same readable CSS fallback as the main
+   window. Accent Blur, when available, only improves what lies behind it. */
+html.is-windows[data-windows-surface="win10-fallback"] body,
+body.is-windows[data-windows-surface="win10-fallback"] {
+  background:
+    linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)),
+    rgba(var(--glass-rgb), var(--windows-fallback-alpha));
+  -webkit-backdrop-filter: blur(var(--windows-fallback-blur)) saturate(112%);
+  backdrop-filter: blur(var(--windows-fallback-blur)) saturate(112%);
 }
 html[data-macos-glass="liquid-glass"] body,
 body[data-macos-glass="liquid-glass"] {

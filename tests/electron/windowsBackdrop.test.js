@@ -17,10 +17,15 @@ const {
   applyWindowsAccentBlur,
   createAccentApi
 } = require('../../src/electron/windowsBackdrop');
-const { normalizeWindowsBackdropMode } = require('../../src/electron/windowsBackdropMode');
+const {
+  normalizeWindowsBackdropMode,
+  windowsNativeBackdropSupported,
+  windowsSurfaceProfile
+} = require('../../src/electron/windowsBackdropMode');
 const {
   appearanceState,
   nativePopoverAlpha,
+  nativePopoverBlur,
   normalizeWindowsBackdropMode: normalizeRendererMode
 } = require('../../src/electron/renderer/windowsGlass');
 
@@ -36,40 +41,83 @@ test('Windows backdrop modes fail closed to documented Acrylic', () => {
 
 test('Windows glass appearance state covers platform boundaries', () => {
   assert.deepEqual(appearanceState({}, { isWindows: false }), {
+    surface: 'none',
+    nativeBackdrop: false,
+    useLegacyAccent: false,
     showBackdropControl: false,
     showAccentNote: false,
     showMicaNote: false,
     backdropMode: 'acrylic'
   });
-  assert.deepEqual(appearanceState({ windowsBackdrop: 'acrylic' }, { isWindows: true }), {
-    showBackdropControl: true,
+  assert.deepEqual(appearanceState({}, { isWindows: true }), {
+    surface: 'win10-fallback',
+    nativeBackdrop: false,
+    useLegacyAccent: true,
+    showBackdropControl: false,
     showAccentNote: false,
     showMicaNote: false,
     backdropMode: 'acrylic'
   });
-  assert.deepEqual(appearanceState({ windowsBackdrop: 'mica' }, { isWindows: true }), {
-    showBackdropControl: true,
-    showAccentNote: false,
-    showMicaNote: true,
-    backdropMode: 'mica'
-  });
-  assert.deepEqual(appearanceState({ windowsBackdrop: 'mica' }, { isWindows: true, backdropSupported: false }), {
+  assert.deepEqual(appearanceState({ windowsSurface: 'mica' }, { isWindows: true }), {
+    surface: 'mica',
+    nativeBackdrop: true,
+    useLegacyAccent: false,
     showBackdropControl: false,
     showAccentNote: false,
     showMicaNote: false,
-    backdropMode: 'mica'
+    backdropMode: 'acrylic'
   });
-  assert.deepEqual(appearanceState({ systemGlass: false, windowsBackdrop: 'mica' }, { isWindows: true }), {
+  assert.deepEqual(appearanceState({ windowsSurface: 'win10-fallback' }, { isWindows: true }), {
+    surface: 'win10-fallback',
+    nativeBackdrop: false,
+    useLegacyAccent: true,
     showBackdropControl: false,
     showAccentNote: false,
     showMicaNote: false,
-    backdropMode: 'mica'
+    backdropMode: 'acrylic'
+  });
+  assert.deepEqual(appearanceState({ systemGlass: false, windowsSurface: 'mica' }, { isWindows: true }), {
+    surface: 'none',
+    nativeBackdrop: false,
+    useLegacyAccent: false,
+    showBackdropControl: false,
+    showAccentNote: false,
+    showMicaNote: false,
+    backdropMode: 'acrylic'
   });
 });
 
 test('Windows native material leaves the whole-window surface to DWM', () => {
-  assert.equal(nativePopoverAlpha({ lightTheme: false }), 0.88);
-  assert.equal(nativePopoverAlpha({ lightTheme: true }), 0.92);
+  assert.equal(nativePopoverAlpha({ lightTheme: false, surface: 'mica' }), 0.78);
+  assert.equal(nativePopoverAlpha({ lightTheme: true, surface: 'mica' }), 0.9);
+  assert.equal(nativePopoverAlpha({ lightTheme: false, surface: 'win10-fallback' }), 0.78);
+  assert.equal(nativePopoverAlpha({ lightTheme: true, surface: 'win10-fallback' }), 0.88);
+  assert.equal(nativePopoverBlur({ surface: 'mica' }), 28);
+  assert.equal(nativePopoverBlur({ surface: 'win10-fallback' }), 30);
+});
+
+test('Windows surface profile selects Mica only for Windows 11 22H2+', () => {
+  assert.equal(windowsNativeBackdropSupported({ platform: 'win32', osRelease: '10.0.22000' }), false);
+  assert.equal(windowsNativeBackdropSupported({ platform: 'win32', osRelease: '10.0.22621' }), true);
+  assert.equal(windowsNativeBackdropSupported({ platform: 'linux', osRelease: '10.0.22621' }), false);
+  assert.deepEqual(windowsSurfaceProfile({ platform: 'win32', osRelease: '10.0.22621', systemGlass: true }), {
+    kind: 'mica',
+    nativeBackdrop: true,
+    nativeMaterial: 'mica',
+    useLegacyAccent: false
+  });
+  assert.deepEqual(windowsSurfaceProfile({ platform: 'win32', osRelease: '10.0.19045', systemGlass: true }), {
+    kind: 'win10-fallback',
+    nativeBackdrop: false,
+    nativeMaterial: null,
+    useLegacyAccent: true
+  });
+  assert.deepEqual(windowsSurfaceProfile({ platform: 'win32', osRelease: '10.0.22621', systemGlass: false }), {
+    kind: 'none',
+    nativeBackdrop: false,
+    nativeMaterial: null,
+    useLegacyAccent: false
+  });
 });
 
 test('Accent blur passes the native HWND and configured tint to the native adapter', () => {
@@ -172,54 +220,47 @@ test('native Accent adapter rejects failed DWM setup before applying the Accent 
   });
 });
 
-test('main process configures backgroundMaterial from windowsBackdrop', () => {
+test('main process configures an automatic Windows surface profile', () => {
   assert.match(main, /windowsBackdrop: 'acrylic',/);
   assert.match(main, /windowsBackdrop: normalizeWindowsBackdropMode\(patch\.windowsBackdrop \?\? settings\.windowsBackdrop\)/);
-  assert.match(main, /windowsElectronBackgroundMaterial\(/);
+  assert.match(main, /windowsSurfaceProfile\(/);
+  assert.match(main, /backgroundMaterial: windowsSurface\.nativeMaterial/);
+  assert.match(main, /if \(windowsSurface\.useLegacyAccent\) applyWindowsAccentBlur\(win\)/);
+  assert.match(main, /windowsSurface: windowsSurface\.kind/);
 });
 
-test('Windows exposes an accessible Acrylic and Mica selector', () => {
+test('Windows exposes automatic glass without a material selector', () => {
   assert.match(html, /name="systemGlassOption"/);
   assert.match(html, /id="glassInput"/);
   assert.match(html, /id="blurInput"/);
-  assert.match(html, /id="windowsBackdropRow" class="settings-item hidden"/);
-  assert.match(html, /id="windowsBackdropInput"/);
-  assert.match(html, /option value="acrylic"/);
-  assert.match(html, /option value="mica"/);
-  assert.doesNotMatch(html, /option value="tabbed"/);
-  assert.doesNotMatch(html, /option value="accent"/);
-  assert.match(html, /data-i18n="settings\.appearance\.windowsBackdropNote"/);
-  assert.match(html, /id="windowsBackdropNote"/);
+  assert.doesNotMatch(html, /windowsBackdropRow|windowsBackdropInput|windowsBackdropNote/);
   assert.match(html, /<script src="\.\.\/windowsBackdropMode\.js"><\/script>[\s\S]*<script src="windowsGlass\.js"><\/script>[\s\S]*<script src="app\.js"><\/script>/);
-  assert.match(app, /windowsBackdropRow\?\.classList\.toggle\('hidden', !windowsGlass\.showBackdropControl\)/);
-  assert.match(app, /const showNote = windowsGlass\.showAccentNote \|\| windowsGlass\.showMicaNote/);
-  assert.match(app, /classList\.toggle\('hidden', !showNote\)/);
-  assert.doesNotMatch(app, /backdropControlDisabled/);
-  assert.equal((i18n.match(/'settings\.appearance\.windowsBackdrop':/g) || []).length, 5);
-  assert.equal((i18n.match(/'settings\.appearance\.windowsBackdropMica':/g) || []).length, 5);
-  assert.equal((i18n.match(/'settings\.appearance\.windowsBackdropMicaNote':/g) || []).length, 5);
-  assert.match(i18n, /Keeps the background translucent and blurred, even when the window is not focused\./);
+  assert.doesNotMatch(app, /windowsBackdropRow|windowsBackdropInput|windowsBackdropNote/);
+  assert.match(app, /windowsGlass\.nativeBackdrop/);
+  assert.match(app, /windowsGlass\.surface/);
+  assert.doesNotMatch(app, /windowsBackdropUnsupported/);
+  assert.doesNotMatch(i18n, /settings\.appearance\.windowsBackdrop/);
   assert.doesNotMatch(css, /windows-native-blur-only/);
   assert.match(css, /--windows-popover-alpha/);
-  assert.doesNotMatch(css, /--windows-surface-alpha/);
-  assert.match(css, /html\.is-windows\[data-windows-backdrop\] \.shell[\s\S]*background:\s*transparent/);
-  assert.match(css, /html\.is-windows\[data-windows-backdrop\] \.floating-bubble-tab[\s\S]*background:\s*transparent/);
+  assert.match(css, /--windows-popover-blur/);
+  assert.match(css, /html\.is-windows\[data-windows-surface="mica"\] \.shell[\s\S]*background:\s*transparent/);
+  assert.match(css, /html\.is-windows\[data-windows-surface="win10-fallback"\] \.shell[\s\S]*windows-fallback-alpha/);
+  assert.match(css, /html\.is-windows\[data-windows-surface\] \.floating-bubble-tab[\s\S]*windows-popover-alpha/);
   assert.match(app, /nativePopoverAlpha/);
+  assert.match(app, /nativePopoverBlur/);
   assert.match(app, /const themeColors = settings && 'themeColors' in settings/);
   assert.match(app, /applyThemeColors\(themeColors, \{ nativeBackdrop: nativeWindowsBackdropEnabled \}\)/);
   assert.doesNotMatch(app, /nativeSurfaceAlphas/);
   assert.doesNotMatch(css, /background:\s*rgba\(var\(--glass-rgb\),\s*0\.35\)/);
   assert.doesNotMatch(css, /background:\s*rgba\(var\(--glass-rgb\),\s*0\.45\)/);
-  assert.match(app, /!systemGlassDisabled[\s\S]*windowsGlass\.showBackdropControl/);
-  assert.match(app, /windowsBackdropUnsupported/);
-  assert.match(main, /windowsNativeBackdropSupported\(\)/);
-  assert.match(main, /build >= 22621/);
+  assert.match(main, /windowsSurfaceProfile\([\s\S]*systemGlass: glass/);
+  assert.match(main, /windowsSurfaceProfile\([\s\S]*osRelease: os\.release\(\)/);
 });
 
-test('experimental Accent mode uses the shared glass surface treatment', () => {
-  assert.doesNotMatch(app, /windows-accent-backdrop/);
-  assert.doesNotMatch(css, /windows-accent-backdrop/);
-  assert.match(css, /#windowsBackdropNote\.hidden \{ display: none; \}/);
+test('Win10 Accent enhancement remains best effort behind the CSS fallback', () => {
+  assert.match(main, /applyWindowsAccentBlur\(win\)/);
+  assert.match(css, /data-windows-surface="win10-fallback"/);
+  assert.doesNotMatch(css, /windowsBackdropNote/);
 });
 
 test('normalizeWindowsBackdropMode accepts mica and acrylic', () => {

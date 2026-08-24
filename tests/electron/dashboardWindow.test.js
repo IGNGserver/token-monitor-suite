@@ -96,15 +96,19 @@ test('dashboard.html wires the shared modules and the two panels', () => {
   assert.match(html, /id="rangeSelect"/);
 });
 
-test('dashboard keeps native Windows material as its base layer', () => {
+test('dashboard follows the automatic Windows surface profile', () => {
   const css = read('src', 'electron', 'renderer', 'dashboard.css');
   const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const html = read('src', 'electron', 'renderer', 'dashboard.html');
   const main = read('src', 'electron', 'main.js');
-  assert.match(css, /html\.is-windows\[data-windows-backdrop\] body[\s\S]*background:\s*transparent/);
+  assert.match(css, /html\.is-windows\[data-windows-surface="mica"\] body[\s\S]*background:\s*transparent/);
+  assert.match(css, /data-windows-surface="win10-fallback"[\s\S]*windows-fallback-alpha/);
   assert.match(js, /function applyWindowsBackdrop\(settings\)/);
-  assert.match(js, /windowsBackdropUnsupported/);
-  assert.match(js, /document\.documentElement\.dataset\.windowsBackdrop/);
-  assert.match(main, /const dashboardQuery = process\.platform === 'win32' && glass && !nativeWindowsBackdrop/);
+  assert.match(js, /windowsGlassApi\.appearanceState/);
+  assert.match(js, /document\.documentElement\.dataset\.windowsSurface/);
+  assert.match(html, /<script src="windowsGlass\.js"><\/script>[\s\S]*<script src="dashboard\.js"><\/script>/);
+  assert.match(main, /const dashboardQuery = process\.platform === 'win32'[\s\S]*windowsSurface\.kind/);
+  assert.match(main, /if \(windowsSurface\.useLegacyAccent\) applyWindowsAccentBlur\(win\)/);
   assert.match(main, /function rebuildDashboardWindow\(\)/);
 });
 

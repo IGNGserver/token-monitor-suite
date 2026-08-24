@@ -263,7 +263,7 @@ let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, macosGlassStyle: macosGlassModeApi.MACOS_GLASS_LIQUID, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, macosGlassStyle: macosGlassModeApi.MACOS_GLASS_LIQUID, reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, settingsInTitlebar: false };
 let preferenceDrag = null;
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
@@ -295,9 +295,6 @@ Object.assign(els, {
   sessionUsageArchiveInput: document.getElementById('sessionUsageArchiveInput'),
   sessionUsageArchiveStatus: document.getElementById('sessionUsageArchiveStatus'),
   reduceMotionInputs: Array.from(document.querySelectorAll('input[name="reduceMotionOption"]')),
-  windowsBackdropRow: document.getElementById('windowsBackdropRow'),
-  windowsBackdropInput: document.getElementById('windowsBackdropInput'),
-  windowsBackdropNote: document.getElementById('windowsBackdropNote'),
   macosGlassRow: document.getElementById('macosGlassRow'),
   macosGlassInput: document.getElementById('macosGlassInput'),
   macosGlassNote: document.getElementById('macosGlassNote'),
@@ -5279,11 +5276,10 @@ function applyAppearanceSettings(settings) {
   const depth = clamp(settings?.glassBlur ?? 32, 0, 100) / 100;
   const systemGlassDisabled = settings?.systemGlass === false;
   const isWindows = navigator.userAgent.toLowerCase().includes('windows');
-  const windowsBackdropUnsupported = isWindows
-    && new URLSearchParams(window.location.search).get('windowsBackdropUnsupported') === '1';
+  const querySurface = new URLSearchParams(window.location.search).get('windowsSurface');
   const windowsGlass = windowsGlassApi.appearanceState(settings, {
     isWindows,
-    backdropSupported: !windowsBackdropUnsupported
+    surface: settings?.windowsSurface || querySurface
   });
   const macosGlass = macosGlassApi.appearanceState(settings, {
     isMac: state.appInfo?.platform === 'darwin',
@@ -5291,33 +5287,15 @@ function applyAppearanceSettings(settings) {
       ?? state.settings?.macosGlassLiquidAvailable
       ?? false
   });
-  const nativeWindowsBackdropEnabled = isWindows
-    && !systemGlassDisabled
-    && !windowsBackdropUnsupported
-    && windowsGlass.showBackdropControl
-    && windowsGlass.backdropMode;
+  const nativeWindowsBackdropEnabled = isWindows && windowsGlass.nativeBackdrop;
   const rootStyle = document.documentElement.style;
   rootStyle.setProperty('--glass-alpha', opacity.toFixed(2));
   rootStyle.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
   rootStyle.setProperty('--line-strong-alpha', (0.18 + depth * 0.14).toFixed(3));
   rootStyle.setProperty('--control-alpha', (0.03 + depth * 0.045).toFixed(3));
+  rootStyle.setProperty('--windows-fallback-alpha', (0.64 + opacity * 0.22).toFixed(3));
+  rootStyle.setProperty('--windows-fallback-blur', `${Math.round(22 + depth * 14)}px`);
   document.documentElement.classList.toggle('system-glass-disabled', systemGlassDisabled);
-  els.windowsBackdropRow?.classList.toggle('hidden', !windowsGlass.showBackdropControl);
-  if (els.windowsBackdropInput) {
-    els.windowsBackdropInput.value = windowsGlass.backdropMode;
-  }
-  if (els.windowsBackdropNote) {
-    const accentFallback = windowsGlass.showAccentNote
-      && new URLSearchParams(window.location.search).get('windowsBackdropFallback') === '1';
-    const showNote = windowsGlass.showAccentNote || windowsGlass.showMicaNote;
-    els.windowsBackdropNote.textContent = t(accentFallback
-      ? 'settings.appearance.windowsBackdropFallback'
-      : windowsGlass.showMicaNote
-        ? 'settings.appearance.windowsBackdropMicaNote'
-        : 'settings.appearance.windowsBackdropNote');
-    els.windowsBackdropNote.classList.toggle('error', accentFallback);
-    els.windowsBackdropNote.classList.toggle('hidden', !showNote);
-  }
   els.macosGlassRow?.classList.toggle('hidden', !macosGlass.showStyleControl);
   if (els.macosGlassInput) els.macosGlassInput.value = macosGlass.requestedStyle;
   if (els.macosGlassNote) els.macosGlassNote.classList.toggle('hidden', !macosGlass.showLiquidNote);
@@ -5335,19 +5313,21 @@ function applyAppearanceSettings(settings) {
   const lightTheme = nativeWindowsBackdropEnabled
     ? systemDarkThemeMedia?.matches !== true
     : themePresetsApi.isLightHex(resolvedThemeColor('bg'));
-  rootStyle.setProperty('--windows-popover-alpha', windowsGlassApi.nativePopoverAlpha({ lightTheme }).toFixed(3));
+  rootStyle.setProperty('--windows-popover-alpha', windowsGlassApi.nativePopoverAlpha({
+    lightTheme,
+    surface: windowsGlass.surface
+  }).toFixed(3));
+  rootStyle.setProperty('--windows-popover-blur', `${windowsGlassApi.nativePopoverBlur({ surface: windowsGlass.surface })}px`);
 
-  // The data attribute activates native-material-specific CSS only when the
-  // BrowserWindow actually has a native Windows backdrop. When system glass is
-  // off, or the OS build cannot host one (main passes windowsBackdropUnsupported),
-  // the window is a transparent CSS fallback and must keep the normal
-  // blur/surface rules instead of inheriting the low-alpha native rules.
-  if (nativeWindowsBackdropEnabled) {
-    document.documentElement.dataset.windowsBackdrop = windowsGlass.backdropMode;
-    document.body.dataset.windowsBackdrop = windowsGlass.backdropMode;
+  // Mica and the deterministic Win10 fallback both get an explicit surface
+  // attribute. The former leaves the shell open for DWM; the latter paints a
+  // controlled CSS fallback and may also be enhanced by native Accent Blur.
+  if (isWindows && windowsGlass.surface !== 'none') {
+    document.documentElement.dataset.windowsSurface = windowsGlass.surface;
+    document.body.dataset.windowsSurface = windowsGlass.surface;
   } else {
-    delete document.documentElement.dataset.windowsBackdrop;
-    delete document.body.dataset.windowsBackdrop;
+    delete document.documentElement.dataset.windowsSurface;
+    delete document.body.dataset.windowsSurface;
   }
   applyReduceMotionPreference(settings?.reduceMotion);
   els.liveDot.style.display = (settings?.showLiveDot !== false) ? '' : 'none';
@@ -5415,7 +5395,7 @@ function matchingThemePresetId(overrides) {
 
 function applyThemeColors(overrides) {
   const options = arguments[1] || {};
-  const nativeBackdrop = options.nativeBackdrop ?? Boolean(document.documentElement.dataset.windowsBackdrop);
+  const nativeBackdrop = options.nativeBackdrop ?? document.documentElement.dataset.windowsSurface === 'mica';
   appliedThemeOverrides = themePresetsApi.normalizeOverrides(overrides, themePresetsApi.INTERFACE_COLOR_KEYS);
   const root = document.documentElement.style;
   for (const { name, value } of themePresetsApi.themeCssVarEntries(appliedThemeOverrides, {
@@ -5977,7 +5957,6 @@ function appearancePatchFromControls() {
   return {
     systemGlass,
     macosGlassStyle: macosGlassModeApi.normalizeMacosGlassStyle(els.macosGlassInput?.value),
-    windowsBackdrop: windowsGlassApi.normalizeWindowsBackdropMode(els.windowsBackdropInput?.value),
     reduceMotion: els.reduceMotionInputs?.find((input) => input.checked)?.value || 'system',
     showLiveDot: Boolean(els.liveDotInput.checked),
     showToolIcons: Boolean(els.toolIconsInput.checked),
@@ -6225,7 +6204,6 @@ function syncSettingsForm() {
   if (els.macosGlassInput) {
     els.macosGlassInput.value = macosGlassModeApi.normalizeMacosGlassStyle(state.settings.macosGlassStyle);
   }
-  if (els.windowsBackdropInput) els.windowsBackdropInput.value = windowsGlassApi.normalizeWindowsBackdropMode(state.settings.windowsBackdrop);
   const reduceMotion = motionPreferenceApi.normalize(state.settings.reduceMotion);
   for (const input of els.reduceMotionInputs || []) input.checked = input.value === reduceMotion;
   els.liveDotInput.checked = state.settings.showLiveDot !== false;
@@ -8004,7 +7982,6 @@ for (const input of els.systemGlassInputs || []) {
     if (input.checked) saveAppearanceFromControls();
   });
 }
-els.windowsBackdropInput?.addEventListener('change', saveAppearanceFromControls);
 els.macosGlassInput?.addEventListener('change', saveAppearanceFromControls);
 for (const input of els.reduceMotionInputs || []) {
   input.addEventListener('change', async () => {

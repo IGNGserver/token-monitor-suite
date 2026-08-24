@@ -2288,6 +2288,10 @@ html.is-windows .settings-panel select option {
 }
 .home-panel.hidden { display: none; }
 .home-panel::-webkit-scrollbar { width: 0; height: 0; }
+/* Settings is a separate surface. Do not leave the Home quota module behind
+   it: a shortened Home scroller would otherwise expose only the tail of a
+   quota account below the settings sheet. */
+.shell.settings-open .home-module-limits { display: none; }
 .home-module {
   display: grid;
   width: 100%;
@@ -3782,6 +3786,10 @@ html.is-windows .limit-live-badge {
 html.is-windows[data-windows-surface] .view-switcher-menu,
 body.is-windows[data-windows-surface] .view-switcher-menu {
   isolation: isolate;
+  width: min(220px, calc(100vw - 28px));
+  min-width: min(180px, calc(100vw - 28px));
+  max-width: calc(100vw - 28px);
+  overflow-x: hidden;
   padding: 6px;
   border-radius: 11px;
   border-color: rgba(var(--line-rgb), 0.34);
@@ -3864,8 +3872,8 @@ body.is-windows[data-windows-surface] .limit-detail-tooltip::after {
 }
 html.is-windows[data-windows-surface] .view-switcher-menu-item,
 body.is-windows[data-windows-surface] .view-switcher-menu-item {
-  height: 32px;
-  padding: 0 8px;
+  height: 28px;
+  padding: 0 7px;
   border-radius: 7px;
 }
 html.is-windows[data-windows-surface] .view-switcher-menu-item:hover,

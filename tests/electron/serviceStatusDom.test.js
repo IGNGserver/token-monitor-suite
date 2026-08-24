@@ -314,6 +314,16 @@ test('view switcher preserves click-to-cycle and direct selection without crowdi
   assert.doesNotMatch(css, /\.view-dock/);
 });
 
+test('Home keeps its quota module out of the settings layout and resets its entry scroll', () => {
+  const app = readRendererFile('app.js');
+  const css = readRendererFile('styles.css');
+
+  assert.match(css, /\.shell\.settings-open \.home-module-limits\s*\{\s*display:\s*none;/);
+  assert.match(app, /homeScrollResetPending/);
+  assert.match(app, /els\.homePanel\.scrollTop\s*=\s*0/);
+  assert.match(app, /if \(!settingsOpen && state\.breakdown === 'home'\)[\s\S]*els\.homePanel\.scrollTop\s*=\s*0/);
+});
+
 test('Home-launched secondary views expose an accessible return action', () => {
   const html = readRendererFile('index.html');
   const app = readRendererFile('app.js');

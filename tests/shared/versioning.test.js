@@ -46,6 +46,6 @@ test('project versions compare upstream components before local revisions', () =
 });
 
 test('release version verification checks the synchronized package metadata', () => {
-  assert.equal(verifyReleaseVersion('v0.45.0-rev.5'), '0.45.0-rev.5');
+  assert.equal(verifyReleaseVersion('v0.45.0-rev.15'), '0.45.0-rev.15');
   assert.throws(() => verifyReleaseVersion('0.37.23'), /Invalid project release version/);
 });

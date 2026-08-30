@@ -11,6 +11,7 @@
     codex: '../../../assets/icons/tray-codex.svg',
     chatgpt: '../../../assets/icons/codex.svg',
     hermes: '../../../assets/icons/hermes-agent.svg',
+    'deepseek-harness': '../../../assets/icons/deepseek.svg',
     kimi: '../../../assets/icons/moonshot.svg',
     mimo: '../../../assets/icons/xiaomi.svg',
     grok: '../../../assets/icons/grok.svg',

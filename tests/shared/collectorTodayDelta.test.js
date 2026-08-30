@@ -93,6 +93,43 @@ test('collectUsageOnce with a valid anchor runs a single --today scan and derive
   }
 });
 
+test('a failed Antigravity sync keeps the anchored today partition', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-antigravity-anchor-'));
+  fs.mkdirSync(path.join(home, '.gemini', 'antigravity'), { recursive: true });
+  try {
+    const { collectUsageOnce, localTodayKey } = freshCollector();
+    const { emptyPeriod } = require('../../src/shared/usage');
+    const antigravity = { ...emptyPeriod(), totalTokens: 42, clients: { antigravity: 42 } };
+    const summary = await collectUsageOnce({
+      clients: 'antigravity',
+      homeDir: home,
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false,
+      historyEnabled: false,
+      wslScanEnabled: false,
+      todayOnlyAnchor: {
+        dateKey: localTodayKey(),
+        today: antigravity,
+        month: antigravity,
+        allTime: antigravity,
+        todayPartitions: { antigravity }
+      },
+      runAntigravitySync: async () => { throw new Error('sync.lock already exists'); },
+      runTokscale: async () => ({ entries: [] })
+    });
+    assert.equal(summary.today.totalTokens, 42);
+    assert.equal(summary.today.clients.antigravity, 42);
+    assert.equal(summary.month.totalTokens, 42);
+    assert.equal(summary.allTime.totalTokens, 42);
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('an anchored watch tick does not re-read session files that only appear in the derived periods', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;

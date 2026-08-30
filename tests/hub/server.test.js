@@ -63,6 +63,24 @@ test('resolveBindHost keeps the requested host when a secret is set', () => {
   assert.equal(resolveBindHost('192.168.1.10', 's3cret'), '192.168.1.10');
 });
 
+test('GET /api/devices returns normalized current-period records', async () => {
+  const { hub } = createMemoryHub();
+  await hub.ingest(payload(5, { updatedAt: '2026-07-18T00:00:00.000Z' }));
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/api/devices`);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.devices.length, 1);
+    assert.equal(body.devices[0].periods.today.totalTokens, 0);
+    assert.equal(body.devices[0].periods.allTime.totalTokens, 5);
+    assert.equal(Object.hasOwn(body.devices[0], 'today'), false);
+  } finally {
+    await hub.stop();
+  }
+});
+
 test('resolveBindHost forces localhost when no secret and a non-loopback host is requested', () => {
   assert.equal(resolveBindHost('0.0.0.0', ''), '127.0.0.1');
   assert.equal(resolveBindHost('192.168.1.10', ''), '127.0.0.1');

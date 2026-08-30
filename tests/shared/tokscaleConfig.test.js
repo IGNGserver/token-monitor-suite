@@ -4,7 +4,18 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const path = require('node:path');
 
-const { tokscaleConfigDir, customPricingPath } = require('../../src/shared/tokscaleConfig');
+const { tokscaleConfigDir, tokscaleClientCacheDir, customPricingPath } = require('../../src/shared/tokscaleConfig');
+
+test('self-synced client cache follows the platform config root', () => {
+  assert.equal(
+    tokscaleClientCacheDir('antigravity', {
+      platform: 'win32',
+      homeDir: 'C:\\Users\\u',
+      env: { APPDATA: 'C:\\Users\\u\\AppData\\Roaming' }
+    }),
+    path.join('C:\\Users\\u\\AppData\\Roaming', 'tokscale', 'antigravity-cache')
+  );
+});
 
 test('TOKSCALE_CONFIG_DIR override wins verbatim on every platform', () => {
   for (const platform of ['darwin', 'win32', 'linux']) {

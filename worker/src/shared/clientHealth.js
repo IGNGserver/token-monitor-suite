@@ -181,6 +181,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'copilot-data',
   'copilot-otel',
   'copilot-otel-exporter',
+  'deepseek-harness-sessions',
   'grok-sessions',
   'grok-unified-log',
   'hermes-home',

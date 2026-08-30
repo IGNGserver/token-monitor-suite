@@ -86,6 +86,7 @@ fun OverviewScreen(
   val devices = state.devices.sortedWith(
     compareBy<DeviceDto> { it.stale }.thenByDescending { it.periods.today.totalTokens }
   )
+  val activeDevices = devices.filterNot { it.stale }
   val historySource = state.history ?: state.stats?.historyPreview
   val historyDays = historySource?.daily.orEmpty().takeRange(TrendRange.Days7)
   val summary = historySource?.summary
@@ -310,7 +311,7 @@ fun OverviewScreen(
                   onAction = onOpenDevices
                 )
                 Spacer(Modifier.height(12.dp))
-                DeviceComparisonChart(devices = devices, limit = 5, showCost = true)
+                DeviceComparisonChart(devices = activeDevices, limit = 5, showCost = true)
               }
             }
           }
@@ -324,7 +325,6 @@ fun OverviewScreen(
     )
   }
 }
-
 @Composable
 private fun SummaryChip(
   label: String,
@@ -358,4 +358,3 @@ private fun SummaryChip(
     }
   }
 }
-

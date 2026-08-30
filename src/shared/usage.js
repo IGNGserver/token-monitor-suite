@@ -168,6 +168,9 @@ function normalizeClientName(value) {
   // Desktop Local Agent / Cowork sessions are deliberately separate from
   // regular Claude Code transcripts.
   if (raw === 'claude-desktop' || raw.includes('claude-desktop') || raw.includes('claude desktop')) return 'claude-desktop';
+  // DeepSeek Harness is a local session source, not the DeepSeek balance
+  // provider. Keep the explicit client id separate from generic DeepSeek rows.
+  if (raw === 'dsh' || raw.includes('deepseek-harness') || raw.includes('deepseek harness')) return 'deepseek-harness';
   if (raw.includes('claude')) return 'claude';
   if (raw.includes('codex')) return 'codex';
   if (raw.includes('hermes')) return 'hermes';

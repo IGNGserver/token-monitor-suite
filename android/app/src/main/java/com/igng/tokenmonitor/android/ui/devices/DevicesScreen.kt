@@ -68,6 +68,7 @@ fun DevicesScreen(
   val sorted = devices.sortedWith(
     compareBy<DeviceDto> { it.stale }.thenByDescending { it.periods.today.totalTokens }
   )
+  val activeDevices = sorted.filterNot { it.stale }
   Column(Modifier.fillMaxSize()) {
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
       Text("设备", style = MaterialTheme.typography.headlineSmall)
@@ -94,7 +95,7 @@ fun DevicesScreen(
               subtitle = "按设备 Token 用量"
             )
             Spacer(Modifier.height(12.dp))
-            DeviceComparisonChart(devices = sorted, limit = 10, showCost = true)
+            DeviceComparisonChart(devices = activeDevices, limit = 10, showCost = true)
           }
         }
         items(sorted, key = { it.deviceId.orEmpty() }) { device ->

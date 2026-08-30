@@ -10,7 +10,7 @@ const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
 const { tokscalePackageNamesForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
-const { customPricingPath, tokscaleCacheDirs } = require('./tokscaleConfig');
+const { customPricingPath, tokscaleCacheDirs, tokscaleClientCacheDir } = require('./tokscaleConfig');
 const {
   applyPeriodDelta,
   emptyPeriod,
@@ -62,6 +62,13 @@ const {
   collectClaudeDesktopRows,
   desktopSessionWatchDirs
 } = require('./claudeDesktopUsage');
+const {
+  buildDeepSeekHarnessHistoryGraph,
+  buildDeepSeekHarnessPeriods,
+  buildDeepSeekHarnessRangeJson,
+  collectDeepSeekHarnessRows,
+  deepseekHarnessSessionsDir
+} = require('./deepseekHarnessUsage');
 const { hashKey } = require('./hashKey');
 const { filterPeriodByCustomRange, normalizeCustomRange } = require('./customRange');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
@@ -529,7 +536,7 @@ function resetPromaPricingCache() {
   promaPricingCache.clear();
 }
 
-const LOCAL_PARSED_CLIENTS = new Set(['proma', 'claude-desktop', 'qodercn']);
+const LOCAL_PARSED_CLIENTS = new Set(['proma', 'claude-desktop', 'deepseek-harness', 'qodercn']);
 
 function collectionDate(now) {
   const value = typeof now === 'function' ? now() : now;
@@ -849,18 +856,19 @@ function antigravityDataPresent(home) {
 
 async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), options = {}) {
   const enabled = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
-  if (!enabled.has('antigravity')) return;
-  if (!antigravityDataPresent(home)) return;
+  if (!enabled.has('antigravity')) return { attempted: false, failed: false };
+  if (!antigravityDataPresent(home)) return { attempted: false, failed: false };
   const minIntervalMs = options.minIntervalMs ?? selfSyncThrottle.minIntervalForTick(
     options.force === true ? { forceSelfSync: ['antigravity'] } : {},
     'antigravity'
   );
-  if (!selfSyncThrottle.claim('antigravity', minIntervalMs)) return;
+  if (!selfSyncThrottle.claim('antigravity', minIntervalMs)) return { attempted: false, failed: false };
   const attempt = selfSyncThrottle.beginAttempt('antigravity');
   if (typeof options.run === 'function') {
     try {
       await options.run();
       selfSyncThrottle.completeAttempt('antigravity', attempt, false);
+      return { attempted: true, failed: false };
     } catch (error) {
       if (typeof logger === 'function') logger(`antigravity sync failed: ${error.message}`);
       selfSyncThrottle.completeAttempt('antigravity', attempt, true, 'sync-failed', {
@@ -869,18 +877,24 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
         exitCode: error?.syncExitCode
       });
       options.onFailure?.('antigravity');
+      return {
+        attempted: true,
+        failed: true,
+        failureStage: error?.syncFailureStage,
+        detailCode: error?.syncDetailCode || classifyClientSyncDetailCode({ client: 'antigravity', text: error?.message }),
+        exitCode: error?.syncExitCode
+      };
     }
-    return;
   }
   const { bin, prefixArgs, env } = tokscaleCommand();
-  await new Promise((resolve) => {
+  return new Promise((resolve) => {
     let settled = false;
     const settle = (failed, code = '', details = {}) => {
       if (settled) return;
       settled = true;
       selfSyncThrottle.completeAttempt('antigravity', attempt, failed, code, details);
       if (failed) options.onFailure?.('antigravity');
-      resolve();
+      resolve({ attempted: true, failed, code, ...details });
     };
     const child = spawn(bin, [...prefixArgs, 'antigravity', 'sync'], { env, windowsHide: true });
     let stderr = '';
@@ -964,6 +978,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
   }
+  if (options.deepseekHarnessGraph) {
+    rawGraphs.push(options.deepseekHarnessGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.deepseekHarnessGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -1030,12 +1048,14 @@ async function collectUsageOnce(options) {
     options.homeDir || os.homedir(),
     { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
   );
-  // Proma and Qoder CN remain local compatibility adapters. Reasonix aggregate
-  // usage is supplied by the same Tokscale path as every other tracked client.
-  const localClients = new Set(['proma', 'claude-desktop', 'qodercn']);
+  // Proma, DeepSeek Harness, and Qoder CN remain local compatibility adapters.
+  // Reasonix aggregate usage is supplied by the same Tokscale path as every
+  // other tracked client.
+  const localClients = new Set(['proma', 'claude-desktop', 'deepseek-harness', 'qodercn']);
   const tokscaleClients = tokscaleClientsCsv(normalizedClients);
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesClaudeDesktop = normalizedClients.split(',').includes('claude-desktop');
+  const includesDeepSeekHarness = normalizedClients.split(',').includes('deepseek-harness');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
@@ -1063,15 +1083,21 @@ async function collectUsageOnce(options) {
   let claudeDesktopPeriods = null;
   let claudeDesktopRows = null;
   let claudeDesktopPricing = null;
+  let deepSeekHarnessPeriods = null;
+  let deepSeekHarnessRows = null;
+  let deepSeekHarnessPricing = null;
   let qoderCnPeriods = null;
   let qoderCnRows = null;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
+  let antigravitySyncFailed = false;
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     const progress = { ...periods };
     if (claudeDesktopPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, claudeDesktopPeriods.today);
     if (claudeDesktopPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, claudeDesktopPeriods.month);
+    if (deepSeekHarnessPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, deepSeekHarnessPeriods.today);
+    if (deepSeekHarnessPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, deepSeekHarnessPeriods.month);
     if (qoderCnPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, qoderCnPeriods.today);
     if (qoderCnPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, qoderCnPeriods.month);
     try { options.onProgress({ ...progress, updatedAt: new Date().toISOString() }); } catch (_) {}
@@ -1082,11 +1108,27 @@ async function collectUsageOnce(options) {
       minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'cursor'),
       onFailure: options.onSelfSyncFailed
     });
-    await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
+    const antigravitySync = await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
       minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'antigravity'),
       run: options.runAntigravitySync,
       onFailure: options.onSelfSyncFailed
     });
+    if (antigravitySync?.failed === true) {
+      antigravitySyncFailed = true;
+      const error = new Error('antigravity sync failed; retaining the last known usage snapshot');
+      error.code = 'client-sync-failed';
+      error.client = 'antigravity';
+      error.syncFailureStage = antigravitySync.failureStage;
+      error.syncDetailCode = antigravitySync.detailCode;
+      error.syncExitCode = antigravitySync.exitCode;
+      // A failed self-sync leaves the cache potentially stale or empty. Do not
+      // let the following Tokscale scan turn a known-good today snapshot into
+      // zero. Anchored ticks can safely keep the per-client partition; a cold or
+      // cross-day full scan has no trustworthy partition to retain, so it must
+      // fail the tick and leave the previous published record untouched.
+      if (!(anchorUsed && anchor.todayPartitions?.antigravity)) throw error;
+      if (typeof options.logger === 'function') options.logger('antigravity sync failed; using the anchored antigravity partition');
+    }
     if (includesProma && (!targetRequested || targetClients.includes('proma'))) {
       try {
         promaRows = collectPromaRows();
@@ -1126,6 +1168,33 @@ async function collectUsageOnce(options) {
         };
       } catch (error) {
         if (typeof options.logger === 'function') options.logger(`claude-desktop parse failed: ${error.message}`);
+      }
+    }
+    if (includesDeepSeekHarness && (!targetRequested || targetClients.includes('deepseek-harness'))) {
+      try {
+        deepSeekHarnessRows = collectDeepSeekHarnessRows({
+          homeDir: options.homeDir || os.homedir(),
+          env: options.env || process.env,
+          logger: options.logger
+        });
+        deepSeekHarnessPricing = await resolvePromaPricing(deepSeekHarnessRows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        });
+        const harnessJson = buildDeepSeekHarnessPeriods({
+          now: collectedAt,
+          allTimeSince,
+          rows: deepSeekHarnessRows,
+          pricingByModel: deepSeekHarnessPricing
+        });
+        deepSeekHarnessPeriods = {
+          today: extractUsageFromTokscale(harnessJson.today),
+          month: extractUsageFromTokscale(harnessJson.month),
+          allTime: extractUsageFromTokscale(harnessJson.allTime)
+        };
+      } catch (error) {
+        if (typeof options.logger === 'function') options.logger(`deepseek-harness parse failed: ${error.message}`);
       }
     }
     if (includesQoderCn && (!targetRequested || targetClients.includes('qodercn'))) {
@@ -1185,11 +1254,17 @@ async function collectUsageOnce(options) {
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
       if (claudeDesktopPeriods) freshPartitions['claude-desktop'] = claudeDesktopPeriods.today;
+      if (deepSeekHarnessPeriods) freshPartitions['deepseek-harness'] = deepSeekHarnessPeriods.today;
       if (qoderCnPeriods) freshPartitions.qodercn = qoderCnPeriods.today;
       if (qoderCnPeriodReadFailed && anchor.todayPartitions?.qodercn) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
         freshPartitions.qodercn = anchor.todayPartitions.qodercn;
+      }
+      if (antigravitySyncFailed && anchor.todayPartitions?.antigravity) {
+        // The cache scan after a failed sync is not a fresh observation. Keep
+        // the exact partition that the anchor used for its month/allTime delta.
+        freshPartitions.antigravity = anchor.todayPartitions.antigravity;
       }
       todayPartitions = useTargetedPartitions
         ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, targetClients)
@@ -1240,6 +1315,12 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, claudeDesktopPeriods.month);
       allTime = mergePeriods(allTime, claudeDesktopPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), 'claude-desktop': claudeDesktopPeriods.today };
+    }
+    if (deepSeekHarnessPeriods && !anchorUsed) {
+      today = mergePeriods(today, deepSeekHarnessPeriods.today);
+      month = mergePeriods(month, deepSeekHarnessPeriods.month);
+      allTime = mergePeriods(allTime, deepSeekHarnessPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), 'deepseek-harness': deepSeekHarnessPeriods.today };
     }
     if (qoderCnPeriods && !anchorUsed) {
       today = mergePeriods(today, qoderCnPeriods.today);
@@ -1450,6 +1531,16 @@ async function collectUsageOnce(options) {
     const historyQoderCnGraph = qoderCnHistoryReadFailed
       ? options.qoderCnHistoryFallbackGraph
       : qoderCnGraph;
+    const deepseekHarnessGraph = includesDeepSeekHarness
+      ? buildDeepSeekHarnessHistoryGraph({
+        rows: deepSeekHarnessRows || collectDeepSeekHarnessRows({
+          homeDir: options.homeDir || os.homedir(),
+          env: options.env || process.env,
+          logger: options.logger
+        }),
+        pricingByModel: deepSeekHarnessPricing || {}
+      })
+      : null;
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
@@ -1460,6 +1551,7 @@ async function collectUsageOnce(options) {
         })
         : null,
       qoderCnGraph: historyQoderCnGraph || null,
+      deepseekHarnessGraph,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -1630,8 +1722,8 @@ function clientSourceRoots(clientsCsv) {
   const xdgHome = xdgDataHome(home);
   add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
-  add('cursor', ['tokscale-cursor-cache', path.join(home, '.config', 'tokscale', 'cursor-cache')]);
-  add('antigravity', ['tokscale-antigravity-cache', path.join(home, '.config', 'tokscale', 'antigravity-cache')]);
+  add('cursor', ['tokscale-cursor-cache', tokscaleClientCacheDir('cursor', { env: process.env, platform: process.platform, homeDir: home })]);
+  add('antigravity', ['tokscale-antigravity-cache', tokscaleClientCacheDir('antigravity', { env: process.env, platform: process.platform, homeDir: home })]);
   // A whitespace-only KIMI_CODE_HOME counts as unset, matching tokscale: it
   // joins `sessions` onto the raw value, so a blank export would resolve to the
   // root-level /sessions and hide the real one.
@@ -1749,6 +1841,9 @@ function clientSourceRoots(clientsCsv) {
   add('workbuddy', ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')]);
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
+  // DeepSeek Harness — default JSONL session store at ~/.dsh/sessions, or the
+  // sessions directory under DSH_HOME when the upstream override is set.
+  add('deepseek-harness', ['deepseek-harness-sessions', deepseekHarnessSessionsDir({ homeDir: home, env: process.env })]);
   add('claude-desktop', ...desktopSessionWatchDirs({ homeDir: home, includeMissing: true }).map((dir) => ['claude-desktop-sessions', dir]));
   // Qoder CN — SQLite DB under the platform Application Support dir.
   const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform: process.platform, env: process.env });
@@ -3513,6 +3608,7 @@ async function collectCustomRangeOnce(options = {}) {
   const tokscaleClients = tokscaleClientsCsv(normalizedClients);
   const includesProma = includesLocalClient(normalizedClients, 'proma');
   const includesClaudeDesktop = includesLocalClient(normalizedClients, 'claude-desktop');
+  const includesDeepSeekHarness = includesLocalClient(normalizedClients, 'deepseek-harness');
   const homeDir = options.homeDir || os.homedir();
   let period = emptyPeriod();
 
@@ -3560,8 +3656,26 @@ async function collectCustomRangeOnce(options = {}) {
       if (typeof options.logger === 'function') options.logger(`claude-desktop custom-range parse failed: ${err.message}`);
     }
   }
+  if (includesDeepSeekHarness) {
+    try {
+      const harnessRows = collectDeepSeekHarnessRows({
+        homeDir,
+        env: options.env || process.env,
+        logger: options.logger
+      });
+      const harnessPricing = await resolvePromaPricing(harnessRows, {
+        lookupModelPricing: options.lookupModelPricing,
+        commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+        pricingRevision: options.pricingRevision
+      });
+      const harnessJson = buildDeepSeekHarnessRangeJson(range, { rows: harnessRows, pricingByModel: harnessPricing });
+      period = mergePeriods(period, extractUsageFromTokscale(harnessJson));
+    } catch (err) {
+      if (typeof options.logger === 'function') options.logger(`deepseek-harness custom-range parse failed: ${err.message}`);
+    }
+  }
 
-  if (!tokscaleClients && !includesProma && !includesClaudeDesktop) {
+  if (!tokscaleClients && !includesProma && !includesClaudeDesktop && !includesDeepSeekHarness) {
     return { range, period: emptyPeriod(), updatedAt: new Date().toISOString() };
   }
 

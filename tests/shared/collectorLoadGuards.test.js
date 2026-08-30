@@ -1019,11 +1019,14 @@ test('a failed sync moves the client off the fast source floor', async () => {
 
     assert.equal(sourceSyncFloorMs('antigravity'), SYNC_SOURCE_EVENT_MIN_INTERVAL_MS);
 
-    await collectUsageOnce({
-      ...options,
-      forceSelfSync: true,
-      runAntigravitySync: async () => { throw new Error('language server unreachable'); }
-    });
+    await assert.rejects(
+      collectUsageOnce({
+        ...options,
+        forceSelfSync: true,
+        runAntigravitySync: async () => { throw new Error('language server unreachable'); }
+      }),
+      (error) => error.code === 'client-sync-failed'
+    );
     assert.equal(sourceSyncFloorMs('antigravity'), SYNC_MIN_INTERVAL_MS, 'a failure backs the client off');
 
     await collectUsageOnce({
@@ -1106,10 +1109,13 @@ test('a superseded sync attempt cannot rewrite the current backoff', async () =>
     });
     await staleOkStarted;
 
-    await collectUsageOnce({
-      ...options,
-      runAntigravitySync: async () => { throw new Error('language server went away'); }
-    });
+    await assert.rejects(
+      collectUsageOnce({
+        ...options,
+        runAntigravitySync: async () => { throw new Error('language server went away'); }
+      }),
+      (error) => error.code === 'client-sync-failed'
+    );
     assert.equal(sourceSyncFloorMs('antigravity'), SYNC_MIN_INTERVAL_MS);
 
     releaseStaleOk();
@@ -1161,16 +1167,19 @@ test('a misbehaving sync child reports failure exactly once', async () => {
     for (const withError of [false, true]) {
       emitAfterError = withError;
       const failures = [];
-      await collectUsageOnce({
-        clients: 'antigravity',
-        allTimeSince: '2024-01-01',
-        commandTimeoutMs: 1000,
-        deviceId: 'usage-only',
-        historyEnabled: false,
-        homeDir: home,
-        forceSelfSync: true,
-        onSelfSyncFailed: (kind) => failures.push(kind)
-      });
+      await assert.rejects(
+        collectUsageOnce({
+          clients: 'antigravity',
+          allTimeSince: '2024-01-01',
+          commandTimeoutMs: 1000,
+          deviceId: 'usage-only',
+          historyEnabled: false,
+          homeDir: home,
+          forceSelfSync: true,
+          onSelfSyncFailed: (kind) => failures.push(kind)
+        }),
+        (error) => error.code === 'client-sync-failed'
+      );
       assert.deepEqual(failures, ['antigravity'], withError ? 'error then close' : 'non-zero close');
     }
   } finally {

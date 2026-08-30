@@ -609,7 +609,10 @@ function createHub({
 
     if (req.method === 'GET' && url.pathname === '/api/stats') return sendJson(res, 200, await getStats());
     if (req.method === 'GET' && url.pathname === '/api/devices') {
-      return sendJson(res, 200, { devices: await store.listDeviceRecords() });
+      // Mobile clients consume the normalized `periods` shape. Returning raw
+      // ingest snapshots here exposes top-level today/month/allTime fields and
+      // makes them silently render zero usage.
+      return sendJson(res, 200, { devices: (await getStats()).devices });
     }
     if (req.method === 'GET' && url.pathname === '/api/history') return sendJson(res, 200, await getHistory());
     if (req.method === 'GET' && url.pathname === '/api/subscriptions') {

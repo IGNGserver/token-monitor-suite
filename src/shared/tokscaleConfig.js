@@ -78,4 +78,10 @@ function customPricingPath(opts) {
   return path.join(tokscaleConfigDir(opts), 'custom-pricing.json');
 }
 
-module.exports = { tokscaleCacheDirs, tokscaleConfigDir, customPricingPath };
+function tokscaleClientCacheDir(client, opts = {}) {
+  const id = String(client || '').trim().toLowerCase();
+  if (!/^[a-z0-9_-]+$/.test(id)) throw new TypeError('Tokscale client id must be a simple name');
+  return path.join(tokscaleConfigDir(opts), `${id}-cache`);
+}
+
+module.exports = { tokscaleCacheDirs, tokscaleConfigDir, tokscaleClientCacheDir, customPricingPath };

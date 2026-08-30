@@ -820,6 +820,36 @@ function normalizePeriodOmissionCounts(value) {
   return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
+// A one-time device migration is kept inside the Hub snapshot so the next
+// ordinary upload from the destination device cannot replace the transferred
+// counters and history. This is private state: aggregateDevices deliberately
+// never exposes it on the public device wire shape.
+function normalizeTransferredUsage(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const sourceDeviceId = String(value.sourceDeviceId || '').trim().slice(0, 128);
+  if (!sourceDeviceId) return null;
+  const projectsEnabled = value.projectsEnabled !== false;
+  const periods = {};
+  for (const periodName of PERIODS) {
+    periods[periodName] = normalizePeriod(value.periods?.[periodName] ?? value[periodName], { projectsEnabled });
+  }
+  const normalized = { sourceDeviceId, periods };
+  const updatedAt = validDate(value.updatedAt);
+  const receivedAt = validDate(value.receivedAt);
+  if (updatedAt) normalized.updatedAt = updatedAt.toISOString();
+  if (receivedAt) normalized.receivedAt = receivedAt.toISOString();
+  const periodWindows = normalizePeriodWindows(value.periodWindows);
+  if (periodWindows) normalized.periodWindows = periodWindows;
+  if (hasOwn(value, 'history')) {
+    normalized.history = value.history === null
+      ? { daily: [], monthly: [], summary: {} }
+      : coerceHistory(value.history);
+  }
+  if (hasOwn(value, 'trackedClients')) normalized.trackedClients = normalizeTrackedClients(value.trackedClients);
+  if (hasOwn(value, 'projectsEnabled')) normalized.projectsEnabled = projectsEnabled;
+  return normalized;
+}
+
 function normalizeDeviceOsVersion(value) {
   return String(value || '').trim().slice(0, 128);
 }
@@ -877,6 +907,10 @@ function normalizeDeviceRecord(record) {
   if (hasOwn(record, 'periodWindows')) {
     const windows = normalizePeriodWindows(record.periodWindows);
     if (windows) normalized.periodWindows = windows;
+  }
+  if (hasOwn(record, 'transferredUsage')) {
+    const transferred = normalizeTransferredUsage(record.transferredUsage);
+    if (transferred) normalized.transferredUsage = transferred;
   }
   for (const periodName of PERIODS) {
     normalized.periods[periodName] = normalizePeriod(record[periodName] || record.periods?.[periodName], {
@@ -1052,15 +1086,41 @@ function mergeDeviceLimits(existingRecord, incomingRecord) {
   };
 }
 
+function transferredUsageRecord(transferredUsage) {
+  return {
+    updatedAt: transferredUsage.updatedAt || transferredUsage.receivedAt || '',
+    receivedAt: transferredUsage.receivedAt || transferredUsage.updatedAt || '',
+    periodWindows: transferredUsage.periodWindows,
+    periods: transferredUsage.periods
+  };
+}
+
+function applyTransferredUsage(incomingRecord, transferredUsage, nowMs = Date.now()) {
+  const sourceRecord = transferredUsageRecord(transferredUsage);
+  for (const periodName of PERIODS) {
+    if (isPeriodExpired(sourceRecord, periodName, nowMs)) continue;
+    incomingRecord.periods[periodName] = mergePeriods(
+      incomingRecord.periods[periodName],
+      transferredUsage.periods[periodName]
+    );
+  }
+}
+
 function mergeDeviceRecord(existing, incoming) {
   const hasExisting = existing && typeof existing === 'object';
   const hasIncomingLimits = incoming && typeof incoming === 'object' && Object.prototype.hasOwnProperty.call(incoming, 'limits');
   const hasIncomingHistory = incoming && typeof incoming === 'object' && Object.prototype.hasOwnProperty.call(incoming, 'history');
   const hasIncomingTrackedClients = hasOwn(incoming, 'trackedClients');
   const normalizedIncoming = normalizeDeviceRecord(incoming || {});
-  if (!hasExisting) return normalizedIncoming;
+  if (!hasExisting) {
+    // The migration marker is Hub-owned state and must not be created by a
+    // first ingest from an untrusted caller.
+    delete normalizedIncoming.transferredUsage;
+    return normalizedIncoming;
+  }
 
   const normalizedExisting = normalizeDeviceRecord(existing);
+  const transferredUsage = normalizedExisting.transferredUsage;
   if (incoming?.limitsOnly === true) {
     normalizedIncoming.periods = normalizedExisting.periods;
     // The three attribution fields describe the usage this branch is carrying
@@ -1093,6 +1153,22 @@ function mergeDeviceRecord(existing, incoming) {
   if (!hasIncomingLimits) normalizedIncoming.limits = normalizedExisting.limits;
   else normalizedIncoming.limits = mergeDeviceLimits(normalizedExisting, normalizedIncoming);
   if (!hasIncomingHistory && hasOwn(normalizedExisting, 'history')) normalizedIncoming.history = normalizedExisting.history;
+  if (transferredUsage) {
+    // The field is accepted only from the stored destination snapshot, never
+    // from an arbitrary incoming payload. Full usage updates get the old
+    // periods overlaid; a limits-only update already carries existing periods.
+    normalizedIncoming.transferredUsage = transferredUsage;
+    if (incoming?.limitsOnly !== true) applyTransferredUsage(normalizedIncoming, transferredUsage);
+    if (hasIncomingHistory && hasOwn(transferredUsage, 'history')) {
+      normalizedIncoming.history = mergeHistories([normalizedIncoming.history, transferredUsage.history]);
+    } else if (!hasOwn(normalizedIncoming, 'history') && hasOwn(transferredUsage, 'history')) {
+      normalizedIncoming.history = transferredUsage.history;
+    }
+  } else {
+    // Do not allow a caller to mint a migration overlay by posting this
+    // internal field directly to the ingest endpoint.
+    delete normalizedIncoming.transferredUsage;
+  }
   if (hasIncomingTrackedClients) {
     preserveUntrackedClientUsage(normalizedExisting, normalizedIncoming, normalizedIncoming.trackedClients || []);
   }

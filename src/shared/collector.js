@@ -23,6 +23,7 @@ const {
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles');
 const { mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
+const { cacheSessionTimestamps } = require('./antigravityCacheRepair');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const {
   CLIENT_HEALTH_VERSION,
@@ -864,11 +865,28 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
   );
   if (!selfSyncThrottle.claim('antigravity', minIntervalMs)) return { attempted: false, failed: false };
   const attempt = selfSyncThrottle.beginAttempt('antigravity');
+  const repairCache = () => {
+    try {
+      const result = cacheSessionTimestamps(tokscaleClientCacheDir('antigravity', {
+        homeDir: home,
+        env: process.env,
+        platform: process.platform
+      }));
+      if (result.patchedEntries > 0 && typeof logger === 'function') {
+        logger(`antigravity cache timestamps repaired: ${result.patchedEntries} usage rows`);
+      }
+      return result;
+    } catch (error) {
+      if (typeof logger === 'function') logger(`antigravity cache timestamp repair skipped: ${error.message}`);
+      return { patchedEntries: 0, patchedFiles: 0, skippedFiles: 1 };
+    }
+  };
   if (typeof options.run === 'function') {
     try {
       await options.run();
+      const repair = repairCache();
       selfSyncThrottle.completeAttempt('antigravity', attempt, false);
-      return { attempted: true, failed: false };
+      return { attempted: true, failed: false, repair };
     } catch (error) {
       if (typeof logger === 'function') logger(`antigravity sync failed: ${error.message}`);
       selfSyncThrottle.completeAttempt('antigravity', attempt, true, 'sync-failed', {
@@ -913,10 +931,12 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code !== 0 && typeof logger === 'function') logger(`antigravity sync exited ${code}: ${stderr.trim().slice(0, 200)}`);
+      const repair = code === 0 ? repairCache() : { patchedEntries: 0, patchedFiles: 0, skippedFiles: 0 };
       settle(code !== 0, 'sync-exit-error', {
         failureStage: code !== 0 ? 'process-exit' : null,
         detailCode: code !== 0 ? classifyClientSyncDetailCode({ client: 'antigravity', text: stderr }) : null,
-        exitCode: code
+        exitCode: code,
+        repair
       });
     });
     child.stdin?.end();

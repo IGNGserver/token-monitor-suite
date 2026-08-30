@@ -40,6 +40,7 @@ const NODE_RUNTIME_SOURCE_FILES = Object.freeze([
   'src/hub/static.js',
   'src/hub/usage-events.js',
   'src/shared/appVersion.js',
+  'src/shared/antigravityCacheRepair.js',
  'src/shared/claudeDesktopUsage.js',
   'src/shared/deepseekHarnessUsage.js',
  'src/shared/clientTracking.js',

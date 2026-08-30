@@ -962,6 +962,93 @@ test('mergeDeviceRecord clears prior history when incoming history is explicitly
   assert.deepEqual(merged.history, { daily: [], monthly: [], summary: {} });
 });
 
+test('mergeDeviceRecord reapplies a stored device transfer without reviving an expired day', () => {
+  const existing = normalizeDeviceRecord({
+    deviceId: 'ubuntu-dev',
+    updatedAt: '2026-08-30T12:00:00.000Z',
+    receivedAt: '2026-08-30T12:00:00.000Z',
+    today: { totalTokens: 7, clients: { codex: 7 } },
+    month: { totalTokens: 570, clients: { codex: 70, claude: 500 } },
+    allTime: { totalTokens: 1010, clients: { codex: 10, claude: 1000 } },
+    history: { daily: [{ date: '2026-08-14', tokens: 40 }], monthly: [{ month: '2026-08', tokens: 540 }], summary: {} },
+    transferredUsage: {
+      sourceDeviceId: '开发机',
+      updatedAt: '2026-08-14T20:44:40.923Z',
+      periodWindows: {
+        today: { key: '2026-08-14', endsAt: '2026-08-15T00:00:00.000Z' },
+        month: { key: '2026-08', endsAt: '2026-09-01T00:00:00.000Z' }
+      },
+      today: { totalTokens: 50, clients: { claude: 50 } },
+      month: { totalTokens: 500, clients: { claude: 500 } },
+      allTime: { totalTokens: 1000, clients: { claude: 1000 } },
+      history: { daily: [{ date: '2026-08-14', tokens: 40 }], monthly: [{ month: '2026-08', tokens: 540 }], summary: {} }
+    }
+  });
+  const incoming = {
+    deviceId: 'ubuntu-dev',
+    updatedAt: '2026-08-30T12:05:00.000Z',
+    receivedAt: '2026-08-30T12:05:00.000Z',
+    trackedClients: ['codex'],
+    today: { totalTokens: 10, clients: { codex: 10 } },
+    month: { totalTokens: 100, clients: { codex: 100 } },
+    allTime: { totalTokens: 110, clients: { codex: 110 } },
+    history: { daily: [{ date: '2026-08-30', tokens: 10 }], monthly: [{ month: '2026-08', tokens: 10 }], summary: {} }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.periods.today.totalTokens, 10);
+  assert.equal(merged.periods.month.totalTokens, 600);
+  assert.equal(merged.periods.allTime.totalTokens, 1110);
+  assert.equal(merged.transferredUsage.sourceDeviceId, '开发机');
+  assert.equal(merged.history.daily.find((row) => row.date === '2026-08-14').tokens, 40);
+  assert.equal(merged.history.daily.find((row) => row.date === '2026-08-30').tokens, 10);
+
+  const next = mergeDeviceRecord(merged, {
+    deviceId: 'ubuntu-dev',
+    updatedAt: '2026-08-30T12:10:00.000Z',
+    receivedAt: '2026-08-30T12:10:00.000Z',
+    trackedClients: ['codex'],
+    today: { totalTokens: 15, clients: { codex: 15 } },
+    month: { totalTokens: 115, clients: { codex: 115 } },
+    allTime: { totalTokens: 125, clients: { codex: 125 } },
+    history: { daily: [{ date: '2026-08-30', tokens: 15 }], monthly: [{ month: '2026-08', tokens: 15 }], summary: {} }
+  });
+  assert.equal(next.periods.month.totalTokens, 615);
+  assert.equal(next.periods.allTime.totalTokens, 1125);
+  assert.equal(next.history.daily.filter((row) => row.date === '2026-08-14').length, 1);
+  assert.equal(next.history.daily.find((row) => row.date === '2026-08-14').tokens, 40);
+});
+
+test('mergeDeviceRecord carries a transfer through limits-only updates without adding it twice', () => {
+  const existing = normalizeDeviceRecord({
+    deviceId: 'ubuntu-dev',
+    month: { totalTokens: 150, clients: { claude: 100, codex: 50 } },
+    allTime: { totalTokens: 150, clients: { claude: 100, codex: 50 } },
+    transferredUsage: {
+      sourceDeviceId: '开发机',
+      month: { totalTokens: 100, clients: { claude: 100 } },
+      allTime: { totalTokens: 100, clients: { claude: 100 } }
+    }
+  });
+  const merged = mergeDeviceRecord(existing, {
+    deviceId: 'ubuntu-dev',
+    limitsOnly: true,
+    limits: { providers: [] }
+  });
+  assert.equal(merged.periods.month.totalTokens, 150);
+  assert.equal(merged.periods.allTime.totalTokens, 150);
+  assert.equal(merged.transferredUsage.sourceDeviceId, '开发机');
+});
+
+test('mergeDeviceRecord does not accept a transfer marker from a first external ingest', () => {
+  const merged = mergeDeviceRecord(null, {
+    deviceId: 'ubuntu-dev',
+    allTime: { totalTokens: 1 },
+    transferredUsage: { sourceDeviceId: 'forged', allTime: { totalTokens: 999 } }
+  });
+  assert.equal(Object.hasOwn(merged, 'transferredUsage'), false);
+});
+
 test('aggregateHistory retains stored history from stale devices', () => {
   const fresh = {
     deviceId: 'm1', receivedAt: '2026-06-07T11:59:00.000Z',

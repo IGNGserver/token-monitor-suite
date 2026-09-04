@@ -517,7 +517,10 @@ test('postSyncPayload aborts a fetch that never settles', async () => {
   await assert.rejects(
     postSyncPayload(async (_url, options) => {
       signal = options.signal;
-      return new Promise(() => {});
+      return new Promise((_, reject) => {
+        if (signal?.aborted) return reject(new Error('aborted'));
+        signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
     }, 'http://hub/api/ingest', {
       timeoutMs: 10,
       summary: { deviceId: 'dev-a', allTime: { totalTokens: 1 } }
@@ -535,7 +538,12 @@ test('postSyncPayload deadline includes a response body that never settles', asy
       return {
         status: 200,
         ok: true,
-        async arrayBuffer() { return new Promise(() => {}); }
+        async arrayBuffer() {
+          return new Promise((_, reject) => {
+            if (signal?.aborted) return reject(new Error('aborted'));
+            signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+          });
+        }
       };
     }, 'http://hub/api/ingest', {
       timeoutMs: 10,

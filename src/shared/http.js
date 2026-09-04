@@ -43,7 +43,6 @@ async function fetchWithTimeout(fetchFn, url, options = {}, timeoutMs = DEFAULT_
       try { controller.abort(deadlineError); } catch (_) { controller.abort(); }
       reject(deadlineError);
     }, deadline);
-    timeout.unref?.();
   });
   const requestPromise = Promise.resolve().then(async () => {
     const response = await fetchFn(url, { ...options, signal: controller.signal });

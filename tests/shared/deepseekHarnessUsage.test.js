@@ -201,9 +201,10 @@ test('custom ranges include DeepSeek Harness assistant messages', async () => {
   const home = makeRoot('deepseek-harness-range-');
   try {
     const fixture = sessionFixture('range-session');
-    const rangeHeader = { ...fixture.header, createdAt: Date.parse('2026-08-20T00:00:00.000Z') };
-    const rangeFirst = { ...fixture.first, time: Date.parse('2026-08-20T00:01:00.000Z') };
-    writeRawSession(path.join(home, '.dsh', 'sessions'), fixture.header.id, [rangeHeader, rangeFirst, fixture.second]);
+    const rangeHeader = { ...fixture.header, createdAt: new Date(2026, 7, 20, 8, 0, 0, 0).getTime() };
+    const rangeFirst = { ...fixture.first, time: new Date(2026, 7, 20, 8, 1, 0, 0).getTime() };
+    const rangeSecond = { ...fixture.second, time: new Date(2026, 7, 20, 9, 2, 0, 0).getTime() };
+    writeRawSession(path.join(home, '.dsh', 'sessions'), fixture.header.id, [rangeHeader, rangeFirst, rangeSecond]);
     const result = await collectCustomRangeOnce({
       clients: 'deepseek-harness',
       homeDir: home,

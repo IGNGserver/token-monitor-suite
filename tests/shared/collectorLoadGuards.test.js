@@ -1333,6 +1333,8 @@ test('watchPathsForClients watches only Proma data that is currently parsed', ()
 });
 
 test('clientDataDirPresence still detects cursor/antigravity via their cache dirs', () => {
+  const previousXdg = process.env.XDG_CONFIG_HOME;
+  delete process.env.XDG_CONFIG_HOME;
   const tmp = withTmpHome([
     path.join('.config', 'tokscale', 'cursor-cache'),
     path.join('.config', 'tokscale', 'antigravity-cache')
@@ -1345,6 +1347,8 @@ test('clientDataDirPresence still detects cursor/antigravity via their cache dir
     assert.equal(presence.cursor, true);
     assert.equal(presence.antigravity, true);
   } finally {
+    if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = previousXdg;
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });

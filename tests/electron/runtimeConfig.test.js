@@ -93,3 +93,12 @@ test('OpenRouter profile changes invalidate only the OpenRouter limits lane', ()
   );
   assert.deepEqual(classification.limitScopes, [{ provider: 'openrouter' }]);
 });
+
+test('allowInsecureHubHttp change triggers mode structural restart', () => {
+  const classification = classifySettingsChange(
+    { allowInsecureHubHttp: false },
+    { allowInsecureHubHttp: true }
+  );
+  assert.equal(classification.modeStructural, true);
+});
+

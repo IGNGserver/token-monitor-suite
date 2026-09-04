@@ -6,6 +6,7 @@ const { normalizeLimitsRefreshMs, parseLimitProviders } = require('../shared/lim
 const MODE_STRUCTURAL_KEYS = Object.freeze([
   'hubMode',
   'hubUrl',
+  'allowInsecureHubHttp',
   'secret',
   'hubHostPort',
   'hubHostSecret',

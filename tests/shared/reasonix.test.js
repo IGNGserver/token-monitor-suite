@@ -17,7 +17,6 @@ const {
   clientSourceChecks,
   clientSourceRoots,
   clientWatchCandidates,
-  deriveClientHealth,
   watchPathsForClients
 } = require('../../src/shared/collector');
 const {
@@ -278,7 +277,7 @@ test('Reasonix synthetic stats sessions never enter periods or sync payloads', (
   assert.equal(Object.hasOwn(payload.allTime, 'sessions'), false);
 });
 
-test('Reasonix stats path is shared by watcher and client health', () => {
+test('Reasonix stats path is shared by watcher and local status detection', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-home-'));
   const previousStateHome = process.env.REASONIX_STATE_HOME;
   const previousReasonixHome = process.env.REASONIX_HOME;
@@ -296,9 +295,6 @@ test('Reasonix stats path is shared by watcher and client health', () => {
     assert.deepEqual(watchPathsForClients('reasonix'), [statsDir]);
     const checks = clientSourceChecks('reasonix');
     assert.deepEqual(checks.reasonix, [{ id: REASONIX_SOURCE_CHECK_ID, exists: true }]);
-    const health = deriveClientHealth('reasonix', { clients: {} }, { sourceChecks: checks });
-    assert.equal(health.clients.reasonix.source.state, 'detected');
-    assert.equal(health.clients.reasonix.overall, 'waiting');
   } finally {
     os.homedir = originalHomedir;
     if (previousStateHome === undefined) delete process.env.REASONIX_STATE_HOME;

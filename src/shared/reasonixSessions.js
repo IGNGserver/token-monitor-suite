@@ -339,7 +339,7 @@ function readReasonixNativeSession(metaPath, telemetryPath, options = {}) {
     ? projectIdentityFor(workspaceRoot, options.projectIdentity)
     : {};
   const rawModel = textValue(firstValue(meta, ['model']), 256);
-  const model = normalizeModelNameForClient(rawModel, REASONIX_CLIENT) || rawModel;
+  const model = normalizeModelNameForClient(rawModel, REASONIX_CLIENT);
   const totalTokens = usage ? Math.max(0, Math.round(firstNumber(usage, ['totalTokens', 'total_tokens']))) : 0;
   const reportedCost = reportedCostUsd(usage);
   const createdAt = firstTimestamp(meta, ['created_at', 'createdAt']);

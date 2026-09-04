@@ -1,10 +1,13 @@
 'use strict';
 
 (function exposeSessionRows(root, factory) {
-  const api = factory();
+  const reasonixGuard = typeof module === 'object' && module.exports
+    ? require('../../shared/reasonixSessionGuard')
+    : root?.TokenMonitorReasonixSessionGuard;
+  const api = factory(reasonixGuard);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorSessionRows = api;
-})(typeof window !== 'undefined' ? window : null, function createSessionRowsApi() {
+})(typeof window !== 'undefined' ? window : null, function createSessionRowsApi(reasonixGuard) {
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
 
   function finiteNumber(value) {
@@ -49,6 +52,11 @@
   function sessionIdLabel(id) {
     const raw = String(id || '').trim();
     if (!raw) return '';
+    // Never render a legacy Reasonix aggregate stats path. Native Reasonix rows
+    // use the stable `reasonix:<branch-id>` namespace and may expose only the
+    // branch id after the prefix.
+    if (raw.toLowerCase().includes('reasonix-stats:')) return '';
+    if (raw.toLowerCase().startsWith('reasonix:')) return raw.slice('reasonix:'.length);
     const rollout = raw.match(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}[:-]\d{2}-(.+)$/);
     if (rollout) return rollout[1];
     if (/^\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}/.test(raw)) return '';
@@ -60,7 +68,7 @@
       .filter(([, value]) => finiteNumber(value) > 0)
       .map(([model]) => model)
       .sort();
-    if (models.length === 0) return '';
+    if (models.length === 0) return String(session?.model || '').trim();
     if (models.length === 1) return models[0];
     return `${models.length} models`;
   }
@@ -87,7 +95,20 @@
     const palette = options.fallbackColors || fallbackColors;
     const archivedLabel = options.archivedLabel || 'Archived';
     const now = options.now || new Date();
-    const rows = Object.entries(period?.sessions || {})
+    const genericSessions = reasonixGuard?.filterReasonixSyntheticSessions
+      ? reasonixGuard.filterReasonixSyntheticSessions(period?.sessions || {})
+      : (period?.sessions || {});
+    const sessions = Object.create(null);
+    for (const [key, session] of Object.entries(genericSessions || {})) {
+      Object.defineProperty(sessions, key, { value: session, enumerable: true, configurable: true, writable: true });
+    }
+    // Native rows are the only accepted Reasonix session source. They live
+    // outside period.sessions so they cannot affect Hub totals or archives.
+    for (const [key, session] of Object.entries(options.nativeSessions || {})) {
+      if (session?.native !== true || String(session?.client || '').toLowerCase() !== 'reasonix') continue;
+      Object.defineProperty(sessions, key, { value: session, enumerable: true, configurable: true, writable: true });
+    }
+    const rows = Object.entries(sessions)
       .map(([key, session]) => {
         const value = finiteNumber(session?.totalTokens);
         if (value <= 0) return null;
@@ -109,13 +130,14 @@
           subtitle: subtitleParts.join(' · '),
           detail: sessionIdLabel(sessionId),
           value,
-          cost: finiteNumber(session?.costUsd),
+          cost: finiteNumber(session?.costUsd ?? session?.reportedCostUsd),
           color: colors[client] || (modelLabel && colorForModel ? colorForModel(modelLabel) : stable(key, palette)),
           stale: false,
           archived: archived || undefined,
           client,
           sortTime: sessionTimestampValue(session),
-          title: `${clientLabel} session ${sessionId}`
+          title: `${clientLabel} session ${sessionId}`,
+          ...(session?.native === true ? { sessionDetailAvailable: session?.sessionDetailAvailable === true } : {})
         };
       })
       .filter(Boolean);

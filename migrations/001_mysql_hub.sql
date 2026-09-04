@@ -1,4 +1,4 @@
-CREATE TABLE devices (
+CREATE TABLE IF NOT EXISTS devices (
   device_id VARCHAR(191) NOT NULL,
   hostname VARCHAR(255) NOT NULL DEFAULT '',
   platform VARCHAR(255) NOT NULL DEFAULT '',
@@ -19,7 +19,7 @@ CREATE TABLE devices (
   PRIMARY KEY (device_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE device_ingest_state (
+CREATE TABLE IF NOT EXISTS device_ingest_state (
   device_id VARCHAR(191) NOT NULL,
   snapshot_json JSON NOT NULL,
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
@@ -27,7 +27,7 @@ CREATE TABLE device_ingest_state (
   CONSTRAINT fk_device_ingest_state_device FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE model_pricing (
+CREATE TABLE IF NOT EXISTS model_pricing (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   model VARCHAR(255) NOT NULL,
   input_price_per_million DECIMAL(20,8) NOT NULL DEFAULT 0,
@@ -40,7 +40,7 @@ CREATE TABLE model_pricing (
   UNIQUE KEY uq_model_pricing_model (model)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE usage_events (
+CREATE TABLE IF NOT EXISTS usage_events (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   device_id VARCHAR(191) NULL,
   client VARCHAR(100) NOT NULL,
@@ -71,7 +71,7 @@ CREATE TABLE usage_events (
   CONSTRAINT fk_usage_events_device FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE sessions (
+CREATE TABLE IF NOT EXISTS sessions (
   device_id VARCHAR(191) NOT NULL,
   client VARCHAR(100) NOT NULL,
   session_id VARCHAR(255) NOT NULL,

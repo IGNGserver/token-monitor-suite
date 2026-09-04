@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   },
   getHubInfo: () => ipcRenderer.invoke('hub:getInfo'),
   regenerateHubSecret: () => ipcRenderer.invoke('hub:regenerateSecret'),
+  provisionHubDeviceCredential: (deviceId) => ipcRenderer.invoke('hub:provisionDeviceCredential', deviceId),
+  revokeHubDeviceCredential: (deviceId) => ipcRenderer.invoke('hub:revokeDeviceCredential', deviceId),
+  revealHubAdminCredential: () => ipcRenderer.invoke('hub:revealAdminCredential'),
   onHubPush: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
     ipcRenderer.on('hub:push', listener);

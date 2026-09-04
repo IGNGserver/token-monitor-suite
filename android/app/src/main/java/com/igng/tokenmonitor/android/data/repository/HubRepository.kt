@@ -5,6 +5,7 @@ import com.igng.tokenmonitor.android.data.local.ConnectionStorage
 import com.igng.tokenmonitor.android.data.model.BatchPricingResponseDto
 import com.igng.tokenmonitor.android.data.model.DevicesResponseDto
 import com.igng.tokenmonitor.android.data.model.HealthDto
+import com.igng.tokenmonitor.android.data.model.HubAuthorizationDto
 import com.igng.tokenmonitor.android.data.model.HistoryDto
 import com.igng.tokenmonitor.android.data.model.PricingListDto
 import com.igng.tokenmonitor.android.data.model.PricingRequestDto
@@ -45,7 +46,24 @@ class HubRepository @Inject constructor(
   fun saveConnection(config: ConnectionConfig) = store.save(config)
   fun clearConnection() = store.clear()
 
-  suspend fun testConnection(config: ConnectionConfig): HubResult<HealthDto> = safeCall { apiFactory.create(config).health() }
+  suspend fun testConnection(config: ConnectionConfig): HubResult<HealthDto> = safeCall {
+    val api = apiFactory.create(config)
+    val health = api.health()
+    require(health.ok && health.role.equals("hub", ignoreCase = true)) {
+      "地址没有返回可用的 Token Monitor Hub。"
+    }
+    // /api/health is intentionally public on the Hub, so a health-only check
+    // cannot prove that the saved secret can access the protected API.
+    api.stats()
+    val authorization = api.capabilities()
+    health.copy(
+      apiVersion = authorization.apiVersion ?: health.apiVersion,
+      capabilities = authorization.capabilities,
+      authenticatedRole = authorization.role,
+      grantedScopes = authorization.scopes
+    )
+  }
+  suspend fun capabilities(): HubResult<HubAuthorizationDto> = withConnection { apiFactory.create(it).capabilities() }
   suspend fun stats(): HubResult<StatsDto> = withConnection { apiFactory.create(it).stats() }
   suspend fun history(): HubResult<HistoryDto> = withConnection { apiFactory.create(it).history() }
   suspend fun devices(): HubResult<DevicesResponseDto> = withConnection { apiFactory.create(it).devices() }
@@ -102,4 +120,3 @@ class HubRepository @Inject constructor(
     HubResult.Failure(HubError(error.message ?: "Hub 地址无效。", HubError.Kind.Api))
   }
 }
-

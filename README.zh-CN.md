@@ -26,7 +26,7 @@
 
 ## Token Monitor 是什么？
 
-一款桌面小部件，实时显示 Claude Code、Codex、Cursor、GitHub Copilot 等 30+ 种 AI 编程工具的 Token 用量与 AI 工具额度，具备实时多设备同步与历史使用趋势功能，并支持按工具、设备、模型、session 或项目分项显示。
+一款桌面小部件，实时显示 Claude Code、Codex、Cursor、GitHub Copilot 等 31+ 种 AI 编程工具的 Token 用量与 AI 工具额度，具备实时多设备同步与历史使用趋势功能，并支持按工具、设备、模型、session 或项目分项显示。
 
 ## 支持的工具
 
@@ -56,6 +56,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` 与 IDE / VS Code 扩展日志 | ✅ | — | — |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/`（默认 `~/.dsh/sessions/`；`session.jsonl.zstd`） | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（仅限中国版）；Qoder dashboard cookie（通过 Qoder usage API 查询 big-model credits） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek | DeepSeek API 密钥（通过 DeepSeek API 查询余额） | — | ✅ | — |
@@ -113,7 +114,7 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 
 ### 用量追踪
 
-- **实时 Token 追踪**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 24+ 种 AI 工具，每轮对话后 UI 在数秒内刷新（完整列表见上方表格）
+- **实时 Token 追踪**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 25+ 种 AI 工具，每轮对话后 UI 在数秒内刷新（完整列表见上方表格）
 - **单个 session 明细**：点进 Claude Code、Codex 或 OpenCode 的 session，可看每条提问的 Token 消耗，并展开查看每次回复的 Token 拆分与用到的工具（打开时才实时读取本机 transcript 或数据库，绝不同步）
 - **缓存命中统计**：点击任何工具或模型，展开查看输入 Token（缓存命中与未命中）、输出 Token 的详细分类及命中率百分比
 - **成本与币别**：Token 数量旁附带成本；可用 USD、TWD、HKD 或 CNY 显示，汇率每日自动更新，也可在设置中手动覆写
@@ -168,9 +169,11 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 
 挑一个所有设备（与任何无头代理）都能连上的 hub 后端。在每台设备上打开小部件，在 设置 → 多设备同步 选一个模式。小部件会自动上报本机用量；只在没有小部件的机器上跑 `npm run agent`。
 
+Hub 凭据已分权：viewer 令牌只读，设备令牌可读取并仅上报绑定的 Device ID，admin 令牌才能执行变更。远程连接默认必须使用 HTTPS；桌面端/agent 需显式开启可信 LAN HTTP，Android 发行版始终要求 HTTPS。
+
 #### 方案 A——直接在小部件内开 hub（最简单，无需命令行）
 
-在一台长期开机的机器上打开小部件，进入 设置 → 多设备同步，选 **在这台设备托管 Hub**。小部件会生成随机 secret，并列出其他设备可以连入的局域网 URL（Tailscale 或 ZeroTier 地址也会显示在这里）。在其他每台设备上选 **连接到 Hub**，把 URL 与 secret 贴进去即可。
+在一台长期开机的机器上选 **在这台设备托管 Hub**。为每个远端 Device ID 生成绑定设备令牌，并粘贴到对应客户端。主机还提供只读 viewer 令牌，以及只在用户主动点击时显示的 Web 管理员令牌。
 
 只要 Token Monitor 还在跑，hub 就会运行——退出 App（仅关闭窗口不算）会停掉 hub，所有连入的设备都会断开。
 
@@ -179,7 +182,7 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 ```bash
 # 在长期开机的机器上
 cp .env.example .env
-# 把 TOKEN_MONITOR_SECRET 设为你私有的值，然后:
+# 在 .env 配置 ADMIN/VIEWER/INGEST 凭据与 TLS，然后：
 npm run hub
 ```
 
@@ -187,17 +190,21 @@ npm run hub
 
 [![部署到 Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IGNGserver/token-monitor-suite/tree/main/worker)
 
-一键部署——Cloudflare 会在过程中提示你输入 `TOKEN_MONITOR_SECRET`。或手动部署:
+一键或手动部署后，配置三类分权 Worker 凭据：
 
 ```bash
 cd worker
 npm install
 npx wrangler login
-npx wrangler secret put TOKEN_MONITOR_SECRET
+npx wrangler secret put TOKEN_MONITOR_ADMIN_SECRET
+npx wrangler secret put TOKEN_MONITOR_VIEWER_SECRET
+npx wrangler secret put TOKEN_MONITOR_INGEST_CREDENTIALS
 npx wrangler deploy
 ```
 
 把部署 URL 贴到每台设备的小部件 设置 → 多设备同步。iOS 小部件配方与端点参考见 [worker/README.md](worker/README.md)，hub HTTP API 见 [docs/API.md](docs/API.md)。
+
+Worker 覆盖 ingest、统计、历史和 SSE，并发布版本化 Hub capabilities，明确标记不支持自定义区间和定价。桌面端、Web 和 Android 会据此隐藏或禁用相关功能。
 
 ## App 数据
 

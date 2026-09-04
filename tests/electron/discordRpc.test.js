@@ -98,6 +98,24 @@ test('Discord Rich Presence uses labels and asset keys for Pi, Zed, and Kilo Cod
   }
 });
 
+test('Discord Rich Presence labels newly wired Command Code and Reasonix assets', () => {
+  const buildPayload = loadBuildPayload();
+  for (const [client, label] of [['commandcode', 'Command Code'], ['reasonix', 'Reasonix'], ['deepseek-harness', 'DeepSeek Harness']]) {
+    const payload = buildPayload({
+      periods: {
+        today: {
+          totalTokens: 12_345,
+          costUsd: 0.125,
+          clients: { [client]: 12_345 }
+        }
+      }
+    });
+    assert.equal(payload.details, `${label} · 12.3K tokens`);
+    assert.equal(payload.smallImageKey, client);
+    assert.equal(payload.smallImageText, label);
+  }
+});
+
 test('Discord Rich Presence formats today cost with selected currency', () => {
   const buildPayload = loadBuildPayload();
   const payload = buildPayload({

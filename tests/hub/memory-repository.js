@@ -32,6 +32,7 @@ function addTokenCost(mapTokens, mapCosts, key, tokens, cost) {
 class MemoryRepository {
   constructor() {
     this.devices = new Map();
+    this.hiddenDevices = new Set();
     this.events = [];
     this.pricing = new Map();
     this.sessions = new Map();
@@ -39,13 +40,20 @@ class MemoryRepository {
 
   async transaction(work) { return work(this); }
 
-  async listDeviceRecords() { return [...this.devices.values()].map(clone); }
+  async listDeviceRecords() {
+    return [...this.devices.entries()]
+      .filter(([deviceId]) => !this.hiddenDevices.has(deviceId))
+      .map(([, record]) => clone(record));
+  }
 
   async getDeviceRecord(deviceId) { return clone(this.devices.get(deviceId) || null); }
 
-  async saveDevice(record) { this.devices.set(record.deviceId, clone(record)); }
+  async saveDevice(record) {
+    this.devices.set(record.deviceId, clone(record));
+    this.hiddenDevices.delete(record.deviceId);
+  }
 
-  async countDevices() { return this.devices.size; }
+  async countDevices() { return this.devices.size - this.hiddenDevices.size; }
 
   async getPricing(models) {
     return new Map(models.filter(Boolean).map((model) => [model, clone(this.pricing.get(model))]).filter(([, item]) => item));
@@ -75,10 +83,31 @@ class MemoryRepository {
   }
 
   async deleteDevice(deviceId) {
-    const deleted = this.devices.delete(deviceId);
-    for (const event of this.events) if (event.deviceId === deviceId) event.deviceId = null;
+    const deleted = this.devices.has(deviceId) && !this.hiddenDevices.has(deviceId);
+    if (deleted) this.hiddenDevices.add(deviceId);
     for (const key of [...this.sessions.keys()]) if (key.startsWith(`${deviceId}\u0000`)) this.sessions.delete(key);
     return deleted;
+  }
+
+  async renameDevice(previousDeviceId, nextDeviceId) {
+    if (previousDeviceId === nextDeviceId && this.devices.has(previousDeviceId)) {
+      return { renamed: true, deviceId: nextDeviceId, unchanged: true };
+    }
+    if (!this.devices.has(previousDeviceId)) return { renamed: false, reason: 'not_found' };
+    if (this.devices.has(nextDeviceId)) return { renamed: false, reason: 'target_exists' };
+    const record = this.devices.get(previousDeviceId);
+    this.devices.set(nextDeviceId, { ...clone(record), deviceId: nextDeviceId });
+    this.devices.delete(previousDeviceId);
+    if (this.hiddenDevices.delete(previousDeviceId)) this.hiddenDevices.add(nextDeviceId);
+    for (const event of this.events) if (event.deviceId === previousDeviceId) event.deviceId = nextDeviceId;
+    const moved = [];
+    for (const [key, value] of this.sessions) {
+      if (!key.startsWith(`${previousDeviceId}\u0000`)) continue;
+      moved.push([`${nextDeviceId}${key.slice(previousDeviceId.length)}`, value]);
+      this.sessions.delete(key);
+    }
+    for (const [key, value] of moved) this.sessions.set(key, value);
+    return { renamed: true, deviceId: nextDeviceId, previousDeviceId };
   }
 
   async listKnownModels() {

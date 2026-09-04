@@ -1,6 +1,6 @@
 'use strict';
 
-const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', 'claude-desktop': 'Claude Desktop' };
+const clientLabels = { claude: 'Claude Code', codex: 'Codex', hermes: 'Hermes', gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw', antigravity: 'Antigravity', cline: 'Cline', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot', pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', commandcode: 'Command Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', 'deepseek-harness': 'DeepSeek Harness', 'claude-desktop': 'Claude Desktop' };
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
@@ -11,7 +11,7 @@ const wslStatusPresentationApi = window.TokenMonitorWslStatusPresentation;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const systemDarkThemeMedia = window.matchMedia?.('(prefers-color-scheme: dark)');
 const clientsWithIcon = new Set([
-  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'claude-desktop',
+  'claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'hermes', 'antigravity', 'cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'commandcode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'deepseek-harness', 'claude-desktop',
   'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'qwen', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'ollama'
 ]);
 
@@ -63,11 +63,15 @@ const KNOWN_CLIENTS = [
   { id: 'zed', label: 'Zed' },
   { id: 'kilocode', label: 'Kilo Code' },
   { id: 'micode', label: 'MiMo Code' },
+  { id: 'commandcode', label: 'Command Code' },
   { id: 'zcode', label: 'ZCode' },
   { id: 'kiro', label: 'Kiro' },
   { id: 'codebuddy', label: 'CodeBuddy' },
   { id: 'workbuddy', label: 'WorkBuddy' },
   { id: 'proma', label: 'Proma' },
+  { id: 'qodercn', label: 'Qoder CN' },
+  { id: 'reasonix', label: 'Reasonix' },
+  { id: 'deepseek-harness', label: 'DeepSeek Harness' },
   { id: 'claude-desktop', label: 'Claude Desktop' }
 ];
 const LIMIT_PROVIDERS = [
@@ -285,7 +289,14 @@ Object.assign(els, {
   hubSecretInput: document.getElementById('hubSecretInput'),
   hubSecretCopyButton: document.getElementById('hubSecretCopyButton'),
   hubSecretRegenButton: document.getElementById('hubSecretRegenButton'),
+  hubAdminSecretCopyButton: document.getElementById('hubAdminSecretCopyButton'),
+  hubDeviceCredentialId: document.getElementById('hubDeviceCredentialId'),
+  hubDeviceCredentialCreate: document.getElementById('hubDeviceCredentialCreate'),
+  hubDeviceCredentialResult: document.getElementById('hubDeviceCredentialResult'),
+  hubDeviceCredentialToken: document.getElementById('hubDeviceCredentialToken'),
+  hubDeviceCredentialCopy: document.getElementById('hubDeviceCredentialCopy'),
   secretPasteButton: document.getElementById('secretPasteButton'),
+  allowInsecureHubHttpInput: document.getElementById('allowInsecureHubHttpInput'),
   hubStatusRow: document.getElementById('hubStatusRow'),
   syncClientStatus: document.getElementById('syncClientStatus'),
   hubAddressList: document.getElementById('hubAddressList'),
@@ -787,6 +798,7 @@ function versionText(value) {
 }
 function appUpdateActionMode(s) {
   if (!s) return '';
+  if (s.installRetryBlocked) return s.latest?.htmlUrl ? 'release' : '';
   if (s.downloaded) return 'install';
   if (!s.hasUpdate) return '';
   if (s.installSupported) return 'download';
@@ -1841,6 +1853,7 @@ function modelRowsForPeriod(period) {
 
 function sessionRowsForPeriod(period) {
   const rows = sessionRowsApi.sessionRowsForPeriod(period, {
+    nativeSessions: state.stats?.nativeSessions?.[state.period],
     clientLabels,
     clientColors,
     modelColor,
@@ -1855,6 +1868,7 @@ function sessionRowsForPeriod(period) {
 
 function projectRowsForPeriod(period) {
   return projectRowsApi.projectRowsForPeriod(period, {
+    nativeProjects: state.stats?.nativeProjects?.[state.period],
     clientLabels,
     clientColors,
     stableColor,
@@ -4592,6 +4606,8 @@ function renderHome() {
 
 function render() {
   if (!state.stats) return;
+  reconcileCustomRangeCapability();
+  syncPeriodTabs();
   renderSessionUsageArchiveStatus();
   ensureBreakdownVisible();
   renderViewSwitcher();
@@ -4988,6 +5004,7 @@ function syncCustomRangeFields() {
 }
 
 function setCustomRangeOpen(open) {
+  if (open && !customRangeSupported()) return;
   state.customRangeOpen = Boolean(open);
   els.shell?.classList.toggle('custom-range-open', state.customRangeOpen);
   if (els.customRangePopover) {
@@ -5008,10 +5025,40 @@ function setCustomRangeOpen(open) {
   }
 }
 
+function customRangeSupported() {
+  // Older Node Hubs did not publish capabilities, so absence remains
+  // backwards-compatible. An explicit false must not silently fall back to a
+  // local-only range while the rest of the dashboard is showing many devices.
+  return state.stats?.capabilities?.usageRange !== false;
+}
+
+function reconcileCustomRangeCapability() {
+  if (customRangeSupported()) return;
+  if (state.customRangeOpen) setCustomRangeOpen(false);
+  state.customRange = null;
+  state.customRangeError = '';
+  if (state.stats?.periods?.custom) {
+    const periods = { ...state.stats.periods };
+    delete periods.custom;
+    state.stats = { ...state.stats, periods };
+  }
+  if (state.period === 'custom') {
+    state.period = 'today';
+    publishViewState();
+  }
+}
+
 function syncCustomRangeButton() {
+  const supported = customRangeSupported();
   const active = state.period === 'custom' && Boolean(state.customRange);
   els.customRangeButton?.classList.toggle('active', active);
   if (!els.customRangeButton) return;
+  els.customRangeButton.disabled = !supported;
+  if (!supported) {
+    els.customRangeButton.title = t('period.custom.unavailable');
+    els.customRangeButton.setAttribute('aria-label', t('period.custom.unavailable'));
+    return;
+  }
   if (active && state.customRange) {
     const label = customRangePickerApi.formatRangeLabel(state.customRange, { compact: true });
     els.customRangeButton.title = label || t('period.custom.button');
@@ -5033,7 +5080,7 @@ function readCustomRangeDraftFromFields() {
 }
 
 async function applyCustomRange(rangeInput) {
-  if (!window.tokenMonitor.getCustomRangeStats) {
+  if (!customRangeSupported() || !window.tokenMonitor.getCustomRangeStats) {
     setCustomRangeError(t('period.custom.unavailable'));
     return false;
   }
@@ -6011,6 +6058,7 @@ function syncHubModeUi() {
   }
   els.hubClientFields.classList.toggle('hidden', mode !== 'client');
   els.hubHostFields.classList.toggle('hidden', mode !== 'host');
+  if (els.allowInsecureHubHttpInput) els.allowInsecureHubHttpInput.checked = state.settings.allowInsecureHubHttp === true;
   if (mode === 'host') {
     els.hubPortInput.value = String(state.settings.hubHostPort || 17321);
     els.hubSecretInput.value = state.settings.hubHostSecret || '';
@@ -7802,14 +7850,23 @@ els.saveSettingsButton.addEventListener('click', async () => {
   const patch = {
     hubUrl: els.hubUrlInput.value.trim(),
     secret: els.secretInput.value,
+    allowInsecureHubHttp: Boolean(els.allowInsecureHubHttpInput?.checked),
     deviceId: els.deviceIdInput.value.trim()
   };
   if (state.settings.hubMode === 'host') {
     patch.hubHostPort = Number(els.hubPortInput.value) || 17321;
   }
-  await saveSettings(patch);
-  await refreshHubInfo();
-  await refreshStats();
+  try {
+    await saveSettings(patch);
+    await refreshHubInfo();
+    await refreshStats();
+  } catch (error) {
+    if (els.syncClientStatus) {
+      els.syncClientStatus.textContent = error?.message || String(error);
+      els.syncClientStatus.className = 'hub-status error';
+      els.syncClientStatus.classList.remove('hidden');
+    }
+  }
 });
 
 els.hubModeOptions.addEventListener('change', async (event) => {
@@ -7868,6 +7925,31 @@ els.hubSecretRegenButton?.addEventListener('click', async () => {
   state.settings = { ...state.settings, hubHostSecret: info.secret };
   els.hubSecretInput.value = info.secret;
   renderHubStatus();
+});
+els.hubAdminSecretCopyButton?.addEventListener('click', async () => {
+  if (!window.tokenMonitor.revealHubAdminCredential) return;
+  const result = await window.tokenMonitor.revealHubAdminCredential();
+  copyToClipboard(result.token, els.hubAdminSecretCopyButton);
+});
+els.hubDeviceCredentialCreate?.addEventListener('click', async () => {
+  const deviceId = String(els.hubDeviceCredentialId?.value || '').trim();
+  if (!deviceId || !window.tokenMonitor.provisionHubDeviceCredential) return;
+  els.hubDeviceCredentialCreate.disabled = true;
+  try {
+    const result = await window.tokenMonitor.provisionHubDeviceCredential(deviceId);
+    state.hubInfo = result.info;
+    els.hubDeviceCredentialToken.value = result.token;
+    els.hubDeviceCredentialResult.classList.remove('hidden');
+    renderHubStatus();
+  } catch (error) {
+    els.hubDeviceCredentialToken.value = error?.message || String(error);
+    els.hubDeviceCredentialResult.classList.remove('hidden');
+  } finally {
+    els.hubDeviceCredentialCreate.disabled = false;
+  }
+});
+els.hubDeviceCredentialCopy?.addEventListener('click', () => {
+  copyToClipboard(els.hubDeviceCredentialToken.value, els.hubDeviceCredentialCopy);
 });
 els.secretPasteButton?.addEventListener('click', async () => {
   try {

@@ -32,8 +32,8 @@ The `⇧` button in the title bar cycles the window behavior.
 The agent and hub have no UI. Configure them with a `.env` file in the project root (copy it from `.env.example`):
 
 ```env
-TOKEN_MONITOR_HUB_URL=               # required in sync mode — Worker URL or http://<lan-ip>:17321
-TOKEN_MONITOR_SECRET=                # shared secret; must match the hub
+TOKEN_MONITOR_HUB_URL=               # required in sync mode — HTTPS Worker/Hub URL
+TOKEN_MONITOR_SECRET=                # this device's token from TOKEN_MONITOR_INGEST_CREDENTIALS
 TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to the hostname
 TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # optional — 0/live, 600000/10min, 1200000/20min, 1800000/30min
 TOKEN_MONITOR_CLIENTS=               # optional — defaults to all supported tools; empty disables tracking
@@ -43,6 +43,11 @@ TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # optional — defaults on; 0 stops
 TOKEN_MONITOR_LIMITS_ENABLED=        # optional — defaults on; 0 skips CLI probing
 TOKEN_MONITOR_LIMIT_PROVIDERS=       # optional — defaults to all supported providers
 ```
+
+For a trusted LAN/VPN Hub that still uses `http://<lan-ip>:17321`, also set
+`TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1` on the connecting agent. Remote HTTP is
+rejected by default; prefer HTTPS whenever possible. The Hub's admin, viewer,
+legacy, and per-device tokens must all be generated independently.
 
 Provider credentials (Grok, DeepSeek, Minimax, Copilot, GLM / GLM Team, Volcengine, Qoder, Ollama, Kimi, …) and proxy settings live in the same file. **`.env.example` is the complete, authoritative list** — start from it rather than copying keys by hand, since it stays in sync with the code.
 

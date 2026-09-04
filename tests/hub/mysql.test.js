@@ -29,7 +29,7 @@ function payload(totalTokens, updatedAt = '2026-07-18T00:00:00.000Z') {
   };
 }
 
-test('MySQL ingest snapshots prices and retains events after deleting a device', { skip: !enabled && 'set MYSQL_TEST_PASSWORD and start docker-compose.test.yml' }, async () => {
+test('MySQL ingest snapshots prices and preserves baseline identity across delete and re-ingest', { skip: !enabled && 'set MYSQL_TEST_PASSWORD and start docker-compose.test.yml' }, async () => {
   const pool = createMySqlPool({
     host: process.env.MYSQL_TEST_HOST || '127.0.0.1',
     port: Number(process.env.MYSQL_TEST_PORT || 17322),
@@ -68,7 +68,13 @@ test('MySQL ingest snapshots prices and retains events after deleting a device',
     await hub.deleteDevice('mysql-device');
     const [remaining] = await pool.query('SELECT device_id FROM usage_events ORDER BY id');
     assert.equal(remaining.length, 2);
-    assert.ok(remaining.every((row) => row.device_id === null));
+    assert.ok(remaining.every((row) => row.device_id === 'mysql-device'));
+    assert.equal((await hub.getStats()).devices.length, 0);
+
+    await hub.ingest(payload(2_000_000, '2026-07-18T00:02:00.000Z'));
+    const [afterReingest] = await pool.query('SELECT device_id FROM usage_events ORDER BY id');
+    assert.equal(afterReingest.length, 2, 're-ingesting the same cumulative snapshot must not duplicate the ledger');
+    assert.equal((await hub.getStats()).devices.length, 1);
   } finally {
     await pool.end();
   }

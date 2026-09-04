@@ -150,7 +150,7 @@ fun TokenMonitorApp(
           DevicesScreen(hubState.devices, navController, isLoading = hubState.isLoading)
         }
         composable("more") {
-          MoreHubScreen(navController)
+          MoreHubScreen(navController, hubState)
         }
         composable("sessions") {
           SessionsScreen(hubState.stats, navController, onHome = navigateHome)
@@ -254,5 +254,4 @@ private fun AppNavigationBar(navController: NavHostController, currentRoute: Str
     }
   }
 }
-
 

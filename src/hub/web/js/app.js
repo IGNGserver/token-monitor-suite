@@ -129,6 +129,7 @@ const state = {
   secret: loadSecret(),
   locale: 'en',
   health: null,
+  authorization: null,
   stats: null,
   history: null,
   historyRequest: null,
@@ -327,12 +328,17 @@ function openRange(open) {
 }
 
 function renderChrome() {
-  els.primaryNav.innerHTML = VIEWS.map((view) => `
+  const capabilities = state.authorization?.capabilities || state.health?.capabilities || {};
+  const admin = state.authorization?.scopes?.includes('admin');
+  const visibleViews = VIEWS.filter((view) => view.id !== 'pricing' || (capabilities.pricing !== false && admin));
+  if (!visibleViews.some((view) => view.id === state.prefs.view)) state.prefs.view = 'home';
+  els.primaryNav.innerHTML = visibleViews.map((view) => `
     <button type="button" class="nav-btn ${state.prefs.view === view.id ? 'active' : ''}" data-view="${view.id}">
       <span class="nav-ico" aria-hidden="true">${view.icon}</span>
       <span class="nav-label">${tr(`nav.${view.id}`)}</span>
     </button>
   `).join('');
+  if (els.customRangeBtn) els.customRangeBtn.classList.toggle('hidden', capabilities.usageRange === false);
 
   els.periodTabs.innerHTML = [
     ...PERIODS.map((period) => `
@@ -720,7 +726,7 @@ function renderDevices() {
                   </td>
                   <td>
                     <div class="device-actions">
-                      <button type="button" class="danger-btn" data-delete-device="${escapeHtml(row.key)}">${tr('devices.delete')}</button>
+                      ${state.authorization?.scopes?.includes('admin') ? `<button type="button" class="ghost-btn" data-rename-device="${escapeHtml(row.key)}">${tr('devices.rename')}</button><button type="button" class="danger-btn" data-delete-device="${escapeHtml(row.key)}">${tr('devices.delete')}</button>` : '—'}
                     </div>
                   </td>
                 </tr>
@@ -977,7 +983,8 @@ function renderSubscriptions() {
     <label class="check-row"><input name="autoRenew" type="checkbox"${editing?.autoRenew !== false ? ' checked' : ''} /><span>${tr('subscriptions.autoRenew')}</span></label>
     <div class="drawer-actions"><button type="submit" class="primary-btn"${state.subscriptionsSaving ? ' disabled' : ''}>${state.subscriptionsSaving ? tr('actions.saving') : tr('actions.save')}</button></div>
   </form>`;
-  return `${renderCompletenessNotice(viewStats(), state.prefs.period)}${panel(tr('subscriptions.title'), `<div class="summary-grid subscription-summary">${summary}</div>${list}`)}${panel(tr('subscriptions.manage'), form)}`;
+  const management = state.authorization?.scopes?.includes('admin') ? panel(tr('subscriptions.manage'), form) : '';
+  return `${renderCompletenessNotice(viewStats(), state.prefs.period)}${panel(tr('subscriptions.title'), `<div class="summary-grid subscription-summary">${summary}</div>${list}`)}${management}`;
 }
 
 function renderPricing() {
@@ -1425,7 +1432,12 @@ async function bootstrapAuthorized() {
   state.error = null;
   render();
   await refreshStats();
-  await Promise.all([ensureHistory(), loadSubscriptions(), loadPricing()]);
+  const capabilities = state.authorization?.capabilities || state.health?.capabilities || {};
+  await Promise.all([
+    ensureHistory(),
+    capabilities.subscriptions === false ? null : loadSubscriptions(),
+    capabilities.pricing === false ? null : loadPricing()
+  ]);
   connectStream();
   render();
 }
@@ -1434,6 +1446,7 @@ async function tryConnect(secret, remember = true) {
   state.secret = String(secret || '').trim();
   try {
     await fetchJson('/api/stats', { secret: state.secret });
+    state.authorization = await fetchJson('/api/capabilities', { secret: state.secret });
     saveSecret(state.secret, remember);
     els.authError.classList.add('hidden');
     await bootstrapAuthorized();
@@ -1461,6 +1474,20 @@ async function deleteDevice(deviceId) {
     method: 'DELETE'
   });
   showToast(tr('toast.deleted'));
+  await refreshStats();
+}
+
+async function renameDevice(deviceId) {
+  if (!deviceId) return;
+  const nextDeviceId = String(window.prompt(tr('devices.renamePrompt'), deviceId) || '').trim();
+  if (!nextDeviceId || nextDeviceId === deviceId) return;
+  if (!window.confirm(tr('devices.renameCredentialWarning'))) return;
+  await fetchJson(`/api/devices/${encodeURIComponent(deviceId)}/rename`, {
+    secret: state.secret,
+    method: 'POST',
+    body: { deviceId: nextDeviceId }
+  });
+  showToast(tr('devices.renamed'));
   await refreshStats();
 }
 
@@ -1789,6 +1816,13 @@ function bindEvents() {
       void deleteDevice(del.getAttribute('data-delete-device')).catch((error) => {
         if (error.status === 401) showAuth(true);
         else showToast(error.message || tr('error.generic'));
+      });
+      return;
+    }
+    const rename = event.target.closest('[data-rename-device]');
+    if (rename) {
+      void renameDevice(rename.getAttribute('data-rename-device')).catch((error) => {
+        showToast(error.message || tr('error.generic'));
       });
       return;
     }

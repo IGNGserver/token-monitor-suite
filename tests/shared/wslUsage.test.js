@@ -39,6 +39,13 @@ test('homeHasData maps Proma agent sessions to proma', () => {
   assert.deepEqual(ids, ['proma']);
 });
 
+test('homeHasData maps DeepSeek Harness sessions to deepseek-harness', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const present = new Set([`${home}\\.dsh\\sessions`]);
+  const ids = homeHasData(home, (p) => present.has(p));
+  assert.deepEqual(ids, ['deepseek-harness']);
+});
+
 test('homeHasData maps VS Code Copilot workspace storage to copilot', () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const workspaceRoot = `${home}\\.config\\Code\\User\\workspaceStorage`;

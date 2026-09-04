@@ -3,6 +3,16 @@
 // Portable (Node-free) usage-history core. Mirrors usage.js conventions so the
 // Cloudflare Worker can import it. Pure functions only — no I/O.
 const { REASONIX_CLIENT } = require('./reasonixPaths');
+const RESERVED_DYNAMIC_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+function safeDynamicKey(value, fallback = '') {
+  const key = String(value ?? '').trim();
+  return key && !RESERVED_DYNAMIC_KEYS.has(key.toLowerCase()) ? key : fallback;
+}
+
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
 
 function num(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -58,12 +68,14 @@ function applyComponentSummary(summary, totalTokens, perClient, perModel) {
   if (!totals) return null;
   const clients = {};
   for (const [key, value] of Object.entries(perClient)) {
+    if (!safeDynamicKey(key)) return null;
     const components = componentValues(summary.perClient?.[key], num(value.tokens), exact);
     if (!components) return null;
     clients[key] = components;
   }
   const models = {};
   for (const [key, value] of Object.entries(perModel)) {
+    if (!safeDynamicKey(key)) return null;
     const components = componentValues(summary.perModel?.[key], num(value.tokens), exact);
     if (!components) return null;
     models[key] = components;
@@ -93,8 +105,8 @@ function parseGraphResult(raw) {
     const clientRows = Array.isArray(row.clients) ? row.clients : [];
     for (const c of clientRows) {
       if (!c || typeof c !== 'object') continue;
-      const client = String(c.client || 'unknown');
-      const model = String(c.modelId || c.model || c.model_id || 'unknown');
+      const client = safeDynamicKey(c.client, 'unknown');
+      const model = safeDynamicKey(c.modelId || c.model || c.model_id, 'unknown');
       const t = sumTokens(c.tokens, client);
       const cst = num(c.cost);
       const cacheRead = num(c.tokens?.cacheRead ?? c.tokens?.cache_read);
@@ -119,7 +131,7 @@ function parseGraphResult(raw) {
       unclassifiedTokens += unclassified;
       tokenComponentsAvailable = tokenComponentsAvailable
         && (t === 0 || (componentsAvailable && unclassified === 0));
-      const pc = perClient[client] || (perClient[client] = {
+      const pc = hasOwn(perClient, client) ? perClient[client] : (perClient[client] = {
         tokens: 0, cost: 0, messages: 0, unclassifiedTokens: 0
       });
       pc.tokens += t; pc.cost += cst; pc.messages += msg;
@@ -127,7 +139,7 @@ function parseGraphResult(raw) {
       if (cacheWrite > 0) pc.cacheWriteTokens = num(pc.cacheWriteTokens) + cacheWrite;
       if (output > 0) pc.outputTokens = num(pc.outputTokens) + output;
       pc.unclassifiedTokens += unclassified;
-      const pm = perModel[model] || (perModel[model] = {
+      const pm = hasOwn(perModel, model) ? perModel[model] : (perModel[model] = {
         tokens: 0, cost: 0, unclassifiedTokens: 0
       });
       pm.tokens += t; pm.cost += cst;
@@ -273,8 +285,10 @@ function computeStreaks(days, todayKey) {
 }
 
 function addPerClient(target, source, includeTokenComponents = false) {
-  for (const [client, v] of Object.entries(source || {})) {
-    const t = target[client] || (target[client] = { tokens: 0, cost: 0, messages: 0 });
+  for (const [rawClient, v] of Object.entries(source || {})) {
+    const client = safeDynamicKey(rawClient);
+    if (!client) continue;
+    const t = hasOwn(target, client) ? target[client] : (target[client] = { tokens: 0, cost: 0, messages: 0 });
     t.tokens += num(v.tokens); t.cost += num(v.cost); t.messages += num(v.messages);
     if (includeTokenComponents) {
       if (num(v.cacheReadTokens) > 0) t.cacheReadTokens = num(t.cacheReadTokens) + num(v.cacheReadTokens);
@@ -287,8 +301,10 @@ function addPerClient(target, source, includeTokenComponents = false) {
 }
 
 function addPerModel(target, source, includeTokenComponents = false) {
-  for (const [model, v] of Object.entries(source || {})) {
-    const t = target[model] || (target[model] = { tokens: 0, cost: 0 });
+  for (const [rawModel, v] of Object.entries(source || {})) {
+    const model = safeDynamicKey(rawModel);
+    if (!model) continue;
+    const t = hasOwn(target, model) ? target[model] : (target[model] = { tokens: 0, cost: 0 });
     t.tokens += num(v.tokens); t.cost += num(v.cost);
     if (includeTokenComponents) {
       if (num(v.cacheReadTokens) > 0) t.cacheReadTokens = num(t.cacheReadTokens) + num(v.cacheReadTokens);
@@ -344,8 +360,10 @@ function rollingDailyWindow(days, todayKey, capDays = DEFAULT_CAP_DAYS) {
 function favoriteModelOf(contributions) {
   const totals = {};
   for (const d of contributions) {
-    for (const [model, v] of Object.entries(d.perModel || {})) {
-      totals[model] = (totals[model] || 0) + num(v.tokens);
+    for (const [rawModel, v] of Object.entries(d.perModel || {})) {
+      const model = safeDynamicKey(rawModel);
+      if (!model) continue;
+      totals[model] = (hasOwn(totals, model) ? totals[model] : 0) + num(v.tokens);
     }
   }
   let best = '';

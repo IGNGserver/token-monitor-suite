@@ -38,7 +38,15 @@
         removed = true;
         continue;
       }
-      filtered[key] = session;
+      // `sessions` can arrive from a JSON payload. Define the property directly
+      // so a legacy plain map cannot interpret an attacker-controlled
+      // `__proto__` key as a prototype assignment.
+      Object.defineProperty(filtered, key, {
+        value: session,
+        enumerable: true,
+        configurable: true,
+        writable: true
+      });
     }
     return removed ? filtered : sessions;
   }

@@ -6,7 +6,7 @@
 
 > 属于 **[Token Monitor Suite](https://github.com/IGNGserver/token-monitor-suite)** 项目。这个目录只是 Cloudflare Worker hub；桌面小部件、无头 agent 和完整文档都在主仓库。一键部署会创建一份独立副本，不会自动更新，所以请回主仓库查看新版本。
 
-自托管 Node hub 的即插即用替代品，以 Cloudflare Worker 部署，用 Durable Object 保存设备状态。它讲的是同一套 HTTP 协议（`/api/ingest`、`/api/stats`、`/api/stats/stream`），所以小部件和 agent 无需改动即可使用，只是 Hub URL 不同。
+自托管 Node hub 的替代方案，以 Cloudflare Worker 部署，用 Durable Object 保存设备状态。它覆盖通用 HTTP 协议（`/api/ingest`、`/api/stats`、`/api/history`、`/api/stats/stream`），所以小部件和 agent 在这些接口上无需改动即可使用，只是 Hub URL 不同。自定义区间用量（`/api/usage/range`）及定价管理接口在能力契约扩展前仍仅由 Node/MySQL Hub 提供。
 
 相比 Node hub，用它的理由：
 
@@ -25,7 +25,9 @@
 cd worker
 npm install
 npx wrangler login          # one-time browser auth
-npx wrangler secret put TOKEN_MONITOR_SECRET   # paste a long random string
+npx wrangler secret put TOKEN_MONITOR_ADMIN_SECRET
+npx wrangler secret put TOKEN_MONITOR_VIEWER_SECRET
+npx wrangler secret put TOKEN_MONITOR_INGEST_CREDENTIALS  # JSON: {"device-id":"token"}
 npx wrangler deploy
 ```
 
@@ -59,14 +61,14 @@ Cloudflare 的 **Deploy to Cloudflare** 按钮很方便，但一直有两种间�
 npm run dev   # wrangler dev — local Worker with a real Durable Object
 ```
 
-各端点与生产环境行为一致。如有需要，用 `wrangler secret put TOKEN_MONITOR_SECRET --env dev` 设置一个独立的开发密钥。
+各端点与生产环境行为一致。开发环境也应使用上述三个变量和 `--env dev` 配置独立令牌。
 
 ## 配置小部件
 
 设置 → Multi-device Sync：
 
 - Hub URL：`https://token-monitor-hub.<your-subdomain>.workers.dev`
-- Secret：你用 `wrangler secret put` 设置的值
+- Secret：与该小部件完整 Device ID 绑定的设备令牌
 
 保存。SSE 流连上后，状态标签会从 `Local` 切换为 `Live`。
 
@@ -76,7 +78,7 @@ npm run dev   # wrangler dev — local Worker with a real Durable Object
 
 ```env
 TOKEN_MONITOR_HUB_URL=https://token-monitor-hub.<your-subdomain>.workers.dev
-TOKEN_MONITOR_SECRET=<the same secret>
+TOKEN_MONITOR_SECRET=<该设备的绑定令牌>
 TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to hostname
 ```
 
@@ -84,7 +86,7 @@ TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to hostname
 
 ```bash
 TOKEN_MONITOR_HUB_URL=https://token-monitor-hub.<your-subdomain>.workers.dev \
-TOKEN_MONITOR_SECRET=<the same secret> \
+TOKEN_MONITOR_SECRET=<该设备的绑定令牌> \
 npm run agent
 ```
 
@@ -102,13 +104,13 @@ npx wrangler secret put PUBLIC_STATS_ENABLED   # enter 1
 
 ### Widgy
 
-选 **async / no main()** 模板。使用 `?secret=` 查询字符串鉴权：Widgy 那个隐藏的 WKWebView 可能会卡在 `Authorization: Bearer` 触发的 CORS 预检上，而 URL 会留在设备本地的 Widgy 配置里，所以密钥不会进入外部日志。
+选 **async / no main()** 模板。客户端支持时优先使用 `Authorization: Bearer`。只有在 WKWebView 无法发送 header 时，才用只读 viewer token 的 `?secret=` 形式。管理和设备令牌在查询字符串中会被拒绝；查询字符串仍可能进入客户端、代理或边缘日志，不要公开。
 
 最简版本，只要一个数字：
 
 ```js
 const HUB = 'https://token-monitor-hub.<your-subdomain>.workers.dev';
-const SECRET = '<the same secret>';
+const SECRET = '<只读 viewer token>';
 const url = HUB + '/api/stats?secret=' + SECRET;
 fetch(url)
   .then(r => r.json())
@@ -133,7 +135,7 @@ fetch(url)
 
 ```js
 const HUB = 'https://token-monitor-hub.<your-subdomain>.workers.dev';
-const SECRET = '<the same secret>';
+const SECRET = '<只读 viewer token>';
 const PERIOD = 'today';        // 'today' | 'month' | 'allTime'
 const SHOW = 'tokens+cost';    // 'tokens' | 'cost' | 'tokens+cost'
 
@@ -166,7 +168,7 @@ fetch(HUB + '/api/stats?secret=' + SECRET)
 
 ```js
 const req = new Request('https://token-monitor-hub.<your-subdomain>.workers.dev/api/stats');
-req.headers = { authorization: 'Bearer <the same secret>' };
+req.headers = { authorization: 'Bearer <只读 viewer token>' };
 const stats = await req.loadJSON();
 const todayTokens = stats.periods.today.totalTokens;
 ```
@@ -238,20 +240,22 @@ iOS 小部件没有省电的推送通道，所以运行时会自行每隔几分�
 | 方法   | 路径                       | 鉴权   | 说明                                       |
 |--------|----------------------------|--------|--------------------------------------------|
 | GET    | `/api/health`              | 无     | 存活探针 + 设备数                          |
+| GET    | `/api/capabilities`        | 读取   | 功能集与已授予的角色/权限               |
 | GET    | `/api/public/stats`        | 无     | `PUBLIC_STATS_ENABLED=1` 时提供不含 devices/账号 id 的公开聚合统计 |
-| GET    | `/api/stats`               | 密钥   | 聚合统计（today / month / allTime）        |
-| GET    | `/api/stats/stream`        | 密钥   | SSE 流，每次 ingest 都推送                 |
-| GET    | `/api/devices`             | 密钥   | 原始的每设备记录                          |
-| POST   | `/api/ingest`              | 密钥   | 更新某个设备的用量摘要                    |
-| DELETE | `/api/devices/{deviceId}`  | 密钥   | 删除一条设备记录                          |
+| GET    | `/api/stats`               | 读取   | 聚合统计（today / month / allTime）        |
+| GET    | `/api/stats/stream`        | 读取   | SSE 流，每次 ingest 都推送                 |
+| GET    | `/api/devices`             | 读取   | 原始的每设备记录                          |
+| POST   | `/api/ingest`              | 上报   | 仅更新凭据绑定的设备                    |
+| POST   | `/api/devices/{id}/rename` | admin  | 原子改名设备记录                          |
+| DELETE | `/api/devices/{deviceId}`  | admin  | 删除一条设备记录                          |
 
 密钥有三种接受方式（任一即可）：
 
 1. `Authorization: Bearer <secret>`：agent、小部件，以及任何服务器 / 桌面客户端首选。
 2. `x-token-monitor-secret: <secret>`：无法设置 `Authorization` 的客户端的后备方案。
-3. `?secret=<secret>` 查询字符串：针对 iOS 小部件运行时（Widgy、Scriptable）的变通方案，它们的 WKWebView 难以处理 `Authorization` 头的 CORS 预检。只在 URL 留在设备本地的客户端上使用。
+3. `?secret=<viewer-token>` 查询字符串：针对 iOS 小部件运行时（Widgy、Scriptable）的变通方案，它们的 WKWebView 难以处理 `Authorization` 头的 CORS 预检。查询字符串可能进入客户端、代理或边缘请求日志；只在可以接受该暴露时使用，且不要分享生成的 URL。
 
-密钥是必需的。当 `TOKEN_MONITOR_SECRET` 未设置时，所有数据路由都返回 `503 secret_required`，只有 `/api/health` 和可选开启的 `/api/public/stats` 会响应。请在部署前（或部署时）设置它。
+至少要配置一个分权凭据。建议同时配置管理、只读 viewer 和按 Device ID 绑定的设备令牌。`TOKEN_MONITOR_SECRET` 仅作为迁移期只读凭据；未显式开启临时 legacy 提权时不能上报或管理。
 
 ## 存储与成本
 

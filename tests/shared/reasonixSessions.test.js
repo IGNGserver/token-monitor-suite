@@ -893,6 +893,21 @@ test('readReasonixNativeSession skips missing stable ID and missing/corrupt tele
   assert.equal(readReasonixNativeSession(metaPath, telemetryPath), null);
 });
 
+test('readReasonixNativeSession rejects reserved model keys before building model maps', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-native-reserved-model-'));
+  const metaPath = path.join(root, 'session.jsonl.meta');
+  const telemetryPath = path.join(root, 'session.jsonl.telemetry.json');
+  writeJson(telemetryPath, nativeTelemetry());
+
+  for (const model of ['constructor', 'deepseek/constructor', 'deepseek/__proto__', 'deepseek/prototype']) {
+    writeJson(metaPath, { id: `reserved-model-${model}`, model });
+    const session = readReasonixNativeSession(metaPath, telemetryPath);
+    assert.equal(session.model, undefined, model);
+    assert.deepEqual(session.models, {}, model);
+  }
+  assert.equal(Object.prototype.polluted, undefined);
+});
+
 test('readReasonixNativeSession bounds metadata and projected telemetry usage to regular files', () => {
   assert.equal(REASONIX_META_MAX_BYTES, 1 * 1024 * 1024);
   assert.equal(REASONIX_TELEMETRY_USAGE_MAX_BYTES, 4 * 1024 * 1024);

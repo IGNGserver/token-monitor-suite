@@ -2,7 +2,6 @@
 
 const PERIODS = ['today', 'month', 'allTime'];
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits');
-const { normalizeClientHealth } = require('./clientHealth');
 const { coerceHistory, dayKeyAddDays, localDayKey, mergeHistories } = require('./history');
 const { REASONIX_CLIENT } = require('./reasonixPaths');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./reasonixSessionGuard');
@@ -37,6 +36,7 @@ const TIMED_TOKEN_KEYS = ['timedTokens', 'timed_tokens'];
 const STARTED_AT_KEYS = ['startedAt', 'started_at', 'createdAt', 'created_at'];
 const LAST_USED_AT_KEYS = ['lastUsedAt', 'last_used_at', 'updatedAt', 'updated_at', 'lastActivityAt', 'last_activity_at', 'timestamp'];
 const GUI_SECRET_LIMIT_PROVIDERS = new Set(['copilot', 'deepseek', 'minimax']);
+const RESERVED_DYNAMIC_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
 function asNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -162,12 +162,18 @@ function emptyPeriod() {
   };
 }
 
-function normalizeClientName(value) {
+function normalizeClientName(value, options = {}) {
   const raw = String(value || '').trim().toLowerCase();
   if (!raw) return null;
+  // These names are not client ids. Rejecting them at the normalization boundary
+  // keeps every legacy plain-object map safe without changing the serialized shape
+  // for ordinary client names.
+  if (!options.allowReserved && RESERVED_DYNAMIC_KEYS.has(raw)) return null;
   // Desktop Local Agent / Cowork sessions are deliberately separate from
   // regular Claude Code transcripts.
   if (raw === 'claude-desktop' || raw.includes('claude-desktop') || raw.includes('claude desktop')) return 'claude-desktop';
+  if (raw === 'dsh' || raw.includes('deepseek-harness') || raw.includes('deepseek harness')) return 'deepseek-harness';
+  if (raw === 'deepseek') return 'deepseek';
   if (raw.includes('claude')) return 'claude';
   if (raw.includes('codex')) return 'codex';
   if (raw.includes('hermes')) return 'hermes';
@@ -202,14 +208,15 @@ function detectClient(obj) {
 
 function normalizeModelName(value) {
   const raw = String(value || '').trim().toLowerCase();
-  return raw || null;
+  return raw && !RESERVED_DYNAMIC_KEYS.has(raw) ? raw : null;
 }
 
 function normalizeModelNameForClient(value, client) {
   const normalized = normalizeModelName(value);
   if (!normalized || normalizeClientName(client) !== REASONIX_CLIENT) return normalized;
   const qualified = normalized.match(/^(?:deepseek|deepseek-flash)\/(.+)$/);
-  return qualified?.[1] || normalized;
+  const model = qualified?.[1] || normalized;
+  return RESERVED_DYNAMIC_KEYS.has(model) ? null : model;
 }
 
 function normalizeSessionId(value) {
@@ -219,11 +226,23 @@ function normalizeSessionId(value) {
 
 function normalizeProviderName(value) {
   const raw = String(value || '').trim().toLowerCase();
-  return raw.replace(/[^a-z0-9_-]+/g, '-') || null;
+  const normalized = raw.replace(/[^a-z0-9_-]+/g, '-');
+  return normalized && !RESERVED_DYNAMIC_KEYS.has(normalized) ? normalized : null;
 }
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function mapNumber(map, key) {
+  return hasOwn(map, key) ? asNumber(map[key]) : 0;
+}
+
+function ensureNestedMap(map, key) {
+  if (!hasOwn(map, key) || !map[key] || typeof map[key] !== 'object' || Array.isArray(map[key])) {
+    map[key] = {};
+  }
+  return map[key];
 }
 
 function emptyProject(label = '') {
@@ -246,7 +265,10 @@ function addProjectInto(projects, rawKey, source) {
   target.tokens += Math.max(0, Math.round(asNumber(source.tokens ?? source.totalTokens)));
   target.costUsd += asNumber(source.costUsd ?? source.cost);
   for (const [client, tokens] of Object.entries(source.clients || {})) {
-    const clientKey = normalizeClientName(client);
+    // Project client maps use a null prototype and historically retained arbitrary
+    // client labels, including names such as "constructor". Keep that compatibility
+    // while the ordinary token maps reject those keys at their boundary.
+    const clientKey = normalizeClientName(client, { allowReserved: true });
     if (!clientKey) continue;
     target.clients[clientKey] = (hasOwn(target.clients, clientKey) ? target.clients[clientKey] : 0)
       + Math.max(0, Math.round(asNumber(tokens)));
@@ -458,15 +480,15 @@ function mergeSession(target, source) {
   }
   for (const [model, tokens] of Object.entries(source.models || {})) {
     const key = normalizeModelNameForClient(model, target.client);
-    if (key) target.models[key] = (target.models[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
+    if (key) target.models[key] = mapNumber(target.models, key) + Math.max(0, Math.round(asNumber(tokens)));
   }
   for (const [model, cost] of Object.entries(source.modelCosts || {})) {
     const key = normalizeModelNameForClient(model, target.client);
-    if (key) target.modelCosts[key] = (target.modelCosts[key] || 0) + asNumber(cost);
+    if (key) target.modelCosts[key] = mapNumber(target.modelCosts, key) + asNumber(cost);
   }
   for (const [provider, tokens] of Object.entries(source.providers || {})) {
     const key = normalizeProviderName(provider);
-    if (key) target.providers[key] = (target.providers[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
+    if (key) target.providers[key] = mapNumber(target.providers, key) + Math.max(0, Math.round(asNumber(tokens)));
   }
   const sourceArchived = source.archived === true || source.deleted === true || source.sourceDeleted === true;
   if (!sourceArchived) {
@@ -479,11 +501,16 @@ function mergeSession(target, source) {
 }
 
 function addSession(period, session) {
-  if (!session?.client || !session?.sessionId || isReasonixSyntheticSession(session)) return;
-  const key = sessionKey(session.client, session.sessionId);
-  if (isReasonixSyntheticSession(session, key)) return;
-  if (!period.sessions[key]) period.sessions[key] = emptySession(session.client, session.sessionId);
-  mergeSession(period.sessions[key], session);
+  const client = normalizeClientName(session?.client);
+  const sessionId = normalizeSessionId(session?.sessionId);
+  if (!client || client === REASONIX_CLIENT || !sessionId) return;
+  const normalized = client === session.client && sessionId === session.sessionId
+    ? session
+    : { ...session, client, sessionId };
+  if (isReasonixSyntheticSession(normalized)) return;
+  const key = sessionKey(client, sessionId);
+  if (!hasOwn(period.sessions, key)) period.sessions[key] = emptySession(client, sessionId);
+  mergeSession(period.sessions[key], normalized);
 }
 
 function sessionFromRow(row) {
@@ -502,10 +529,10 @@ function sessionFromRow(row) {
   session.projectLabel = String(row.projectLabel || row.project_label || '').trim();
   let model = detectModel(row, client);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
-  if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
-  if (model && session.costUsd > 0) session.modelCosts[model] = (session.modelCosts[model] || 0) + session.costUsd;
+  if (model && session.totalTokens > 0) session.models[model] = mapNumber(session.models, model) + session.totalTokens;
+  if (model && session.costUsd > 0) session.modelCosts[model] = mapNumber(session.modelCosts, model) + session.costUsd;
   const provider = normalizeProviderName(row.provider);
-  if (provider && session.totalTokens > 0) session.providers[provider] = (session.providers[provider] || 0) + session.totalTokens;
+  if (provider && session.totalTokens > 0) session.providers[provider] = mapNumber(session.providers, provider) + session.totalTokens;
   return session;
 }
 
@@ -529,19 +556,19 @@ function normalizeSession(input, fallbackKey) {
   if (input.models && typeof input.models === 'object') {
     for (const [model, value] of Object.entries(input.models)) {
       const key = normalizeModelNameForClient(model, client);
-      if (key) session.models[key] = (session.models[key] || 0) + Math.max(0, Math.round(asNumber(value)));
+      if (key) session.models[key] = mapNumber(session.models, key) + Math.max(0, Math.round(asNumber(value)));
     }
   }
   if (input.modelCosts && typeof input.modelCosts === 'object') {
     for (const [model, value] of Object.entries(input.modelCosts)) {
       const key = normalizeModelNameForClient(model, client);
-      if (key) session.modelCosts[key] = (session.modelCosts[key] || 0) + asNumber(value);
+      if (key) session.modelCosts[key] = mapNumber(session.modelCosts, key) + asNumber(value);
     }
   }
   if (input.providers && typeof input.providers === 'object') {
     for (const [provider, value] of Object.entries(input.providers)) {
       const key = normalizeProviderName(provider);
-      if (key) session.providers[key] = (session.providers[key] || 0) + Math.max(0, Math.round(asNumber(value)));
+      if (key) session.providers[key] = mapNumber(session.providers, key) + Math.max(0, Math.round(asNumber(value)));
     }
   }
   if (input.archived === true || input.deleted === true || input.sourceDeleted === true) session.archived = true;
@@ -598,10 +625,10 @@ function normalizePeriod(input, options = {}) {
     for (const [client, value] of Object.entries(input.clients)) {
       const key = normalizeClientName(client);
       if (key) {
-        period.clients[key] = (period.clients[key] || 0) + Math.max(0, Math.round(asNumber(value)));
-        if (input.clientCacheReads?.[client]) period.clientCacheReads[key] = (period.clientCacheReads[key] || 0) + Math.max(0, Math.round(asNumber(input.clientCacheReads[client])));
-        if (input.clientCacheWrites?.[client]) period.clientCacheWrites[key] = (period.clientCacheWrites[key] || 0) + Math.max(0, Math.round(asNumber(input.clientCacheWrites[client])));
-        if (input.clientOutputs?.[client]) period.clientOutputs[key] = (period.clientOutputs[key] || 0) + Math.max(0, Math.round(asNumber(input.clientOutputs[client])));
+        period.clients[key] = mapNumber(period.clients, key) + Math.max(0, Math.round(asNumber(value)));
+        if (input.clientCacheReads?.[client]) period.clientCacheReads[key] = mapNumber(period.clientCacheReads, key) + Math.max(0, Math.round(asNumber(input.clientCacheReads[client])));
+        if (input.clientCacheWrites?.[client]) period.clientCacheWrites[key] = mapNumber(period.clientCacheWrites, key) + Math.max(0, Math.round(asNumber(input.clientCacheWrites[client])));
+        if (input.clientOutputs?.[client]) period.clientOutputs[key] = mapNumber(period.clientOutputs, key) + Math.max(0, Math.round(asNumber(input.clientOutputs[client])));
         const known = Math.min(
           period.clients[key],
           asNumber(period.clientCacheReads[key])
@@ -622,17 +649,17 @@ function normalizePeriod(input, options = {}) {
   if (input.clientCosts && typeof input.clientCosts === 'object') {
     for (const [client, value] of Object.entries(input.clientCosts)) {
       const key = normalizeClientName(client);
-      if (key) period.clientCosts[key] = (period.clientCosts[key] || 0) + asNumber(value);
+      if (key) period.clientCosts[key] = mapNumber(period.clientCosts, key) + asNumber(value);
     }
   }
   if (input.models && typeof input.models === 'object') {
     for (const [model, value] of Object.entries(input.models)) {
       const key = normalizeModelName(model);
       if (key) {
-        period.models[key] = (period.models[key] || 0) + Math.max(0, Math.round(asNumber(value)));
-        if (input.modelCacheReads?.[model]) period.modelCacheReads[key] = (period.modelCacheReads[key] || 0) + Math.max(0, Math.round(asNumber(input.modelCacheReads[model])));
-        if (input.modelCacheWrites?.[model]) period.modelCacheWrites[key] = (period.modelCacheWrites[key] || 0) + Math.max(0, Math.round(asNumber(input.modelCacheWrites[model])));
-        if (input.modelOutputs?.[model]) period.modelOutputs[key] = (period.modelOutputs[key] || 0) + Math.max(0, Math.round(asNumber(input.modelOutputs[model])));
+        period.models[key] = mapNumber(period.models, key) + Math.max(0, Math.round(asNumber(value)));
+        if (input.modelCacheReads?.[model]) period.modelCacheReads[key] = mapNumber(period.modelCacheReads, key) + Math.max(0, Math.round(asNumber(input.modelCacheReads[model])));
+        if (input.modelCacheWrites?.[model]) period.modelCacheWrites[key] = mapNumber(period.modelCacheWrites, key) + Math.max(0, Math.round(asNumber(input.modelCacheWrites[model])));
+        if (input.modelOutputs?.[model]) period.modelOutputs[key] = mapNumber(period.modelOutputs, key) + Math.max(0, Math.round(asNumber(input.modelOutputs[model])));
         const known = Math.min(
           period.models[key],
           asNumber(period.modelCacheReads[key])
@@ -653,7 +680,7 @@ function normalizePeriod(input, options = {}) {
   if (input.modelCosts && typeof input.modelCosts === 'object') {
     for (const [model, value] of Object.entries(input.modelCosts)) {
       const key = normalizeModelName(model);
-      if (key) period.modelCosts[key] = (period.modelCosts[key] || 0) + asNumber(value);
+      if (key) period.modelCosts[key] = mapNumber(period.modelCosts, key) + asNumber(value);
     }
   }
   if (input.clientModels && typeof input.clientModels === 'object') {
@@ -663,8 +690,8 @@ function normalizePeriod(input, options = {}) {
       for (const [model, value] of Object.entries(models)) {
         const modelKey = normalizeModelNameForClient(model, clientKey);
         if (!modelKey) continue;
-        if (!period.clientModels[clientKey]) period.clientModels[clientKey] = {};
-        period.clientModels[clientKey][modelKey] = (period.clientModels[clientKey][modelKey] || 0) + Math.max(0, Math.round(asNumber(value)));
+        const modelsForClient = ensureNestedMap(period.clientModels, clientKey);
+        modelsForClient[modelKey] = mapNumber(modelsForClient, modelKey) + Math.max(0, Math.round(asNumber(value)));
       }
     }
   }
@@ -675,8 +702,8 @@ function normalizePeriod(input, options = {}) {
       for (const [model, value] of Object.entries(models)) {
         const modelKey = normalizeModelNameForClient(model, clientKey);
         if (!modelKey) continue;
-        if (!period.clientModelCosts[clientKey]) period.clientModelCosts[clientKey] = {};
-        period.clientModelCosts[clientKey][modelKey] = (period.clientModelCosts[clientKey][modelKey] || 0) + asNumber(value);
+        const modelsForClient = ensureNestedMap(period.clientModelCosts, clientKey);
+        modelsForClient[modelKey] = mapNumber(modelsForClient, modelKey) + asNumber(value);
       }
     }
   }
@@ -732,26 +759,26 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   period.timedOutputTokens += timedOutputTokens;
   period.timedDurationMs += timedDurationMs;
   if (client && tokens > 0) {
-    period.clients[client] = (period.clients[client] || 0) + Math.round(tokens);
-    if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
-    if (cacheWrite > 0) period.clientCacheWrites[client] = (period.clientCacheWrites[client] || 0) + cacheWrite;
-    if (output > 0) period.clientOutputs[client] = (period.clientOutputs[client] || 0) + output;
+    period.clients[client] = mapNumber(period.clients, client) + Math.round(tokens);
+    if (cacheRead > 0) period.clientCacheReads[client] = mapNumber(period.clientCacheReads, client) + cacheRead;
+    if (cacheWrite > 0) period.clientCacheWrites[client] = mapNumber(period.clientCacheWrites, client) + cacheWrite;
+    if (output > 0) period.clientOutputs[client] = mapNumber(period.clientOutputs, client) + output;
   }
-  if (client && cost > 0) period.clientCosts[client] = (period.clientCosts[client] || 0) + cost;
+  if (client && cost > 0) period.clientCosts[client] = mapNumber(period.clientCosts, client) + cost;
   if (model && tokens > 0) {
-    period.models[model] = (period.models[model] || 0) + Math.round(tokens);
-    if (cacheRead > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cacheRead;
-    if (cacheWrite > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cacheWrite;
-    if (output > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + output;
+    period.models[model] = mapNumber(period.models, model) + Math.round(tokens);
+    if (cacheRead > 0) period.modelCacheReads[model] = mapNumber(period.modelCacheReads, model) + cacheRead;
+    if (cacheWrite > 0) period.modelCacheWrites[model] = mapNumber(period.modelCacheWrites, model) + cacheWrite;
+    if (output > 0) period.modelOutputs[model] = mapNumber(period.modelOutputs, model) + output;
   }
-  if (model && cost > 0) period.modelCosts[model] = (period.modelCosts[model] || 0) + cost;
+  if (model && cost > 0) period.modelCosts[model] = mapNumber(period.modelCosts, model) + cost;
   if (client && model && tokens > 0) {
-    if (!period.clientModels[client]) period.clientModels[client] = {};
-    period.clientModels[client][model] = (period.clientModels[client][model] || 0) + Math.round(tokens);
+    const modelsForClient = ensureNestedMap(period.clientModels, client);
+    modelsForClient[model] = mapNumber(modelsForClient, model) + Math.round(tokens);
   }
   if (client && model && cost > 0) {
-    if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
-    period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + cost;
+    const modelsForClient = ensureNestedMap(period.clientModelCosts, client);
+    modelsForClient[model] = mapNumber(modelsForClient, model) + cost;
   }
   const session = sessionFromRow(row);
   if (session) addSession(period, session);
@@ -839,13 +866,6 @@ function normalizeDeviceRecord(record) {
   if (hasOwn(record, 'osVersion')) normalized.osVersion = normalizeDeviceOsVersion(record.osVersion);
   if (hasOwn(record, 'trackedClients')) normalized.trackedClients = normalizeTrackedClients(record.trackedClients);
   if (hasOwn(record, 'clientStatus')) normalized.clientStatus = normalizeClientStatus(record.clientStatus);
-  if (hasOwn(record, 'clientHealth')) {
-    // Validated, capped, and with `overall` recomputed from the core rather than
-    // trusted — see clientHealth.js. Left off the record entirely when the field
-    // is unusable, so a consumer's `hasOwn` check stays meaningful.
-    const health = normalizeClientHealth(record.clientHealth, normalizeClientName);
-    if (health) normalized.clientHealth = health;
-  }
   if (hasOwn(record, 'wslStatus')) normalized.wslStatus = normalizeWslStatus(record.wslStatus);
   if (hasOwn(record, 'projectsEnabled')) normalized.projectsEnabled = record.projectsEnabled !== false;
   if (hasOwn(record, 'allTimeProjectsOmitted')) normalized.allTimeProjectsOmitted = record.allTimeProjectsOmitted === true;
@@ -884,35 +904,39 @@ function addClientModelUsage(target, source, client) {
   const models = source.clientModels?.[client];
   const costs = source.clientModelCosts?.[client];
   for (const [model, tokens] of Object.entries(models || {})) {
-    target.models[model] = (target.models[model] || 0) + tokens;
-    if (!target.clientModels[client]) target.clientModels[client] = {};
-    target.clientModels[client][model] = (target.clientModels[client][model] || 0) + tokens;
+    const modelKey = normalizeModelNameForClient(model, client);
+    if (!modelKey) continue;
+    target.models[modelKey] = mapNumber(target.models, modelKey) + tokens;
+    const targetModels = ensureNestedMap(target.clientModels, client);
+    targetModels[modelKey] = mapNumber(targetModels, modelKey) + tokens;
 
     // Model component maps are not client×model maps. They can be carried only
     // when this preserved client owns the whole source model bucket; otherwise
     // retain the model total and mark just that contribution unknown.
-    if (asNumber(source.models?.[model]) === asNumber(tokens)) {
-      const cacheRead = Math.min(tokens, asNumber(source.modelCacheReads?.[model]));
-      const cacheWrite = Math.min(tokens - cacheRead, asNumber(source.modelCacheWrites?.[model]));
-      const output = Math.min(tokens - cacheRead - cacheWrite, asNumber(source.modelOutputs?.[model]));
+    if (asNumber(source.models?.[modelKey]) === asNumber(tokens)) {
+      const cacheRead = Math.min(tokens, asNumber(source.modelCacheReads?.[modelKey]));
+      const cacheWrite = Math.min(tokens - cacheRead, asNumber(source.modelCacheWrites?.[modelKey]));
+      const output = Math.min(tokens - cacheRead - cacheWrite, asNumber(source.modelOutputs?.[modelKey]));
       const unclassified = Math.min(
         tokens - cacheRead - cacheWrite - output,
-        asNumber(source.modelUnclassifiedTokens?.[model])
+        asNumber(source.modelUnclassifiedTokens?.[modelKey])
       );
-      if (cacheRead > 0) target.modelCacheReads[model] = (target.modelCacheReads[model] || 0) + cacheRead;
-      if (cacheWrite > 0) target.modelCacheWrites[model] = (target.modelCacheWrites[model] || 0) + cacheWrite;
-      if (output > 0) target.modelOutputs[model] = (target.modelOutputs[model] || 0) + output;
-      if (unclassified > 0) target.modelUnclassifiedTokens[model] = (target.modelUnclassifiedTokens[model] || 0) + unclassified;
+      if (cacheRead > 0) target.modelCacheReads[modelKey] = mapNumber(target.modelCacheReads, modelKey) + cacheRead;
+      if (cacheWrite > 0) target.modelCacheWrites[modelKey] = mapNumber(target.modelCacheWrites, modelKey) + cacheWrite;
+      if (output > 0) target.modelOutputs[modelKey] = mapNumber(target.modelOutputs, modelKey) + output;
+      if (unclassified > 0) target.modelUnclassifiedTokens[modelKey] = mapNumber(target.modelUnclassifiedTokens, modelKey) + unclassified;
       if (unclassified > 0) target.capabilities.tokenComponents = false;
     } else if (tokens > 0) {
-      target.modelUnclassifiedTokens[model] = (target.modelUnclassifiedTokens[model] || 0) + tokens;
+      target.modelUnclassifiedTokens[modelKey] = mapNumber(target.modelUnclassifiedTokens, modelKey) + tokens;
       target.capabilities.tokenComponents = false;
     }
   }
   for (const [model, cost] of Object.entries(costs || {})) {
-    target.modelCosts[model] = (target.modelCosts[model] || 0) + cost;
-    if (!target.clientModelCosts[client]) target.clientModelCosts[client] = {};
-    target.clientModelCosts[client][model] = (target.clientModelCosts[client][model] || 0) + cost;
+    const modelKey = normalizeModelNameForClient(model, client);
+    if (!modelKey) continue;
+    target.modelCosts[modelKey] = mapNumber(target.modelCosts, modelKey) + cost;
+    const targetCosts = ensureNestedMap(target.clientModelCosts, client);
+    targetCosts[modelKey] = mapNumber(targetCosts, modelKey) + cost;
   }
 }
 
@@ -958,20 +982,21 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
     const restoredSessions = Object.create(null);
     const preservedClients = new Set();
     incomingRecord.periods[periodName] = target;
-    for (const [client, tokens] of Object.entries(source.clients || {})) {
-      if (active.has(client) || hasOwn(target.clients, client)) continue;
-      const cost = source.clientCosts?.[client] || 0;
+    for (const [rawClient, tokens] of Object.entries(source.clients || {})) {
+      const client = normalizeClientName(rawClient);
+      if (!client || active.has(client) || hasOwn(target.clients, client)) continue;
+      const cost = mapNumber(source.clientCosts, client);
       target.totalTokens += tokens;
       target.costUsd += cost;
       target.clients[client] = tokens;
       preservedClients.add(client);
       if (cost > 0) target.clientCosts[client] = cost;
-      const cacheRead = Math.min(tokens, asNumber(source.clientCacheReads?.[client]));
-      const cacheWrite = Math.min(tokens - cacheRead, asNumber(source.clientCacheWrites?.[client]));
-      const output = Math.min(tokens - cacheRead - cacheWrite, asNumber(source.clientOutputs?.[client]));
+      const cacheRead = Math.min(tokens, mapNumber(source.clientCacheReads, client));
+      const cacheWrite = Math.min(tokens - cacheRead, mapNumber(source.clientCacheWrites, client));
+      const output = Math.min(tokens - cacheRead - cacheWrite, mapNumber(source.clientOutputs, client));
       const unclassified = Math.min(
         tokens - cacheRead - cacheWrite - output,
-        asNumber(source.clientUnclassifiedTokens?.[client])
+        mapNumber(source.clientUnclassifiedTokens, client)
       );
       target.cacheReadTokens += cacheRead;
       target.cacheWriteTokens += cacheWrite;
@@ -1063,7 +1088,6 @@ function mergeDeviceRecord(existing, incoming) {
     // it has no such data, and preserving them there would strand a permanently
     // stale diagnosis on a device that changed hands.
     if (hasOwn(normalizedExisting, 'clientStatus') && !hasOwn(normalizedIncoming, 'clientStatus')) normalizedIncoming.clientStatus = normalizedExisting.clientStatus;
-    if (hasOwn(normalizedExisting, 'clientHealth') && !hasOwn(normalizedIncoming, 'clientHealth')) normalizedIncoming.clientHealth = normalizedExisting.clientHealth;
     if (hasOwn(normalizedExisting, 'wslStatus') && !hasOwn(normalizedIncoming, 'wslStatus')) normalizedIncoming.wslStatus = normalizedExisting.wslStatus;
     if (hasOwn(normalizedExisting, 'periodWindows')) normalizedIncoming.periodWindows = normalizedExisting.periodWindows;
     if (hasOwn(normalizedExisting, 'projectsEnabled')) normalizedIncoming.projectsEnabled = normalizedExisting.projectsEnabled;
@@ -1226,32 +1250,56 @@ function addPeriodInto(target, source) {
   target.timedTokens += source.timedTokens;
   target.timedOutputTokens += source.timedOutputTokens;
   target.timedDurationMs += source.timedDurationMs;
-  for (const [client, tokens] of Object.entries(source.clients)) {
-    target.clients[client] = (target.clients[client] || 0) + tokens;
-    if (source.clientCacheReads?.[client]) target.clientCacheReads[client] = (target.clientCacheReads[client] || 0) + source.clientCacheReads[client];
-    if (source.clientCacheWrites?.[client]) target.clientCacheWrites[client] = (target.clientCacheWrites[client] || 0) + source.clientCacheWrites[client];
-    if (source.clientOutputs?.[client]) target.clientOutputs[client] = (target.clientOutputs[client] || 0) + source.clientOutputs[client];
-    if (source.clientUnclassifiedTokens?.[client]) target.clientUnclassifiedTokens[client] = (target.clientUnclassifiedTokens[client] || 0) + source.clientUnclassifiedTokens[client];
+  for (const [rawClient, tokens] of Object.entries(source.clients)) {
+    const client = normalizeClientName(rawClient);
+    if (!client) continue;
+    target.clients[client] = mapNumber(target.clients, client) + tokens;
+    const cacheReads = mapNumber(source.clientCacheReads, client);
+    const cacheWrites = mapNumber(source.clientCacheWrites, client);
+    const outputs = mapNumber(source.clientOutputs, client);
+    const unclassifiedTokens = mapNumber(source.clientUnclassifiedTokens, client);
+    if (cacheReads) target.clientCacheReads[client] = mapNumber(target.clientCacheReads, client) + cacheReads;
+    if (cacheWrites) target.clientCacheWrites[client] = mapNumber(target.clientCacheWrites, client) + cacheWrites;
+    if (outputs) target.clientOutputs[client] = mapNumber(target.clientOutputs, client) + outputs;
+    if (unclassifiedTokens) target.clientUnclassifiedTokens[client] = mapNumber(target.clientUnclassifiedTokens, client) + unclassifiedTokens;
   }
-  for (const [client, cost] of Object.entries(source.clientCosts)) target.clientCosts[client] = (target.clientCosts[client] || 0) + cost;
-  for (const [model, tokens] of Object.entries(source.models)) {
-    target.models[model] = (target.models[model] || 0) + tokens;
-    if (source.modelCacheReads?.[model]) target.modelCacheReads[model] = (target.modelCacheReads[model] || 0) + source.modelCacheReads[model];
-    if (source.modelCacheWrites?.[model]) target.modelCacheWrites[model] = (target.modelCacheWrites[model] || 0) + source.modelCacheWrites[model];
-    if (source.modelOutputs?.[model]) target.modelOutputs[model] = (target.modelOutputs[model] || 0) + source.modelOutputs[model];
-    if (source.modelUnclassifiedTokens?.[model]) target.modelUnclassifiedTokens[model] = (target.modelUnclassifiedTokens[model] || 0) + source.modelUnclassifiedTokens[model];
+  for (const [rawClient, cost] of Object.entries(source.clientCosts)) {
+    const client = normalizeClientName(rawClient);
+    if (client) target.clientCosts[client] = mapNumber(target.clientCosts, client) + cost;
   }
-  for (const [model, cost] of Object.entries(source.modelCosts)) target.modelCosts[model] = (target.modelCosts[model] || 0) + cost;
-  for (const [client, models] of Object.entries(source.clientModels)) {
-    if (!target.clientModels[client]) target.clientModels[client] = {};
-    for (const [model, tokens] of Object.entries(models)) {
-      target.clientModels[client][model] = (target.clientModels[client][model] || 0) + tokens;
+  for (const [rawModel, tokens] of Object.entries(source.models)) {
+    const model = normalizeModelName(rawModel);
+    if (!model) continue;
+    target.models[model] = mapNumber(target.models, model) + tokens;
+    const cacheReads = mapNumber(source.modelCacheReads, model);
+    const cacheWrites = mapNumber(source.modelCacheWrites, model);
+    const outputs = mapNumber(source.modelOutputs, model);
+    const unclassifiedTokens = mapNumber(source.modelUnclassifiedTokens, model);
+    if (cacheReads) target.modelCacheReads[model] = mapNumber(target.modelCacheReads, model) + cacheReads;
+    if (cacheWrites) target.modelCacheWrites[model] = mapNumber(target.modelCacheWrites, model) + cacheWrites;
+    if (outputs) target.modelOutputs[model] = mapNumber(target.modelOutputs, model) + outputs;
+    if (unclassifiedTokens) target.modelUnclassifiedTokens[model] = mapNumber(target.modelUnclassifiedTokens, model) + unclassifiedTokens;
+  }
+  for (const [rawModel, cost] of Object.entries(source.modelCosts)) {
+    const model = normalizeModelName(rawModel);
+    if (model) target.modelCosts[model] = mapNumber(target.modelCosts, model) + cost;
+  }
+  for (const [rawClient, models] of Object.entries(source.clientModels)) {
+    const client = normalizeClientName(rawClient);
+    if (!client || !models || typeof models !== 'object') continue;
+    const targetModels = ensureNestedMap(target.clientModels, client);
+    for (const [rawModel, tokens] of Object.entries(models)) {
+      const model = normalizeModelNameForClient(rawModel, client);
+      if (model) targetModels[model] = mapNumber(targetModels, model) + tokens;
     }
   }
-  for (const [client, models] of Object.entries(source.clientModelCosts)) {
-    if (!target.clientModelCosts[client]) target.clientModelCosts[client] = {};
-    for (const [model, cost] of Object.entries(models)) {
-      target.clientModelCosts[client][model] = (target.clientModelCosts[client][model] || 0) + cost;
+  for (const [rawClient, models] of Object.entries(source.clientModelCosts)) {
+    const client = normalizeClientName(rawClient);
+    if (!client || !models || typeof models !== 'object') continue;
+    const targetCosts = ensureNestedMap(target.clientModelCosts, client);
+    for (const [rawModel, cost] of Object.entries(models)) {
+      const model = normalizeModelNameForClient(rawModel, client);
+      if (model) targetCosts[model] = mapNumber(targetCosts, model) + cost;
     }
   }
   for (const [key, project] of Object.entries(source.projects || {})) addProjectInto(target.projects, key, project);
@@ -1322,11 +1370,6 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
       stale,
       ...(hasOwn(normalized, 'trackedClients') ? { trackedClients: normalized.trackedClients } : {}),
       ...(hasOwn(normalized, 'clientStatus') ? { clientStatus: normalized.clientStatus } : {}),
-      // Per device only. There is deliberately no cross-device rollup of this
-      // field: `/api/public/stats` drops `devices` wholesale and spreads the rest
-      // of getStats(), so a top-level summary is the one shape that would put
-      // diagnostics on the unauthenticated surface.
-      ...(hasOwn(normalized, 'clientHealth') ? { clientHealth: normalized.clientHealth } : {}),
       ...(hasOwn(normalized, 'wslStatus') ? { wslStatus: normalized.wslStatus } : {}),
       ...(hasOwn(normalized, 'projectsEnabled') ? { projectsEnabled: normalized.projectsEnabled } : {}),
       ...(hasOwn(normalized, 'allTimeProjectsOmitted') ? { allTimeProjectsOmitted: normalized.allTimeProjectsOmitted } : {}),
@@ -1431,12 +1474,17 @@ function deltaValue(base, fresh, anchor, key) {
     const keys = new Set([...Object.keys(base || {}), ...Object.keys(fresh || {}), ...Object.keys(anchor || {})]);
     const result = Object.getPrototypeOf(sample) === null ? Object.create(null) : {};
     for (const childKey of keys) {
-      result[childKey] = deltaValue(
-        base ? base[childKey] : undefined,
-        fresh ? fresh[childKey] : undefined,
-        anchor ? anchor[childKey] : undefined,
-        childKey
-      );
+      Object.defineProperty(result, childKey, {
+        value: deltaValue(
+          base ? base[childKey] : undefined,
+          fresh ? fresh[childKey] : undefined,
+          anchor ? anchor[childKey] : undefined,
+          childKey
+        ),
+        enumerable: true,
+        configurable: true,
+        writable: true
+      });
     }
     return result;
   }

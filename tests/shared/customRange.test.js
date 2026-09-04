@@ -131,6 +131,24 @@ test('periodFromSessions rebuilds totals from session maps', () => {
   assert.equal(period.clientModels.claude.sonnet, 20);
 });
 
+test('periodFromSessions normalizes the session identity stored in the row', () => {
+  const period = periodFromSessions({
+    'codex:fallback': {
+      client: 'Codex',
+      sessionId: 'fallback',
+      totalTokens: 7,
+      models: { 'gpt-5': 7 }
+    }
+  });
+
+  assert.deepEqual(period.sessions['codex:fallback'], {
+    client: 'codex',
+    sessionId: 'fallback',
+    totalTokens: 7,
+    models: { 'gpt-5': 7 }
+  });
+});
+
 test('formatCustomRangeLabel supports compact same-day form', () => {
   const label = formatCustomRangeLabel({
     startDate: '2026-07-24',

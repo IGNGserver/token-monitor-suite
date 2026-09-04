@@ -109,15 +109,15 @@ test('Cursor account status stays inline with an email-only summary', () => {
   assert.equal(declaration(expandedRule, 'transform'), 'rotate(180deg)');
 });
 
-test('Hub secret input stays masked and exposes an accessible paste button', () => {
+test('Hub device token input stays masked and exposes an accessible paste button', () => {
   const html = readRendererFile('index.html');
   const secretFieldMatch = html.match(/<div class="settings-field hub-secret-field">[\s\S]*?<\/div>\s*<div/);
   const secretField = secretFieldMatch?.[0]?.replace(/<div$/, '') || '';
-  const secretLabel = secretField.match(/<label for="secretInput" data-i18n="settings\.sync\.secret">Secret<\/label>/)?.[0] || '';
+  const secretLabel = secretField.match(/<label for="secretInput" data-i18n="settings\.sync\.secret">Device token<\/label>/)?.[0] || '';
   const secretRow = secretField.match(/<div class="hub-secret-row">[\s\S]*?<\/div>/)?.[0] || '';
   // Outer container must carry settings-field so it inherits font-size 11px
-  assert.match(secretField, /<div class="settings-field hub-secret-field">[\s\S]*?<label for="secretInput" data-i18n="settings\.sync\.secret">Secret<\/label>[\s\S]*?<div class="hub-secret-row">/);
-  assert.match(secretLabel, /<label for="secretInput" data-i18n="settings\.sync\.secret">Secret<\/label>/);
+  assert.match(secretField, /<div class="settings-field hub-secret-field">[\s\S]*?<label for="secretInput" data-i18n="settings\.sync\.secret">Device token<\/label>[\s\S]*?<div class="hub-secret-row">/);
+  assert.match(secretLabel, /<label for="secretInput" data-i18n="settings\.sync\.secret">Device token<\/label>/);
   assert.doesNotMatch(secretLabel, /secretPasteButton/);
   assert.match(secretRow, /<input id="secretInput" type="password"[\s\S]*data-i18n-placeholder="settings\.sync\.secretPlaceholder"/);
   assert.match(secretRow, /<button id="secretPasteButton" type="button" class="icon-button" title="Paste secret" data-i18n-title="settings\.sync\.pasteSecret" aria-label="Paste secret" data-i18n-aria-label="settings\.sync\.pasteSecret">/);
@@ -1183,4 +1183,3 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
   assert.match(renderLimitsBody, /if \(id === 'mimo' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
   assert.match(renderLimitsBody, /nodes\.push\(renderMimoAccountGroup\(label, visibleProviders, color\)\);/);
 });
-

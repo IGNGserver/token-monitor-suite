@@ -3,7 +3,13 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { aggregateDevices, extractUsageFromTokscale, mergeDeviceRecord } = require('../../src/shared/usage');
+const {
+  aggregateDevices,
+  extractUsageFromTokscale,
+  mergeDeviceRecord,
+  normalizeDeviceRecord
+} = require('../../src/shared/usage');
+const workerUsage = require('../../worker/src/shared/usage');
 
 function recordWithLimits(extra = {}) {
   return {
@@ -33,6 +39,32 @@ function recordWithLimits(extra = {}) {
     ...extra
   };
 }
+
+test('usage maps reject reserved keys without prototype pollution in Node and Worker paths', () => {
+  const originalConstructor = Object.getOwnPropertyDescriptor(Object.prototype, 'constructor');
+  const payload = JSON.parse('{"deviceId":"audit","today":{"clients":{"__proto__":7,"constructor":8,"prototype":9,"toString":11},"models":{"__proto__":13,"constructor":14,"toString":15},"clientModels":{"__proto__":{"constructor":17},"codex":{"__proto__":19,"gpt-5":20}},"sessions":{"__proto__":{"client":"codex","sessionId":"s","models":{"__proto__":23,"gpt-5":24}}}},"month":{"totalTokens":1},"allTime":{"totalTokens":1}}');
+
+  for (const api of [require('../../src/shared/usage'), workerUsage]) {
+    const normalized = api.normalizeDeviceRecord(payload);
+    const merged = api.mergePeriods(normalized.periods.today);
+    const delta = api.applyPeriodDelta(normalized.periods.today, normalized.periods.today, normalized.periods.today);
+    assert.deepEqual(Object.keys(normalized.periods.today.clients), ['tostring']);
+    assert.deepEqual(Object.keys(normalized.periods.today.models), ['tostring']);
+    assert.deepEqual(Object.keys(normalized.periods.today.clientModels), ['codex']);
+    assert.deepEqual(Object.keys(normalized.periods.today.sessions), ['codex:s']);
+    assert.equal(Object.hasOwn(merged.clients, '__proto__'), false);
+    assert.equal(Object.hasOwn(delta.clientModels, '__proto__'), false);
+
+    const projectPeriod = api.normalizePeriod(JSON.parse('{"projects":{"__proto__":{"label":"__proto__","tokens":5},"constructor":{"label":"constructor","tokens":7}}}'));
+    const projectDelta = api.applyPeriodDelta(projectPeriod, projectPeriod, projectPeriod);
+    assert.equal(Object.getPrototypeOf(projectDelta.projects), null);
+    assert.equal(projectDelta.projects.__proto__.tokens, 5);
+    assert.equal(projectDelta.projects.constructor.tokens, 7);
+  }
+
+  assert.equal(Object.getOwnPropertyDescriptor(Object.prototype, 'constructor')?.value, originalConstructor.value);
+  assert.equal(Object.prototype.auditPolluted, undefined);
+});
 
 test('mergeDeviceRecord preserves existing limits when incoming payload omits limits', () => {
   const existing = recordWithLimits();
@@ -930,7 +962,7 @@ test('aggregateDevices keeps a zero-usage live session unarchived in either merg
   assert.equal(aggregateDevices([archived, live], 0).periods.allTime.sessions['codex:s1'].archived, undefined);
 });
 
-const { normalizeDeviceRecord, aggregateHistory, carryDeviceHistory } = require('../../src/shared/usage');
+const { aggregateHistory, carryDeviceHistory } = require('../../src/shared/usage');
 
 test('normalizeDeviceRecord carries a history field when present', () => {
   const rec = normalizeDeviceRecord({

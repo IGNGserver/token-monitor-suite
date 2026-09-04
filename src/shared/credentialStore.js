@@ -10,6 +10,7 @@ const MIMO_MIGRATION_VERSION = 1;
 
 const CREDENTIAL_SETTING_PATHS = Object.freeze({
   hubHostSecret: ['hub', 'hostSecret'],
+  hubHostAdminSecret: ['hub', 'adminSecret'],
   secret: ['hub', 'clientSecret'],
   claudeWebCookie: ['providers', 'claude', 'webCookie'],
   opencodeCookie: ['providers', 'opencode', 'cookie'],
@@ -332,6 +333,62 @@ class CredentialStore {
     deleteValueAt(document.credentials, ['providers', 'mimo', 'accounts', accountId]);
     this.writeDocument(document);
     return !this.readMimoCredential(accountId);
+  }
+
+  readHubIngestCredentials(document = this.readDocument()) {
+    const stored = valueAt(document.credentials, ['hub', 'ingestCredentials']);
+    if (!isObject(stored)) return {};
+    const result = {};
+    for (const [rawDeviceId, rawSecret] of Object.entries(stored)) {
+      const deviceId = safeDynamicKey(rawDeviceId);
+      const secret = typeof rawSecret === 'string' ? rawSecret.trim() : '';
+      if (deviceId && secret) result[deviceId] = secret;
+    }
+    return result;
+  }
+
+  writeHubIngestCredential(id, secret) {
+    const deviceId = safeDynamicKey(id);
+    const normalized = String(secret || '').trim();
+    if (!deviceId || !normalized) return false;
+    const document = this.readDocument();
+    setValueAt(document.credentials, ['hub', 'ingestCredentials', deviceId], normalized);
+    this.writeDocument(document);
+    return this.readHubIngestCredentials()[deviceId] === normalized;
+  }
+
+  removeHubIngestCredential(id) {
+    const deviceId = safeDynamicKey(id);
+    if (!deviceId) return false;
+    const document = this.readDocument();
+    deleteValueAt(document.credentials, ['hub', 'ingestCredentials', deviceId]);
+    this.writeDocument(document);
+    return !Object.hasOwn(this.readHubIngestCredentials(), deviceId);
+  }
+
+  renameHubIngestCredential(previousId, nextId) {
+    const previousDeviceId = safeDynamicKey(previousId);
+    const nextDeviceId = safeDynamicKey(nextId);
+    if (!previousDeviceId || !nextDeviceId) return false;
+    const document = this.readDocument();
+    const credentials = this.readHubIngestCredentials(document);
+    if (!Object.hasOwn(credentials, previousDeviceId)) {
+      return previousDeviceId === nextDeviceId && Object.hasOwn(credentials, nextDeviceId);
+    }
+    if (!Object.hasOwn(credentials, nextDeviceId)) {
+      setValueAt(
+        document.credentials,
+        ['hub', 'ingestCredentials', nextDeviceId],
+        credentials[previousDeviceId]
+      );
+    }
+    if (previousDeviceId !== nextDeviceId) {
+      deleteValueAt(document.credentials, ['hub', 'ingestCredentials', previousDeviceId]);
+    }
+    this.writeDocument(document);
+    const persisted = this.readHubIngestCredentials();
+    return Object.hasOwn(persisted, nextDeviceId)
+      && (previousDeviceId === nextDeviceId || !Object.hasOwn(persisted, previousDeviceId));
   }
 
   migrateLegacyMimoCredentials(entries) {

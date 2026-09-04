@@ -489,6 +489,15 @@ body.is-windows .title-controls .tabs { right: 120px; }
   background: rgba(var(--accent-rgb), 0.08);
   box-shadow: inset 0 1px 0 rgba(var(--overlay-rgb), 0.075);
 }
+.period-calendar-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.36;
+}
+.period-calendar-button:disabled:hover {
+  color: var(--text);
+  border-color: rgba(var(--line-rgb), 0.09);
+  background: rgba(var(--overlay-rgb), 0.026);
+}
 .title-controls:has(.actions-hotspot:hover) .tabs,
 .title-controls:has(.window-actions:hover) .tabs,
 .title-controls:has(.window-actions:focus-within) .tabs,
@@ -2851,11 +2860,15 @@ html.is-windows .settings-panel select option {
 .row-icon-zed        { -webkit-mask-image: url(../../../assets/icons/zed.svg);           mask-image: url(../../../assets/icons/zed.svg); }
 .row-icon-kilocode   { -webkit-mask-image: url(../../../assets/icons/kilocode.svg);      mask-image: url(../../../assets/icons/kilocode.svg); }
 .row-icon-micode     { -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);       mask-image: url(../../../assets/icons/xiaomi.svg); }
+.row-icon-commandcode { -webkit-mask-image: url(../../../assets/icons/commandcode.svg); mask-image: url(../../../assets/icons/commandcode.svg); }
 .row-icon-zcode      { -webkit-mask-image: url(../../../assets/icons/zai.svg);          mask-image: url(../../../assets/icons/zai.svg); }
 .row-icon-kiro       { -webkit-mask-image: url(../../../assets/icons/kiro.svg);          mask-image: url(../../../assets/icons/kiro.svg); }
 .row-icon-codebuddy  { -webkit-mask-image: url(../../../assets/icons/codebuddy.svg);     mask-image: url(../../../assets/icons/codebuddy.svg); }
 .row-icon-workbuddy  { -webkit-mask-image: url(../../../assets/icons/workbuddy.svg);     mask-image: url(../../../assets/icons/workbuddy.svg); }
 .row-icon-proma      { -webkit-mask-image: url(../../../assets/icons/proma.svg);         mask-image: url(../../../assets/icons/proma.svg); }
+.row-icon-qodercn    { -webkit-mask-image: url(../../../assets/icons/qodercn.svg);       mask-image: url(../../../assets/icons/qodercn.svg); }
+.row-icon-reasonix   { -webkit-mask-image: url(../../../assets/icons/reasonix.svg);      mask-image: url(../../../assets/icons/reasonix.svg); }
+.row-icon-deepseek-harness { -webkit-mask-image: url(../../../assets/icons/deepseek.svg); mask-image: url(../../../assets/icons/deepseek.svg); }
 .row-icon-opencode   { -webkit-mask-image: url(../../../assets/icons/opencode.svg);      mask-image: url(../../../assets/icons/opencode.svg); }
 .row-icon-openrouter { -webkit-mask-image: url(../../../assets/icons/openrouter.svg);    mask-image: url(../../../assets/icons/openrouter.svg); }
 .row-icon-openclaw   { -webkit-mask-image: url(../../../assets/icons/openclaw.svg);      mask-image: url(../../../assets/icons/openclaw.svg); }

@@ -9,5 +9,5 @@ plugins {
 tasks.register("test") {
   group = "verification"
   description = "Runs Android JVM verification tasks."
-  dependsOn(":app:runRepositoryTests")
+  dependsOn(":app:runUnitTests")
 }

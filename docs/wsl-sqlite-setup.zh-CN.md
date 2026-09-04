@@ -20,9 +20,9 @@ Agent 在数据库旁边运行 Linux 版 tokscale，再把规范化后的用量�
 
 ## 1. 在 Windows 启动 Hub
 
-打开 Token Monitor 的 **设置 → 多设备同步**，选择 **在这台设备托管 Hub**，并记下 Hub URL 与共享密钥。
+打开 Token Monitor 的 **设置 → 多设备同步**，选择 **在这台设备托管 Hub**。在 **设备令牌** 中输入 `wsl-agent`，创建后记下 Hub URL 和生成的设备令牌。
 
-请只在可信网络中开放 hub，并保留自动生成的密钥。如果 WSL 无法访问界面显示的主机名，请改用 Windows 主机 IP，端口保持不变，默认是 `17321`。
+请只在可信网络中开放 hub，并保留生成的令牌。如果 WSL 无法访问界面显示的主机名，请改用 Windows 主机 IP，端口保持不变，默认是 `17321`。
 
 ## 2. 在 WSL 安装 Headless Agent
 
@@ -40,12 +40,17 @@ npm ci
 
 ```env
 TOKEN_MONITOR_HUB_URL=http://WINDOWS_HOST_IP:17321
-TOKEN_MONITOR_SECRET=你的共享密钥
+TOKEN_MONITOR_SECRET=与_wsl-agent_绑定的设备令牌
 TOKEN_MONITOR_DEVICE_ID=wsl-agent
 TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode
+TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1
 ```
 
 `TOKEN_MONITOR_DEVICE_ID` 必须与 Windows widget 的设备 ID 不同。Hub 会把相同 ID 当作同一台设备，后发送的记录会覆盖前一条。
+
+设备令牌必须来自 Hub 的 `TOKEN_MONITOR_INGEST_CREDENTIALS`，其中键名与
+`wsl-agent` 一致；不要复用 admin 或 viewer 令牌。仅当 Hub 位于可信 LAN/VPN
+且暂时无法启用 HTTPS 时，才使用上述明文 HTTP 开关。
 
 ## 3. 明确采集边界
 
@@ -74,8 +79,7 @@ npm run agent
 
 ## 排查
 
-- **没有出现第二台设备**：检查 Hub URL、共享密钥，以及 Windows 防火墙是否允许访问 hub 端口。
+- **没有出现第二台设备**：检查 Hub URL、与 `wsl-agent` 绑定的设备令牌、必要时的明文 HTTP 开关，以及 Windows 防火墙是否允许访问 hub 端口。
 - **请求被代理拦截**：把 Windows 主机 IP 加入 `NO_PROXY` 与 `no_proxy`，或为 agent 进程取消代理环境变量。
 - **总量重复**：缩小 `TOKEN_MONITOR_CLIENTS` 的范围；如果 agent 负责全部 WSL 工具，则关闭 Windows widget 的内建 WSL 扫描。
 - **WSL 检测仍显示无数据**：Windows 侧的状态只描述它自己的 `\\wsl$` 扫描。WSL agent 会作为另一台同步设备出现，并作为这些 SQLite 工具的权威来源。
-

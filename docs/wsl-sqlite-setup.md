@@ -20,9 +20,9 @@ The agent runs the Linux tokscale binary next to the database, then sends only t
 
 ## 1. Start the hub on Windows
 
-In Token Monitor, open **Settings → Multi-device Sync** and select **Host hub on this device**. Record the hub URL and shared secret.
+In Token Monitor, open **Settings → Multi-device Sync** and select **Host hub on this device**. Enter `wsl-agent` under **Device token**, create it, and record the Hub URL and generated device token.
 
-Keep the hub on a trusted network and retain the generated secret. If WSL cannot reach the displayed hostname, use the Windows host IP while keeping the same port, which defaults to `17321`.
+Keep the hub on a trusted network and retain the generated token. If WSL cannot reach the displayed hostname, use the Windows host IP while keeping the same port, which defaults to `17321`.
 
 ## 2. Install the headless agent in WSL
 
@@ -40,12 +40,18 @@ Create `token-monitor/.env`:
 
 ```env
 TOKEN_MONITOR_HUB_URL=http://WINDOWS_HOST_IP:17321
-TOKEN_MONITOR_SECRET=YOUR_SHARED_SECRET
+TOKEN_MONITOR_SECRET=YOUR_WSL_DEVICE_TOKEN
 TOKEN_MONITOR_DEVICE_ID=wsl-agent
 TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode
+TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1
 ```
 
 `TOKEN_MONITOR_DEVICE_ID` must differ from the Windows widget device ID. The hub treats matching IDs as the same device, so a duplicate ID would make the latest post replace the previous record.
+
+`YOUR_WSL_DEVICE_TOKEN` must be the token bound to `wsl-agent` in the Hub's
+`TOKEN_MONITOR_INGEST_CREDENTIALS`; do not reuse the admin or viewer token. The
+insecure-HTTP opt-in is only for a trusted LAN/VPN. Prefer an HTTPS Hub when
+available.
 
 ## 3. Choose one collection boundary
 
@@ -74,8 +80,7 @@ For unattended use, run that command from your normal WSL service manager or log
 
 ## Troubleshooting
 
-- **No second device:** verify the hub URL, shared secret, and Windows firewall access to the hub port.
+- **No second device:** verify the hub URL, the device token bound to `wsl-agent`, the insecure-HTTP opt-in when applicable, and Windows firewall access to the hub port.
 - **Request goes through a proxy:** add the Windows host IP to `NO_PROXY` and `no_proxy`, or unset the proxy variables for the agent process.
 - **Totals are doubled:** narrow `TOKEN_MONITOR_CLIENTS`, or disable the Windows widget's built-in WSL scan when the agent owns all WSL tools.
 - **WSL detection still says no data:** the Windows-side status describes its own `\\wsl$` scan. The WSL agent appears as a separate synced device and is the authoritative source for these SQLite-backed tools.
-

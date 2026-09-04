@@ -7,6 +7,21 @@ const { PERIODS, normalizePeriod } = require('./usage');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./reasonixSessionGuard');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function mapNumber(map, key) {
+  return hasOwn(map, key) ? numberValue(map[key]) : 0;
+}
+
+function ensureNestedMap(map, key) {
+  if (!hasOwn(map, key) || !map[key] || typeof map[key] !== 'object' || Array.isArray(map[key])) {
+    map[key] = {};
+  }
+  return map[key];
+}
+
 function numberValue(value) {
   const parsed = Number(value || 0);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -185,9 +200,9 @@ function addSessionBreakdown(period, session) {
   const cacheWrite = Math.max(0, Math.round(numberValue(session.cacheWriteTokens)));
   const output = Math.max(0, Math.round(numberValue(session.outputTokens)));
 
-  if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
-  if (cacheWrite > 0) period.clientCacheWrites[client] = (period.clientCacheWrites[client] || 0) + cacheWrite;
-  if (output > 0) period.clientOutputs[client] = (period.clientOutputs[client] || 0) + output;
+  if (cacheRead > 0) period.clientCacheReads[client] = mapNumber(period.clientCacheReads, client) + cacheRead;
+  if (cacheWrite > 0) period.clientCacheWrites[client] = mapNumber(period.clientCacheWrites, client) + cacheWrite;
+  if (output > 0) period.clientOutputs[client] = mapNumber(period.clientOutputs, client) + output;
 
   const modelTokens = Object.entries(session.models || {})
     .map(([model, tokens]) => [model, numberValue(tokens)])
@@ -203,15 +218,15 @@ function addSessionBreakdown(period, session) {
     const cr = cacheReads.get(model) || 0;
     const cw = cacheWrites.get(model) || 0;
     const ou = outputs.get(model) || 0;
-    if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
-    if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
-    if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;
+    if (cr > 0) period.modelCacheReads[model] = mapNumber(period.modelCacheReads, model) + cr;
+    if (cw > 0) period.modelCacheWrites[model] = mapNumber(period.modelCacheWrites, model) + cw;
+    if (ou > 0) period.modelOutputs[model] = mapNumber(period.modelOutputs, model) + ou;
   }
 }
 
 function addArchivedSession(period, session) {
   const key = sessionKey(session.client, session.sessionId);
-  if (!key || period.sessions[key]) return;
+  if (!key || hasOwn(period.sessions, key)) return;
 
   const archived = { ...clone(session), archived: true };
   period.sessions[key] = archived;
@@ -226,22 +241,22 @@ function addArchivedSession(period, session) {
   period.cacheReadTokens += cacheRead;
   period.cacheWriteTokens += cacheWrite;
   period.outputTokens += output;
-  if (tokens > 0) period.clients[archived.client] = (period.clients[archived.client] || 0) + tokens;
-  if (cost > 0) period.clientCosts[archived.client] = (period.clientCosts[archived.client] || 0) + cost;
+  if (tokens > 0) period.clients[archived.client] = mapNumber(period.clients, archived.client) + tokens;
+  if (cost > 0) period.clientCosts[archived.client] = mapNumber(period.clientCosts, archived.client) + cost;
 
   for (const [model, modelTokens] of Object.entries(archived.models || {})) {
     const next = Math.max(0, Math.round(numberValue(modelTokens)));
     if (next <= 0) continue;
-    period.models[model] = (period.models[model] || 0) + next;
-    if (!period.clientModels[archived.client]) period.clientModels[archived.client] = {};
-    period.clientModels[archived.client][model] = (period.clientModels[archived.client][model] || 0) + next;
+    period.models[model] = mapNumber(period.models, model) + next;
+    const models = ensureNestedMap(period.clientModels, archived.client);
+    models[model] = mapNumber(models, model) + next;
   }
   for (const [model, modelCost] of Object.entries(archived.modelCosts || {})) {
     const next = numberValue(modelCost);
     if (next <= 0) continue;
-    period.modelCosts[model] = (period.modelCosts[model] || 0) + next;
-    if (!period.clientModelCosts[archived.client]) period.clientModelCosts[archived.client] = {};
-    period.clientModelCosts[archived.client][model] = (period.clientModelCosts[archived.client][model] || 0) + next;
+    period.modelCosts[model] = mapNumber(period.modelCosts, model) + next;
+    const costs = ensureNestedMap(period.clientModelCosts, archived.client);
+    costs[model] = mapNumber(costs, model) + next;
   }
 
   addSessionBreakdown(period, archived);

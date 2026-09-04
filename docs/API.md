@@ -1,13 +1,23 @@
 # API
 
-The hub exposes a small JSON HTTP API and serves a same-origin web dashboard (PWA) from the hub root (/). Static UI assets do not require the shared secret; every /api/* route still does.
+The hub exposes a JSON HTTP API and serves a same-origin web dashboard (PWA) from the hub root (`/`). Static UI assets and `/api/health` are public; private API routes require a scoped credential. Remote connections use HTTPS by default. Node Hub/agent/desktop require `TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1` for an intentional non-loopback HTTP deployment; Android release builds do not permit cleartext traffic.
 
 
 For pricing refreshes, the Hub invokes `tokscale pricing <model> --json` first. If tokscale cannot complete its upstream catalog request, the Hub retries against the configured `TOKSCALE_PRICING_CATALOG_URL` (default `https://models.dev/api.json`), which is a public catalog tokscale also uses. The catalog is cached in the Hub process for six hours; the resulting `model_pricing` row remains durable.
 
 ## Authentication
 
-All endpoints except `/api/health` require the configured shared secret.
+Configure independent credentials:
+
+- `TOKEN_MONITOR_ADMIN_SECRET`: read, ingest, and every administrative mutation.
+- `TOKEN_MONITOR_VIEWER_SECRET`: read-only dashboard/API access. This is the only credential accepted through `?secret=` for header-limited widgets.
+- `TOKEN_MONITOR_INGEST_CREDENTIALS`: JSON object mapping the exact `deviceId` to a device token, for example `{"workstation":"...","laptop":"..."}`. A device token can read shared stats and ingest only its bound identity.
+- `TOKEN_MONITOR_SECRET`: legacy read-only credential. Temporary ingest/admin elevation requires `TOKEN_MONITOR_ALLOW_LEGACY_INGEST=1` or `TOKEN_MONITOR_ALLOW_LEGACY_ADMIN=1`; remove those flags after migration.
+
+Every configured admin, viewer, legacy, and device credential must be distinct;
+the Hub refuses to start when one token would resolve to more than one role.
+
+An unconfigured Node Hub is restricted to loopback. An internet-facing Worker refuses all private routes until at least one scoped or legacy credential is configured.
 
 Use either:
 
@@ -21,6 +31,10 @@ or:
 X-Token-Monitor-Secret: <secret>
 ```
 
+Privileged credentials are rejected in query strings. Query credentials can appear in browser, proxy, CDN, or diagnostic logs, so use a rotatable viewer token only when the client cannot send a header.
+
+The Hub rate-limits repeated authentication failures per source and ingest bursts per authenticated principal. Successful administrative mutations emit structured `[hub-audit]` records containing the time, principal ID, action, and target; secret values are never logged.
+
 ## `GET /api/health`
 
 Health check. Does not require authentication.
@@ -32,15 +46,50 @@ Example response:
   "ok": true,
   "role": "hub",
   "version": 1,
+  "apiVersion": 2,
+  "capabilities": {
+    "stats": true,
+    "history": true,
+    "statsStream": true,
+    "subscriptions": true,
+    "usageRange": true,
+    "pricing": true,
+    "deviceDelete": true,
+    "deviceRename": true,
+    "publicStats": false
+  },
   "deviceCount": 2,
   "secretRequired": true,
   "now": "2026-05-18T00:00:00.000Z"
 }
 ```
 
+`version` remains `1` for compatibility. `apiVersion` versions the capability/authentication contract. The Worker reports `usageRange: false` and `pricing: false`; clients must hide or explain unsupported features.
+
+## `GET /api/capabilities`
+
+Requires read scope and returns the server feature set plus the authenticated credential's `role` and `scopes`. Clients use this endpoint to validate a saved token and gate administrative or runtime-specific UI.
+
+```json
+{
+  "apiVersion": 2,
+  "capabilities": { "stats": true, "usageRange": false, "pricing": false },
+  "role": "device",
+  "scopes": ["read", "ingest"]
+}
+```
+
 ## `POST /api/ingest`
 
 Posts one device usage summary.
+
+Requires ingest scope. A device credential is accepted only when the payload `deviceId` exactly matches its configured identity. Reposting an unchanged cumulative snapshot is idempotent: Node derives zero ledger delta and Worker replaces the same current record.
+
+First-party agents send `Prefer: return=minimal` and receive only
+`{"ok":true,"deviceId":"..."}`. This avoids aggregating and returning the full
+multi-device snapshot when no SSE consumer needs it. For compatibility, callers
+that omit the header still receive the legacy `stats` field; when SSE consumers
+are connected, the Hub computes one snapshot and reuses it for the broadcast.
 
 Example payload:
 
@@ -203,7 +252,7 @@ Current agents and widgets include `osName` and, when known, `osVersion` so devi
 `limits` is optional. Agents and widgets include it when AI Tool Limits detection is enabled. Raw OAuth credentials, access tokens, refresh tokens, and provider response bodies must never be sent.
 
 `limits.providers[].provider` is one of `claude`, `codex`, `opencode`, `cursor`, `antigravity`, `kimi`, `grok`, `copilot`, `commandcode`, `mimo`, `zai`, `zaiteam`, `kiro`, `qoder`, `deepseek`, `openrouter`, `minimax`, `volcengine`, `ollama`, or `thirdparty`.
-`limits.providers[].accountKey` is a stable hashed account identifier (`sha256:…`) used to dedupe the same account across devices. `accountEmail` is the account email when available, and `accountName` is a sanitized display/profile name. Codex may additionally send `workspaceKind: "personal"` when the workspace has no provider-supplied name, allowing account-management UI to localize the Personal label without persisting translated text. `accountLabel` is the legacy provider-defined short label retained for mixed-version compatibility: older OpenCode renderers use it as the profile name, while existing providers may use it for the plan. `planLabel` is the explicit plan label (for example `Plus`, `Go`, or `Zen`) when identity and plan must be carried separately; readers fall back to `accountLabel` for payloads produced before `planLabel` existed. These fields MAY be sent to the authenticated hub so devices can identify each account and its plan. The hub ingest is protected by the shared `secret`; the **public** stats endpoints (`publicLimits`) strip `accountKey`, `accountEmail`, `accountName`, `accountLabel`, `planLabel`, and `workspaceKind` so neither account identity nor plan labels are exposed publicly.
+`limits.providers[].accountKey` is a stable hashed account identifier (`sha256:…`) used to dedupe the same account across devices. `accountEmail` is the account email when available, and `accountName` is a sanitized display/profile name. Codex may additionally send `workspaceKind: "personal"` when the workspace has no provider-supplied name, allowing account-management UI to localize the Personal label without persisting translated text. `accountLabel` is the legacy provider-defined short label retained for mixed-version compatibility: older OpenCode renderers use it as the profile name, while existing providers may use it for the plan. `planLabel` is the explicit plan label (for example `Plus`, `Go`, or `Zen`) when identity and plan must be carried separately; readers fall back to `accountLabel` for payloads produced before `planLabel` existed. These fields MAY be sent to the authenticated hub so devices can identify each account and its plan. Hub ingest requires an admin, explicitly elevated legacy, or device-bound credential; the **public** stats endpoints (`publicLimits`) strip `accountKey`, `accountEmail`, `accountName`, `accountLabel`, `planLabel`, and `workspaceKind` so neither account identity nor plan labels are exposed publicly.
 `limits.providers[].source` is one of `oauth`, `cli`, `web`, `rpc`, `local`, or `api`; `local` means the value was read from an on-disk store such as OpenCode Go usage from `opencode.db`, `web` means a browser/session cookie backed web endpoint (Cursor, OpenCode web accounts, Qoder, MiMo, Kimi membership, Ollama), and `api` means a provider HTTP API authenticated by an API key or AK/SK credentials (OpenRouter, DeepSeek, Minimax, Copilot, GLM/Z.ai, Volcengine, Kimi Code).
 `limits.providers[].balanceUsd` is an optional prepaid credit balance in USD (OpenCode Zen); `null` when the provider has no balance concept or none could be read. A genuine `0` (no remaining credit) is distinct from `null`.
 `limits.providers[].balance` is an optional native-currency prepaid balance block. DeepSeek uses `{ amount, currency, todaySpend, monthSpend, allTimeSpend, trackingSince, monthSinceTracking }`: `amount` is the spendable balance in the account's own currency (e.g. `CNY`/`USD`); the spend fields are derived from locally observed paid-balance drawdown, `allTimeSpend` keeps accumulating after old daily buckets are pruned, `trackingSince` records when that local observation began, and `monthSinceTracking` is `true` until a full month of history has accrued. OpenRouter uses USD: `/key` supplies `todaySpend`, `weekSpend`, `monthSpend`, and the provider-reported lifetime `allTimeSpend`; when OpenRouter authorizes `/credits` (officially documented for Management keys), `amount` and the corresponding real Credits meter are also included. Other API keys can still report their own spend and configured key limit without inventing an account balance. MiMo may additionally send `giftBalance`, `cashBalance`, Token Plan usage fields, and `planStatus` (`active`, `expired`, `none`, or `null`). An expired MiMo Token Plan has no quota window even when its prepaid balance remains available. `null` when not applicable. DeepSeek uses `source: "api"` with an empty `windows` array (it has no rate-limit windows). OpenRouter, GLM/Z.ai, Volcengine, Qoder, Kimi, and Ollama report quota/credit windows through the same `windows` array.
@@ -265,13 +314,17 @@ When an ingest event has configured pricing, the hub copies those four values, s
 
 ## `DELETE /api/devices/:id`
 
-Deletes one device record and its mutable session rollup from the hub store. Historical `usage_events` are deliberately retained and their nullable device foreign key is set to `null`.
+Requires admin scope. Removes the device from visible stats. The Node/MySQL Hub keeps its ingest baseline and immutable event ledger as a tombstone, so re-ingesting the same identity does not duplicate historical usage.
 
-This is useful after renaming a device id.
+## `POST /api/devices/:id/rename`
+
+Requires admin scope. Body: `{"deviceId":"new-id"}`. Atomically moves the current record and measurement identity to the new ID; the Node/MySQL Hub also moves its baseline, ledger, and session rows. Returns `409 target_exists` rather than merging two identities.
+
+For a standalone Node or Worker Hub, credential bindings are deployment configuration rather than database rows. Use this order: stop the old client's uploads; provision a distinct token bound to the new ID and reload the Hub configuration; call the rename endpoint; change the client's Device ID and token together; resume it and verify one successful upload; then remove the old binding. Uploading the new ID before the rename creates a conflicting target, while resuming the old binding afterwards recreates the old identity. The embedded Electron Host migrates its own local binding and refreshes the live authorization policy automatically.
 
 ## `GET /api/usage/range`
 
-Query a client/model token & cost aggregate for a custom calendar range. Desktop (hub mode) and Android both call this endpoint so custom-range totals stay aligned.
+Query a client/model token & cost aggregate for a custom calendar range. Desktop (hub mode) and Android both call this endpoint so custom-range totals stay aligned. This endpoint is currently implemented by the Node/MySQL Hub; the Cloudflare Worker does not expose it yet, so clients must capability-gate the feature.
 
 Preferred query parameters (local calendar days, same family as day/month tabs and tokscale `--since`/`--until`):
 

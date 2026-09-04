@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.igng.tokenmonitor.android.data.model.BatchPricingResponseDto
 import com.igng.tokenmonitor.android.data.model.DeviceDto
 import com.igng.tokenmonitor.android.data.model.HistoryDto
+import com.igng.tokenmonitor.android.data.model.HubAuthorizationDto
 import com.igng.tokenmonitor.android.data.model.PeriodDto
 import com.igng.tokenmonitor.android.data.model.PricingDto
 import com.igng.tokenmonitor.android.data.model.PricingRequestDto
@@ -38,6 +39,7 @@ data class HubUiState(
   val stats: StatsDto? = null,
   val history: HistoryDto? = null,
   val devices: List<DeviceDto> = emptyList(),
+  val authorization: HubAuthorizationDto? = null,
   val pricing: List<PricingDto> = emptyList(),
   val isLoading: Boolean = false,
   val error: String? = null,
@@ -56,13 +58,22 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
   private var sseJob: Job? = null
   private var rangeJob: Job? = null
 
-  init { refreshAll(); startRealtime() }
+  init {
+    viewModelScope.launch {
+      when (val result = repository.capabilities()) {
+        is HubResult.Success -> _state.value = _state.value.copy(authorization = result.value)
+        is HubResult.Failure -> _state.value = _state.value.copy(error = result.error.message)
+      }
+      refreshAll()
+      startRealtime()
+    }
+  }
 
   fun refreshAll() {
     refreshStats()
     refreshHistory()
     refreshDevices()
-    refreshPricing()
+    if (_state.value.authorization?.capabilities?.pricing == true) refreshPricing()
     val current = _state.value
     if (current.analyticsPeriod == AnalyticsPeriodKind.Custom && current.customRange != null) {
       val range = current.customRange
@@ -96,6 +107,7 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
   }
 
   fun refreshPricing() = viewModelScope.launch {
+    if (_state.value.authorization?.capabilities?.pricing != true) return@launch
     when (val result = repository.pricing()) {
       is HubResult.Success -> _state.value = _state.value.copy(pricing = result.value.pricing, error = null)
       is HubResult.Failure -> _state.value = _state.value.copy(error = result.error.message)
@@ -103,6 +115,7 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
   }
 
   fun savePricing(model: String, request: PricingRequestDto) = viewModelScope.launch {
+    if (_state.value.authorization?.scopes?.contains("admin") != true) return@launch
     when (val result = repository.putPricing(model, request)) {
       is HubResult.Success -> refreshPricing()
       is HubResult.Failure -> _state.value = _state.value.copy(error = result.error.message)
@@ -110,6 +123,7 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
   }
 
   fun fetchUpstream(model: String) = viewModelScope.launch {
+    if (_state.value.authorization?.scopes?.contains("admin") != true) return@launch
     when (val result = repository.fetchUpstream(model)) {
       is HubResult.Success -> refreshPricing()
       is HubResult.Failure -> _state.value = _state.value.copy(error = result.error.message)
@@ -117,6 +131,7 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
   }
 
   fun fetchAllUpstream() = viewModelScope.launch {
+    if (_state.value.authorization?.scopes?.contains("admin") != true) return@launch
     when (val result = repository.fetchAllUpstream()) {
       is HubResult.Success -> {
         _state.value = _state.value.copy(batchResult = result.value)
@@ -131,6 +146,10 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
 
   fun setAnalyticsPeriod(kind: AnalyticsPeriodKind) {
     if (kind == AnalyticsPeriodKind.Custom) {
+      if (_state.value.authorization?.capabilities?.usageRange != true) {
+        _state.value = _state.value.copy(error = "当前 Hub 不支持自定义时间范围。")
+        return
+      }
       _state.value = _state.value.copy(analyticsPeriod = AnalyticsPeriodKind.Custom)
       return
     }
@@ -148,6 +167,10 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
     endHour: Int = 23,
     label: String? = null
   ) {
+    if (_state.value.authorization?.capabilities?.usageRange != true) {
+      _state.value = _state.value.copy(error = "当前 Hub 不支持自定义时间范围。")
+      return
+    }
     val rangeLabel = label ?: formatRangeLabel(startDate, endDate, startHour, endHour)
     val selection = CustomRangeSelection(startDate, endDate, startHour, endHour, rangeLabel)
     rangeJob?.cancel()

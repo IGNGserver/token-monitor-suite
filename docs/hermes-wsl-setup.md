@@ -52,8 +52,8 @@ Hermes Agent 运行在 WSL 中，其会话数据存储在 `~/.hermes/state.db`�
 1. 打开 Token Monitor
 2. 进入 **设置（Settings）** → **多设备同步（Multi-device Sync）**
 3. 选择 **「在这台设备托管 Hub」**
-4. 确认端口（默认 `17321`）和共享密钥已生成
-5. 记录下 **Hub URL**（如 `http://192.168.x.x:17321`）和 **共享密钥**
+4. 在 **设备令牌** 中输入 `hermes-wsl` 并创建与该设备 ID 绑定的令牌
+5. 记录下 **Hub URL**（如 `http://192.168.x.x:17321`）和刚创建的 **设备令牌**
 
 ### 第二步：在 WSL 安装 Token Monitor
 
@@ -75,8 +75,11 @@ npm install
 # Hub 地址（Windows 端的 IP 和端口）
 TOKEN_MONITOR_HUB_URL=http://192.168.x.x:17321
 
-# 共享密钥（与 Windows hub 保持一致）
-TOKEN_MONITOR_SECRET=你的共享密钥
+# 与 hermes-wsl 设备 ID 绑定的上报令牌（不要复用 admin/viewer 令牌）
+TOKEN_MONITOR_SECRET=与_hermes-wsl_绑定的设备令牌
+
+# 仅限可信 LAN/VPN 中暂时使用明文 HTTP；能用 HTTPS 时应删除
+TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1
 
 # 设备 ID —— 必须与 Windows widget 不同！
 # 如果两台设备 ID 相同，后推送的数据会覆盖前者
@@ -85,6 +88,8 @@ TOKEN_MONITOR_DEVICE_ID=hermes-wsl
 
 > **💡 提示：** Windows 端和 WSL 端的设备 ID 不能相同。
 > Windows widget 通常使用主机名（如 `DESKTOP-XXX`），WSL agent 建议设为 `hermes-wsl` 或 `wsl-agent` 以避免冲突。
+> Hub 必须在 `TOKEN_MONITOR_INGEST_CREDENTIALS` 中为这个设备 ID 保存对应令牌。
+> Hub 必须在 `TOKEN_MONITOR_INGEST_CREDENTIALS` 中为这个设备 ID 配置对应令牌。
 
 ### 第四步：运行 Agent 验证
 

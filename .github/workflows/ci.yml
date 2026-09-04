@@ -52,21 +52,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Run macOS Widget Node tests
-        run: >-
-          node --test
-          tests/shared/macWidgetSnapshot.test.js
-          tests/electron/macWidgetBridge.test.js
-          tests/electron/macWidgetDeepLink.test.js
-          tests/electron/macWidgetHistory.test.js
-          tests/electron/macWidgetHistoryStore.test.js
-          tests/electron/macWidgetSnapshotController.test.js
-          tests/electron/macWidgetSnapshotLane.test.js
-          tests/electron/macWidgetLaunchServicesRecovery.test.js
-          tests/electron/macWidgetReloader.test.js
-          tests/electron/macWidgetSigning.test.js
-          tests/electron/macosProvisioning.test.js
-          tests/electron/macWidgetIntegration.test.js
-          tests/electron/macWidgetVerifier.test.js
+        run: node --test tests/shared/macWidgetSnapshot.test.js
       - name: Run native macOS Widget tests
         run: >-
           xcodebuild

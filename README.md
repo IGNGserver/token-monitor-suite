@@ -26,7 +26,7 @@
 
 ## What is Token Monitor?
 
-A desktop widget that shows live token usage and AI Tool Limits across 30+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project.
+A desktop widget that shows live token usage and AI Tool Limits across 31+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project.
 
 ## Supported Tools
 
@@ -56,6 +56,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code extension logs | ✅ | — | — |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/` (default `~/.dsh/sessions/`; `session.jsonl.zstd`) | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db` (CN only); Qoder dashboard cookie (big-model credits via Qoder usage API) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek | DeepSeek API key (balance via DeepSeek API) | — | ✅ | — |
@@ -113,7 +114,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Tracking usage
 
-- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 24+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
+- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 25+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
 - **Per-session detail** — open a Claude Code, Codex, or OpenCode session to see tokens per prompt, expandable to each reply's exact token split and tools used (read on-demand from local transcripts or databases, never synced)
 - **Cache hit statistics** — click any tool or model to expand a detailed breakdown of input tokens (cache hit vs miss), output tokens, and hit-rate percentages
 - **Cost & currency** — cost alongside token counts, shown in USD, TWD, HKD, or CNY; exchange rates auto-update daily and can be manually overridden in Settings
@@ -168,9 +169,11 @@ Local mode is the default: launch the app and it starts tracking this device. No
 
 Pick ONE hub backend that all your devices (and any headless agents) connect to. On each device, open the widget and pick a mode under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget.
 
+Hub credentials are scoped: viewer tokens are read-only, device tokens can read and ingest only their bound Device ID, and admin tokens perform mutations. Remote connections require HTTPS by default; desktop/agent HTTP needs an explicit trusted-LAN opt-in, while Android release builds always require HTTPS.
+
 #### Option A — Host the hub from the widget (easiest, no CLI)
 
-In the widget on one always-on machine, open Settings → Multi-device Sync and pick **Host hub on this device**. The widget generates a random secret and lists the LAN URLs other devices can connect to (Tailscale or ZeroTier addresses appear here too). On every other device, pick **Connect to a hub** and paste the URL + secret.
+In the widget on one always-on machine, open Settings → Multi-device Sync and pick **Host hub on this device**. For every remote Device ID, create a bound device token and paste that token into the matching client. The host also exposes a read-only viewer token and a deliberately revealed admin token for the web management UI.
 
 The hub runs while Token Monitor is running — quitting (not just closing the window) stops it for all connected devices.
 
@@ -179,7 +182,7 @@ The hub runs while Token Monitor is running — quitting (not just closing the w
 ```bash
 # on the always-on machine
 cp .env.example .env
-# set TOKEN_MONITOR_SECRET to something private, then:
+# set ADMIN/VIEWER/INGEST credentials and TLS in .env, then:
 npm run hub
 ```
 
@@ -187,17 +190,21 @@ npm run hub
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IGNGserver/token-monitor-suite/tree/main/worker)
 
-One-click deploy — Cloudflare will prompt for the `TOKEN_MONITOR_SECRET` during setup. Or deploy manually:
+After a one-click or manual deploy, configure the three scoped Worker secrets:
 
 ```bash
 cd worker
 npm install
 npx wrangler login
-npx wrangler secret put TOKEN_MONITOR_SECRET
+npx wrangler secret put TOKEN_MONITOR_ADMIN_SECRET
+npx wrangler secret put TOKEN_MONITOR_VIEWER_SECRET
+npx wrangler secret put TOKEN_MONITOR_INGEST_CREDENTIALS
 npx wrangler deploy
 ```
 
 Paste the deployed URL into each device's widget at Settings → Multi-device Sync. See [worker/README.md](worker/README.md) for the iOS widget recipe and endpoint reference, or [docs/API.md](docs/API.md) for the hub HTTP API.
+
+The Worker covers ingest, stats, history, and SSE. It publishes the versioned Hub capability contract with custom-range usage and pricing marked unsupported; desktop, web, and Android gate those features instead of assuming Node/MySQL parity.
 
 ## App data
 
@@ -300,7 +307,7 @@ This repository keeps the upstream desktop collector and adds the project-specif
 
 - **Claude Desktop Local Agent / Cowork** usage and session details.
 - **Android client** for viewing synced usage from a Worker or MySQL-backed Hub.
-- **MySQL Hub** with Docker Compose deployment, plus the compatible Cloudflare Worker hub.
+- **MySQL Hub** with Docker Compose deployment, plus the Cloudflare Worker hub for common ingest, stats, history, and SSE surfaces.
 - The project release stream and package metadata live at [IGNGserver/token-monitor-suite](https://github.com/IGNGserver/token-monitor-suite).
 
 ## License

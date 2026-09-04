@@ -15,9 +15,21 @@ function statements(sql) {
   return String(sql).split(/;\s*(?:\r?\n|$)/).map((statement) => statement.trim()).filter(Boolean);
 }
 
+const MIGRATION_LOCK_NAME = 'token-monitor-schema-migrations';
+const MIGRATION_LOCK_TIMEOUT_SECONDS = 30;
+
 async function runMigrations(pool, directory) {
   const connection = await pool.getConnection();
+  let lockAcquired = false;
   try {
+    const [lockRows] = await connection.execute(
+      'SELECT GET_LOCK(?, ?) AS acquired',
+      [MIGRATION_LOCK_NAME, MIGRATION_LOCK_TIMEOUT_SECONDS]
+    );
+    if (Number(lockRows?.[0]?.acquired) !== 1) {
+      throw new Error(`Could not acquire MySQL migration lock within ${MIGRATION_LOCK_TIMEOUT_SECONDS}s`);
+    }
+    lockAcquired = true;
     await connection.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
       name VARCHAR(255) NOT NULL PRIMARY KEY,
       applied_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
@@ -27,18 +39,19 @@ async function runMigrations(pool, directory) {
     for (const file of migrationFiles(directory)) {
       if (applied.has(file)) continue;
       const sql = fs.readFileSync(path.join(directory || path.join(projectRoot(), 'migrations'), file), 'utf8');
-      await connection.beginTransaction();
       try {
         for (const statement of statements(sql)) await connection.query(statement);
         await connection.execute('INSERT INTO schema_migrations (name) VALUES (?)', [file]);
-        await connection.commit();
       } catch (error) {
-        await connection.rollback();
         throw new Error(`Migration ${file} failed: ${error.message}`, { cause: error });
       }
     }
   } finally {
-    connection.release();
+    try {
+      if (lockAcquired) await connection.execute('SELECT RELEASE_LOCK(?) AS released', [MIGRATION_LOCK_NAME]);
+    } finally {
+      connection.release();
+    }
   }
 }
 

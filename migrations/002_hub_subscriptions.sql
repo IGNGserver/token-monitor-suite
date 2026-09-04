@@ -1,4 +1,4 @@
-CREATE TABLE hub_subscriptions (
+CREATE TABLE IF NOT EXISTS hub_subscriptions (
   id TINYINT UNSIGNED NOT NULL,
   updated_at DATETIME(3) NULL,
   subscriptions JSON NOT NULL,

@@ -18,6 +18,7 @@ const {
 } = require('../shared/credentialStore');
 const { installSafeStdout } = require('../shared/safeStdio');
 const { appVersion } = require('../shared/appVersion');
+const { macWidgetRuntimeSupport } = require('../shared/macSystemRequirements');
 const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/exporter');
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const motionPreferenceApi = require('./motionPreference');
@@ -32,6 +33,9 @@ const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { createHub } = require('../hub/server');
+const { createHubAuthPolicy } = require('../shared/hubAuth');
+const { validateDeviceRecordPayload } = require('../shared/wireValidation');
+const { requireSafeHubTransport } = require('../shared/hubTransport');
 const { deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
@@ -84,9 +88,11 @@ const {
   deriveAppUpdateAvailability,
   downloadedAppUpdateMatchesLatest,
   GITHUB_REPO,
+  installFailureErrorKind,
   mergeLatestReleaseMetadata,
   shouldDownloadAutomaticAppUpdate,
-  shouldSkipAppUpdateCheck
+  shouldSkipAppUpdateCheck,
+  updateInstallQuitPolicy
 } = require('../shared/appUpdater');
 const cursorAuth = require('../shared/cursorAuth');
 const cursorProbe = require('../shared/cursorProbe');
@@ -112,6 +118,7 @@ const {
 } = require('../shared/sessionUsageArchive');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
 const { aggregateDevices, aggregateHistory, applyProjectRollups } = require('../shared/usage');
+const { fetchBufferedWithTimeout, fetchWithTimeout } = require('../shared/http');
 const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const {
@@ -122,6 +129,11 @@ const {
 } = require('../shared/mimoLimits');
 const { historyPreview, historyRevision } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
+const {
+  createMacWidgetPublisher,
+  resolveMacWidgetConfiguration
+} = require('./macWidgetPublisher');
+const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const linuxAutostart = require('./linuxAutostart');
 const { codexAccountIdForProvider, localLiveCodexProvider } = require('./renderer/accountIdentity');
@@ -148,6 +160,7 @@ const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./servi
 const { classifyStreamFailure } = require('./syncConnection');
 const { composeLocalSyncStats } = require('./syncDisplayStats');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
+const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const {
   classifySettingsChange,
   envelopeFromSettings,
@@ -232,6 +245,10 @@ const COLLECTION_MODE_VALUES = new Set(['live', 'interval']);
 const COLLECTION_INTERVAL_OPTIONS = [5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000];
 const DEFAULT_COLLECTION_INTERVAL_MS = 5 * 60 * 1000;
 const HUB_DEFAULT_PORT = 17321;
+const HUB_REQUEST_TIMEOUT_MS = 15 * 1000;
+// The Node/Worker hubs emit a heartbeat every 30 seconds by default. Allow two
+// missed beats before treating a half-open stream as disconnected.
+const SSE_IDLE_TIMEOUT_MS = 90 * 1000;
 const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
 const DEFAULT_VIEW_LIST = ['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'].map((id) => ({ id }));
 const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends'].map((id) => ({ id }));
@@ -255,6 +272,17 @@ if (process.platform === 'win32') app.setAppUserModelId('com.javis.tokenmonitor'
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.exit(0);
 
+let pendingMacWidgetOpen = null;
+app.on('open-url', (event, url) => {
+  if (process.platform !== 'darwin') return;
+  const scheme = String(process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME || 'token-monitor').trim();
+  const destination = parseMacWidgetDeepLink(url, scheme);
+  if (!destination) return;
+  event.preventDefault();
+  pendingMacWidgetOpen = destination;
+  if (app.isReady()) setImmediate(openMainWindowFromWidget);
+});
+
 const HOME_LIMIT_ACCOUNT_COUNT_DEFAULT = 3;
 const HOME_LIMIT_ACCOUNT_COUNT_MAX = 12;
 
@@ -276,7 +304,9 @@ function defaultSettings() {
     // embedded hub without a fresh round of credential sharing. Falls back
     // to a random secret generated in startEmbeddedHub() if env is empty.
     hubHostSecret: process.env.TOKEN_MONITOR_SECRET || '',
+    hubHostAdminSecret: process.env.TOKEN_MONITOR_ADMIN_SECRET || '',
     secret: process.env.TOKEN_MONITOR_SECRET || '',
+    allowInsecureHubHttp: parseBoolean(process.env.TOKEN_MONITOR_ALLOW_INSECURE_HTTP, false),
     windowBehavior,
     alwaysOnTop: windowBehavior === 'floating',
     refreshMs: Number(process.env.TOKEN_MONITOR_WIDGET_REFRESH_MS || 15000),
@@ -1936,6 +1966,8 @@ function readSettings() {
     merged.currencyRates = normalizeCurrencyOverrides(merged.currencyRates);
     merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
     merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
+    merged.hubHostAdminSecret = typeof merged.hubHostAdminSecret === 'string' ? merged.hubHostAdminSecret : '';
+    merged.allowInsecureHubHttp = parseBoolean(merged.allowInsecureHubHttp, false);
     merged.floatingBubbleEnabled = parseBoolean(merged.floatingBubbleEnabled ?? merged.edgeDrawerEnabled, false);
     merged.archivedClientUsage = normalizeArchivedClientUsage(merged.archivedClientUsage);
     delete merged.edgeDrawerEnabled;
@@ -2241,12 +2273,16 @@ let localDevice = null;
 let localStats = null;
 let sseAbortController = null;
 let sseRetryTimer = null;
+let sseIdleTimer = null;
+let sseIdleController = null;
 let streamConnected = false;
 let streamFailure = null;
 let lastCollectedDevice = null;
 let latestHubStats = null;
 let tray = null;
 let latestStats = null;
+let macWidgetPublisher = null;
+let cachedMacWidgetConfiguration;
 let trayRefreshInFlight = false;
 let trayCodexActiveAccountId = '';
 let trayCodexPendingAccountId = '';
@@ -2354,16 +2390,68 @@ function drainPendingRuntimeActions(runtime) {
   drainPendingUsageClientRefreshes(runtime);
 }
 
+function hostIngestCredentials() {
+  return ensureCredentialStore().readHubIngestCredentials();
+}
+
+function embeddedHubAuthPolicy() {
+  return createHubAuthPolicy({
+    adminSecret: settings.hubHostAdminSecret,
+    viewerSecret: settings.hubHostSecret,
+    ingestCredentials: hostIngestCredentials()
+  });
+}
+
+function refreshEmbeddedHubAuth() {
+  if (!embeddedHub?.hub) return;
+  embeddedHub.hub.replaceAuthPolicy(embeddedHubAuthPolicy());
+}
+
+function ensureEmbeddedHubCredentials() {
+  let settingsChanged = false;
+  if (!settings.hubHostSecret) {
+    settings.hubHostSecret = generateHubSecret();
+    settingsChanged = true;
+  }
+  if (!settings.hubHostAdminSecret) {
+    settings.hubHostAdminSecret = generateHubSecret();
+    settingsChanged = true;
+  }
+  const deviceId = String(settings.deviceId || defaultDeviceId()).trim();
+  let credentials = hostIngestCredentials();
+  const previousDeviceId = String(settings.lastPostedDeviceId || '').trim();
+  if (previousDeviceId && previousDeviceId !== deviceId && credentials[previousDeviceId]) {
+    // Revoke the old identity before the restarted Host begins listening. The
+    // collector moves the database baseline on its first tick; keeping the old
+    // token live until then would let an outdated client recreate that ID.
+    if (!ensureCredentialStore().renameHubIngestCredential(previousDeviceId, deviceId)) {
+      throw new Error(`Could not migrate Hub device credential from ${previousDeviceId} to ${deviceId}`);
+    }
+    credentials = hostIngestCredentials();
+  }
+  if (!credentials[deviceId]) {
+    if (!ensureCredentialStore().writeHubIngestCredential(deviceId, generateHubSecret())) {
+      throw new Error(`Could not persist Hub device credential for ${deviceId}`);
+    }
+  }
+  if (settingsChanged) saveSettings({ throwOnError: true });
+  return hostIngestCredentials();
+}
+
 function effectiveHubConfig() {
   if (settings?.hubMode === 'host') {
+    const credentials = ensureEmbeddedHubCredentials();
     return {
       url: `http://127.0.0.1:${normalizeHubPort(settings.hubHostPort)}`,
-      secret: settings.hubHostSecret || ''
+      secret: credentials[settings.deviceId] || ''
     };
   }
   if (settings?.hubMode === 'client') {
     const url = normalizeHubUrl(settings.hubUrl);
-    return { url: url || null, secret: settings.secret || '' };
+    return {
+      url: url ? requireSafeHubTransport(url, { allowInsecureHttp: settings.allowInsecureHubHttp === true }) : null,
+      secret: settings.secret || ''
+    };
   }
   return { url: null, secret: '' };
 }
@@ -2384,6 +2472,7 @@ function getHubInfo() {
     mode: settings?.hubMode || 'local',
     port,
     secret: settings?.hubHostSecret || '',
+    credentialDeviceIds: Object.keys(hostIngestCredentials()).sort(),
     listening: Boolean(embeddedHub),
     listeningPort: embeddedHub ? embeddedHub.port : null,
     error: embeddedHubError,
@@ -2394,16 +2483,16 @@ function getHubInfo() {
 async function startEmbeddedHub() {
   if (embeddedHub) return embeddedHub;
   embeddedHubError = null;
-  if (!settings.hubHostSecret) {
-    settings.hubHostSecret = generateHubSecret();
-    saveSettings();
-  }
+  const ingestCredentials = ensureEmbeddedHubCredentials();
   const port = normalizeHubPort(settings.hubHostPort);
   try {
     const hub = createHub({
       port,
       host: '0.0.0.0',
-      secret: settings.hubHostSecret,
+      adminSecret: settings.hubHostAdminSecret,
+      viewerSecret: settings.hubHostSecret,
+      ingestCredentials,
+      allowInsecureHttp: true,
       dataFile: hubDataFile(),
       logger: { error: (err) => console.log(`[hub] ${err?.message || err}`) }
     });
@@ -2438,15 +2527,46 @@ function isExternalAgentActive() {
   } catch (_) { return false; }
 }
 
-async function deleteDeviceFromHub(deviceId) {
+async function renameDeviceOnHub(previousDeviceId, nextDeviceId) {
+  if (settings?.hubMode === 'host' && embeddedHub?.hub) {
+    const result = await embeddedHub.hub.renameDevice(previousDeviceId, nextDeviceId);
+    if (result?.reason === 'not_found' || result?.reason === 'baseline_missing') return false;
+    if (!result?.renamed) throw new Error(`Hub device rename failed: ${result?.reason || 'unknown error'}`);
+    const credentials = hostIngestCredentials();
+    const currentSecret = credentials[previousDeviceId];
+    if (currentSecret) {
+      if (!ensureCredentialStore().renameHubIngestCredential(previousDeviceId, nextDeviceId)) {
+        throw new Error('Hub device was renamed, but its local credential could not be migrated');
+      }
+      refreshEmbeddedHubAuth();
+    }
+    return true;
+  }
   const { url: hubUrl, secret } = effectiveHubConfig();
-  if (!hubUrl) return;
+  if (!hubUrl) return false;
   const base = hubUrl.replace(/\/$/, '');
-  const response = await fetch(`${base}/api/devices/${encodeURIComponent(deviceId)}`, {
-    method: 'DELETE',
+  const devicesResponse = await fetchBufferedWithTimeout(fetch, `${base}/api/devices`, {
     headers: secret ? { authorization: `Bearer ${secret}` } : {}
-  });
-  if (!response.ok && response.status !== 404) throw new Error(`DELETE ${response.status}`);
+  }, HUB_REQUEST_TIMEOUT_MS);
+  if (devicesResponse.ok) {
+    const body = await devicesResponse.json();
+    const ids = new Set((body?.devices || []).map((device) => String(device?.deviceId || device?.id || '')));
+    // An administrator may have completed the identity migration from the Hub
+    // dashboard before the remote client restarts. Recognize that state so the
+    // device credential can resume without needing admin scope itself.
+    if (!ids.has(previousDeviceId) && ids.has(nextDeviceId)) return true;
+  }
+  const response = await fetchBufferedWithTimeout(fetch, `${base}/api/devices/${encodeURIComponent(previousDeviceId)}/rename`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+    body: JSON.stringify({ deviceId: nextDeviceId })
+  }, HUB_REQUEST_TIMEOUT_MS);
+  if (response.status === 404) return false;
+  if (response.status === 403) {
+    throw new Error('Hub device rename requires an admin credential; provision a token for the new Device ID on the Hub host before changing it here');
+  }
+  if (!response.ok) throw new Error(`Hub device rename ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  return true;
 }
 
 async function postToHub(summary) {
@@ -2454,8 +2574,11 @@ async function postToHub(summary) {
   if (!hubUrl) throw new Error('hub not configured');
   const stale = settings.lastPostedDeviceId;
   if (stale && stale !== summary.deviceId) {
-    try { await deleteDeviceFromHub(stale); }
-    catch (error) { console.log(`[sync] cleanup of old deviceId ${stale} failed: ${error.message}`); }
+    // Move the ingest baseline and immutable ledger identity before posting the
+    // new snapshot. Falling through after a conflict would merge two unrelated
+    // installations or replay the full cumulative counter, so non-404 failures
+    // deliberately block this upload.
+    await renameDeviceOnHub(stale, summary.deviceId);
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/ingest`;
   const { response } = await postSyncPayload(fetch, url, {
@@ -2471,8 +2594,8 @@ async function postToHub(summary) {
   return response.json();
 }
 
-function stopSyncCollector() {
-  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(); } catch (_) {} }
+function stopSyncCollector(options = {}) {
+  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
 }
 
@@ -2530,7 +2653,17 @@ function startHostCollector() {
       try {
         const stale = settings.lastPostedDeviceId;
         if (stale && stale !== visibleSummary.deviceId) {
-          await embeddedHub.hub.deleteDevice(stale);
+          const renamed = await embeddedHub.hub.renameDevice(stale, visibleSummary.deviceId);
+          if (!renamed.renamed && renamed.reason !== 'not_found') {
+            throw new Error(`device rename failed: ${renamed.reason || 'unknown'}`);
+          }
+          const credentials = hostIngestCredentials();
+          if (credentials[stale]) {
+            if (!ensureCredentialStore().renameHubIngestCredential(stale, visibleSummary.deviceId)) {
+              throw new Error('device was renamed, but its local credential could not be migrated');
+            }
+            refreshEmbeddedHubAuth();
+          }
         }
         const payload = syncPayload(visibleSummary);
         if (payload.allTimeProjectsOmitted === true) {
@@ -2613,11 +2746,74 @@ function injectLocalDeviceStatus(stats) {
   return stats;
 }
 
+function macWidgetRuntimeSupported(
+  platform = process.platform,
+  osRelease = platform === 'darwin' ? os.release() : ''
+) {
+  return macWidgetRuntimeSupport({ platform, osRelease }).supported;
+}
+
+function macWidgetConfiguration() {
+  if (!macWidgetRuntimeSupported()) return null;
+  if (cachedMacWidgetConfiguration !== undefined) return cachedMacWidgetConfiguration;
+  cachedMacWidgetConfiguration = resolveMacWidgetConfiguration({
+    appGroup: process.env.TOKEN_MONITOR_APP_GROUP,
+    configCandidates: [
+      path.join(process.resourcesPath, 'token-monitor-widget.json'),
+      path.resolve(__dirname, '..', '..', 'build', 'macos-widget', 'widget-config.json')
+    ],
+    home: app.getPath('home'),
+    platform: process.platform,
+    runtimeSupported: true,
+    urlScheme: process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME,
+    widgetKind: process.env.TOKEN_MONITOR_WIDGET_KIND
+  });
+  return cachedMacWidgetConfiguration;
+}
+
+function macWidgetPresentation() {
+  return {
+    currencyCode: settings?.currency,
+    currencyRate: effectiveRates?.[normalizeCurrency(settings?.currency)] || 1,
+    compactNumbers: settings?.showCompactTotalTokens !== false,
+    compactTokenUnits: settings?.compactTokenUnits,
+    showCost: true,
+    locale: settings?.language,
+    theme: Object.keys(settings?.themeColors || {}).length ? 'custom' : 'system'
+  };
+}
+
+function ensureMacWidgetPublisher() {
+  if (macWidgetPublisher) return macWidgetPublisher;
+  const widget = macWidgetConfiguration();
+  if (!widget) return null;
+  macWidgetPublisher = createMacWidgetPublisher({
+    platform: process.platform,
+    snapshotPath: widget.snapshotPath,
+    widgetKind: widget.widgetKind,
+    getHistory: getDashboardHistory,
+    getPresentation: macWidgetPresentation,
+    reloaderCandidates: [
+      path.join(process.resourcesPath, 'TokenMonitorWidgetReloader'),
+      path.resolve(__dirname, '..', '..', 'build', 'macos-widget', 'TokenMonitorWidgetReloader')
+    ],
+    logger: (message) => console.warn(message)
+  });
+  macWidgetPublisher.start();
+  return macWidgetPublisher;
+}
+
+function scheduleMacWidgetSnapshot(stats = latestStats) {
+  if (!stats || !macWidgetRuntimeSupported()) return false;
+  return ensureMacWidgetPublisher()?.publish(stats) || false;
+}
+
 function sendPush(payload) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+    scheduleMacWidgetSnapshot(latestStats);
     syncTrayCodexActiveAccount();
     updateTrayDisplay();
     if (settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
@@ -2721,8 +2917,8 @@ function sendStatus(connected, extra) {
   sendPush({ event: 'status', data: { connected: streamConnected, mode, ...(extra || {}) } });
 }
 
-function stopLocalCollector() {
-  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(); } catch (_) {} }
+function stopLocalCollector(options = {}) {
+  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
   localDevice = null;
   localStats = null;
@@ -2761,9 +2957,28 @@ function scheduleStreamRetry(delayMs = 3000) {
   sseRetryTimer = setTimeout(() => { sseRetryTimer = null; startStatsStream(); }, delayMs);
 }
 
+function clearSseIdleWatchdog(controller = null) {
+  if (controller && sseIdleController !== controller) return;
+  if (sseIdleTimer) clearTimeout(sseIdleTimer);
+  sseIdleTimer = null;
+  sseIdleController = null;
+}
+
+function armSseIdleWatchdog(controller, onTimeout) {
+  clearSseIdleWatchdog();
+  sseIdleController = controller;
+  sseIdleTimer = setTimeout(() => {
+    sseIdleTimer = null;
+    sseIdleController = null;
+    onTimeout();
+  }, SSE_IDLE_TIMEOUT_MS);
+  sseIdleTimer.unref?.();
+}
+
 function stopStatsStream() {
   if (sseAbortController) { try { sseAbortController.abort(); } catch (_) {} }
   sseAbortController = null;
+  clearSseIdleWatchdog();
   if (sseRetryTimer) { clearTimeout(sseRetryTimer); sseRetryTimer = null; }
 }
 
@@ -2787,24 +3002,33 @@ async function startStatsStream(options = {}) {
   mode = 'sync';
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats/stream`;
   const controller = new AbortController();
+  let idleTimedOut = false;
   sseAbortController = controller;
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(fetch, url, {
       headers: { accept: 'text/event-stream', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
       signal: controller.signal
-    });
+    }, HUB_REQUEST_TIMEOUT_MS);
     if (!response.ok || !response.body) {
       sendStatus(false, classifyStreamFailure({ status: response.status }));
       scheduleStreamRetry();
       return;
     }
     sendStatus(true);
+    armSseIdleWatchdog(controller, () => {
+      idleTimedOut = true;
+      try { controller.abort(); } catch (_) {}
+    });
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
+      if (value) armSseIdleWatchdog(controller, () => {
+        idleTimedOut = true;
+        try { controller.abort(); } catch (_) {}
+      });
       buffer += decoder.decode(value, { stream: true });
       let idx;
       while ((idx = buffer.indexOf('\n\n')) !== -1) {
@@ -2825,9 +3049,11 @@ async function startStatsStream(options = {}) {
     sendStatus(false, classifyStreamFailure({ eof: true }));
     scheduleStreamRetry();
   } catch (error) {
-    if (controller.signal.aborted) return;
+    if (controller.signal.aborted && !idleTimedOut) return;
     sendStatus(false, classifyStreamFailure({ errorCode: error?.cause?.code || error?.code, message: error?.message }));
     scheduleStreamRetry();
+  } finally {
+    clearSseIdleWatchdog(controller);
   }
 }
 
@@ -2845,6 +3071,19 @@ function showPopover() {
   // case where macOS fires blur immediately after show because the click that
   // opened us still has the menu bar as the focused element.
   setTimeout(() => { suppressNextBlurHide = false; }, 250);
+}
+
+function openMainWindowFromWidget() {
+  if (!app.isReady()) return;
+  const destination = pendingMacWidgetOpen || { page: 'overview', view: 'home', settings: false };
+  pendingMacWidgetOpen = null;
+  updateRendererViewState({ breakdown: destination.view });
+  focusExistingWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  sendMainWindowEvent(
+    destination.settings ? 'settings:open' : 'view:open',
+    destination.settings ? undefined : destination.view
+  );
 }
 
 function hidePopover() {
@@ -3027,6 +3266,9 @@ function pushSettingsToRenderer() {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     try { dashboardWindow.webContents.send('settings:push', payload); } catch (_) {}
   }
+  // Currency, compact-unit, locale, and theme settings are part of the native
+  // Widget snapshot even when the usage counters themselves did not change.
+  scheduleMacWidgetSnapshot(latestStats);
 }
 
 function sendMimoAccountsPush() {
@@ -3373,10 +3615,13 @@ function restartDeviceRuntimeForMode() {
 
 function stopAll() {
   stopPersistBoundsTimer();
-  stopLocalCollector();
+  // Quit does not need to await chokidar's O(N) close pass. The runtime marks
+  // itself inactive synchronously, so leaving descriptors for process teardown
+  // cannot deliver another collection tick while Electron exits.
+  stopLocalCollector({ skipCloseWatchers: true });
   stopStatsStream();
   stopHostStats();
-  stopSyncCollector();
+  stopSyncCollector({ skipCloseWatchers: true });
   void stopEmbeddedHub();
   stopDiscordRpc();
   if (tray && !tray.isDestroyed()) tray.destroy();
@@ -3384,12 +3629,41 @@ function stopAll() {
 }
 
 let quitRequested = false;
+let quitInProgress = false;
+let skipForcedQuit = false;
+let updateHandoffObserved = false;
+
+const updateInstallQuit = createUpdateInstallQuitGuard({
+  ...updateInstallQuitPolicy(),
+  watchdogEnabled: () => updateHandoffObserved,
+  claim: () => { quitRequested = true; skipForcedQuit = true; },
+  release: () => { quitRequested = false; skipForcedQuit = false; },
+  onStalled: () => {
+    setNativeAppUpdateState({
+      phase: 'error',
+      progress: null,
+      error: 'Update installer did not start',
+      errorKind: installFailureErrorKind({ spent: updateInstallQuit.isSpent(), stalled: true })
+    });
+  },
+  onHandoff: (afterStalledReport) => {
+    if (!afterStalledReport) return;
+    setNativeAppUpdateState({ phase: 'downloaded', progress: 100, error: null });
+  }
+});
+
+function performQuit() {
+  if (quitInProgress) return;
+  quitInProgress = true;
+  try { stopAll(); }
+  catch (error) { console.log(`[quit] stopAll failed: ${error?.message || error}`); }
+  app.exit(0);
+}
+
 function requestAppQuit() {
   if (quitRequested) return;
   quitRequested = true;
-  stopAll();
-  if (app.isReady()) app.quit();
-  else app.exit(0);
+  performQuit();
 }
 
 // Write the export file set (JSON + CSVs) into `dir`, atomically (temp + rename)
@@ -3464,7 +3738,7 @@ async function fetchStats(options = {}) {
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return withHistoryPreview(aggregateDevices([], 0), []);
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
-  const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
+  const response = await fetchBufferedWithTimeout(fetch, url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} }, HUB_REQUEST_TIMEOUT_MS);
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
   latestHubStats = await response.json();
   return injectLocalDeviceStatus(composeLocalSyncStats(latestHubStats, lastCollectedDevice));
@@ -3552,7 +3826,8 @@ let appUpdateNativeState = {
   phase: 'idle',
   version: null,
   progress: null,
-  error: null
+  error: null,
+  errorKind: null
 };
 
 function latestFromUpdaterInfo(info) {
@@ -3597,7 +3872,9 @@ function nativeAppUpdateInstallSupport() {
 }
 
 function setNativeAppUpdateState(patch = {}) {
-  appUpdateNativeState = { ...appUpdateNativeState, ...patch };
+  const next = { ...appUpdateNativeState, ...patch };
+  if ('error' in patch && !('errorKind' in patch)) next.errorKind = null;
+  appUpdateNativeState = next;
   sendAppUpdatePush();
 }
 
@@ -3631,9 +3908,34 @@ function configureNativeAppUpdater() {
     const latest = latestFromUpdaterInfo(info);
     setNativeAppUpdateState({ phase: 'downloaded', version: latest?.version || info?.version || appUpdateNativeState.version || null, progress: 100, error: null });
   });
+  // The install hand-off is emitted by Electron's native autoUpdater emitter,
+  // not necessarily by electron-updater's wrapper. Arm the watchdog only after
+  // this registration has actually succeeded.
+  try {
+    updateHandoffObserved = observeUpdateInstallHandoff(
+      require('electron').autoUpdater,
+      () => updateInstallQuit.noteHandoff()
+    );
+  } catch (error) {
+    updateHandoffObserved = false;
+    console.log(`[update] cannot observe the install hand-off: ${error?.message || error}`);
+  }
+  if (!updateHandoffObserved) console.log('[update] no install hand-off signal; quit recovery disabled');
   autoUpdater.on('error', (error) => {
+    const wasInstalling = updateInstallQuit.abort();
+    // A late updater error after the watchdog already reported a spent attempt
+    // must not erase that recovery state. Conversely, a check/download error
+    // without an outstanding install remains an ordinary updater error.
+    if (!appUpdateNativeBusy && !wasInstalling) return;
     appUpdateNativeBusy = false;
-    setNativeAppUpdateState({ phase: 'error', progress: null, error: error?.message || String(error || 'Update failed') });
+    setNativeAppUpdateState({
+      phase: 'error',
+      progress: null,
+      error: error?.message || String(error || 'Update failed'),
+      errorKind: wasInstalling
+        ? installFailureErrorKind({ spent: updateInstallQuit.isSpent() })
+        : null
+    });
   });
 }
 
@@ -3665,8 +3967,14 @@ function deriveAppUpdateState() {
     installProgress: appUpdateNativeState.progress,
     installVersion: appUpdateNativeState.version,
     installError: appUpdateNativeState.error,
+    installErrorKind: appUpdateNativeState.errorKind || null,
     downloaded: availability.downloaded,
-    installBusy: appUpdateNativeBusy || appUpdateNativeState.phase === 'checking' || appUpdateNativeState.phase === 'downloading'
+    installStarting: updateInstallQuit.isInstalling(),
+    installRetryBlocked: updateInstallQuit.isSpent(),
+    installBusy: appUpdateNativeBusy
+      || updateInstallQuit.isInstalling()
+      || appUpdateNativeState.phase === 'checking'
+      || appUpdateNativeState.phase === 'downloading'
   };
 }
 
@@ -3687,6 +3995,10 @@ function sendAppUpdatePush() {
 }
 
 async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {}) {
+  // An install owns electron-updater until its hand-off resolves. Its error is
+  // reported on the same emitter as check failures, so allowing a check here
+  // could release the install's quit claim or make a second update lifecycle run.
+  if (updateInstallQuit.isOutstanding()) return deriveAppUpdateState();
   if (appUpdateCheckPromise) {
     if (force) sendAppUpdatePush();
     const activeResult = await appUpdateCheckPromise;
@@ -3781,6 +4093,8 @@ async function downloadAndPrepareAppUpdate() {
     setNativeAppUpdateState({ phase: 'error', error: support.reason || 'unsupported-platform', progress: null });
     return deriveAppUpdateState();
   }
+  if (updateInstallQuit.isOutstanding()) return deriveAppUpdateState();
+  if (appUpdateCheckPromise) await appUpdateCheckPromise;
   if (appUpdateNativeBusy) return deriveAppUpdateState();
   const latest = settings?.appUpdate?.lastKnownLatest || null;
   if (downloadedAppUpdateMatchesLatest({
@@ -3810,17 +4124,38 @@ async function downloadAndPrepareAppUpdate() {
   return deriveAppUpdateState();
 }
 
-function installDownloadedAppUpdate() {
+async function installDownloadedAppUpdate() {
+  if (appUpdateCheckPromise) await appUpdateCheckPromise;
   const latest = settings?.appUpdate?.lastKnownLatest || null;
   if (!downloadedAppUpdateMatchesLatest({
     phase: appUpdateNativeState.phase,
     downloadedVersion: appUpdateNativeState.version,
     latest
   })) return deriveAppUpdateState();
-  quitRequested = true;
-  // isSilent: skip the NSIS installer UI on Windows so the update feels seamless
-  // (per-user install needs no elevation); isForceRunAfter relaunches the app.
-  autoUpdater.quitAndInstall(true, true);
+  if (!updateInstallQuit.request()) {
+    if (updateInstallQuit.phase() === 'spent') {
+      setNativeAppUpdateState({
+        phase: 'error',
+        progress: null,
+        error: 'Update install was already attempted',
+        errorKind: 'attempt-spent'
+      });
+    }
+    return deriveAppUpdateState();
+  }
+  try {
+    // isSilent: skip the NSIS installer UI on Windows so the update feels seamless
+    // (per-user install needs no elevation); isForceRunAfter relaunches the app.
+    autoUpdater.quitAndInstall(true, true);
+  } catch (error) {
+    updateInstallQuit.abort();
+    setNativeAppUpdateState({
+      phase: 'error',
+      progress: null,
+      error: error?.message || String(error || 'Update failed'),
+      errorKind: installFailureErrorKind({ spent: updateInstallQuit.isSpent() })
+    });
+  }
   return deriveAppUpdateState();
 }
 
@@ -4158,18 +4493,11 @@ async function getDashboardHistory() {
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return aggregateHistory([]);
   const url = `${hubUrl.replace(/\/$/, '')}/api/history`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-  try {
-    const response = await fetch(url, {
-      headers: secret ? { authorization: `Bearer ${secret}` } : {},
-      signal: controller.signal
-    });
-    if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-    return response.json();
-  } finally {
-    clearTimeout(timeout);
-  }
+  const response = await fetchBufferedWithTimeout(fetch, url, {
+    headers: secret ? { authorization: `Bearer ${secret}` } : {}
+  }, HUB_REQUEST_TIMEOUT_MS);
+  if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  return response.json();
 }
 
 let cursorStatusCache = { value: null, at: 0 };
@@ -4242,6 +4570,7 @@ app.whenReady().then(() => {
   ensureTray();
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
+  ensureMacWidgetPublisher();
   startMode();
   void hydrateCodexManagedWorkspaceLabels();
   if (settings.discordRpcEnabled) startDiscordRpc();
@@ -4302,6 +4631,17 @@ app.whenReady().then(() => {
     delete normalizedPatch.customModelPricing;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
     if (patch.hubUrl !== undefined) normalizedPatch.hubUrl = normalizeHubUrl(patch.hubUrl);
+    if (patch.allowInsecureHubHttp !== undefined) {
+      normalizedPatch.allowInsecureHubHttp = parseBoolean(patch.allowInsecureHubHttp, false);
+    }
+    const requestedHubMode = patch.hubMode !== undefined ? normalizeHubMode(patch.hubMode, settings.hubMode) : settings.hubMode;
+    const requestedHubUrl = normalizedPatch.hubUrl !== undefined ? normalizedPatch.hubUrl : settings.hubUrl;
+    const allowInsecureHubHttp = normalizedPatch.allowInsecureHubHttp !== undefined
+      ? normalizedPatch.allowInsecureHubHttp
+      : settings.allowInsecureHubHttp;
+    if (requestedHubMode === 'client' && requestedHubUrl) {
+      requireSafeHubTransport(requestedHubUrl, { allowInsecureHttp: allowInsecureHubHttp === true });
+    }
     if (patch.deepseekApiKey !== undefined) normalizedPatch.deepseekApiKey = normalizeDeepSeekApiKey(patch.deepseekApiKey);
     if (patch.minimaxApiKey !== undefined) normalizedPatch.minimaxApiKey = normalizeMinimaxApiKey(patch.minimaxApiKey);
     if (patch.copilotApiToken !== undefined) normalizedPatch.copilotApiToken = normalizeCopilotApiToken(patch.copilotApiToken);
@@ -4613,6 +4953,13 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('stats:get', (_event, options) => fetchStats(options));
   ipcMain.handle('stats:getCustomRange', async (_event, rangeInput) => {
+    if (settings.hubMode === 'client' && latestHubStats?.capabilities?.usageRange === false) {
+      return {
+        ok: false,
+        error: 'hub-capability-unsupported',
+        message: 'The connected Hub does not support custom usage ranges.'
+      };
+    }
     const { normalizeCustomRange } = require('../shared/customRange');
     const range = normalizeCustomRange(rangeInput || {});
     if (!range.ok) {
@@ -4692,7 +5039,7 @@ app.whenReady().then(() => {
             endHour: String(range.endHour)
           });
           const url = `${hubUrl.replace(/\/$/, '')}/api/usage/range?${params}`;
-          const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
+          const response = await fetchBufferedWithTimeout(fetch, url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} }, HUB_REQUEST_TIMEOUT_MS);
           if (!response.ok) {
             throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
           }
@@ -4825,6 +5172,28 @@ app.whenReady().then(() => {
     saveSettings({ throwOnError: true });
     if (settings.hubMode === 'host') startMode();
     return getHubInfo();
+  });
+  ipcMain.handle('hub:provisionDeviceCredential', (_event, rawDeviceId) => {
+    const deviceId = String(rawDeviceId || '').trim();
+    validateDeviceRecordPayload({ deviceId });
+    const token = generateHubSecret();
+    if (!ensureCredentialStore().writeHubIngestCredential(deviceId, token)) {
+      throw new Error('Could not persist the device credential');
+    }
+    if (settings.hubMode === 'host') startMode();
+    return { ok: true, deviceId, token, info: getHubInfo() };
+  });
+  ipcMain.handle('hub:revokeDeviceCredential', (_event, rawDeviceId) => {
+    const deviceId = String(rawDeviceId || '').trim();
+    validateDeviceRecordPayload({ deviceId });
+    if (deviceId === settings.deviceId) throw new Error('The host device credential cannot be revoked while it is active');
+    const removed = ensureCredentialStore().removeHubIngestCredential(deviceId);
+    if (removed && settings.hubMode === 'host') startMode();
+    return { ok: removed, deviceId, info: getHubInfo() };
+  });
+  ipcMain.handle('hub:revealAdminCredential', () => {
+    ensureEmbeddedHubCredentials();
+    return { token: settings.hubHostAdminSecret };
   });
   ipcMain.handle('app:getInfo', () => ({
     version: app.getVersion(),
@@ -5350,13 +5719,25 @@ app.whenReady().then(() => {
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  if (pendingMacWidgetOpen) setImmediate(openMainWindowFromWidget);
   maybeRunBackgroundUpdateCheck();
   startAppUpdateBackgroundChecks();
 });
 
 app.on('second-instance', focusExistingWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('before-quit', () => { quitRequested = true; if (rateRefreshTimer) clearInterval(rateRefreshTimer); if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer); unregisterWindowToggleShortcut(); stopAll(); });
+app.on('before-quit', () => {
+  quitRequested = true;
+  macWidgetPublisher?.stop();
+  if (rateRefreshTimer) clearInterval(rateRefreshTimer);
+  if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
+  unregisterWindowToggleShortcut();
+  // During a native update the updater owns the restart. Calling app.exit here
+  // can pre-empt its hand-off; the watchdog releases this flag if the hand-off
+  // never arrives so a later normal quit still works.
+  if (skipForcedQuit) return;
+  performQuit();
+});
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   process.once(signal, requestAppQuit);
 }

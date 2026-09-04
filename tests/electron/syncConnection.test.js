@@ -24,6 +24,7 @@ test('other HTTP status maps to server_error with the code as detail', () => {
 test('network errnos map to their reason', () => {
   assert.deepEqual(classifyStreamFailure({ errorCode: 'ECONNREFUSED' }), { reason: 'refused', detail: null });
   assert.deepEqual(classifyStreamFailure({ errorCode: 'ETIMEDOUT' }), { reason: 'timeout', detail: null });
+  assert.deepEqual(classifyStreamFailure({ errorCode: 'request_timeout' }), { reason: 'timeout', detail: null });
   assert.deepEqual(classifyStreamFailure({ errorCode: 'ENOTFOUND' }), { reason: 'dns', detail: null });
   assert.deepEqual(classifyStreamFailure({ errorCode: 'EAI_AGAIN' }), { reason: 'dns', detail: null });
   assert.deepEqual(classifyStreamFailure({ errorCode: 'EHOSTUNREACH' }), { reason: 'unreachable', detail: null });

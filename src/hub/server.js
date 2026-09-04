@@ -14,7 +14,16 @@ const {
 } = require('../shared/subscriptionDisplay');
 const { CURRENCY_CODES, normalizeCurrency } = require('../shared/currency');
 const { currentHubBuild } = require('../shared/hubBuildIdentity');
-const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
+const { readJsonBody, sendJson, sendText } = require('../shared/http');
+const {
+  ADMIN_SCOPE,
+  INGEST_SCOPE,
+  READ_SCOPE,
+  createHubAuthPolicy
+} = require('../shared/hubAuth');
+const { HUB_API_VERSION, hubCapabilities } = require('../shared/hubCapabilities');
+const { createFixedWindowRateLimiter } = require('../shared/hubRateLimit');
+const { validateDeviceRecordPayload } = require('../shared/wireValidation');
 const { loadDotEnv, parseArgs } = require('../shared/config');
 const { tryServeStatic } = require('./static');
 const { lookupModelPricing, normalizePromaPricing } = require('../shared/collector');
@@ -29,6 +38,21 @@ const PRICE_FIELDS = [
   'cacheReadPricePerMillion',
   'cacheWritePricePerMillion'
 ];
+const SSE_WRITE_TIMEOUT_MS = 45 * 1000;
+const RESERVED_DYNAMIC_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function safeDynamicKey(value, fallback = 'unknown') {
+  const key = String(value ?? '').trim();
+  return key && !RESERVED_DYNAMIC_KEYS.has(key.toLowerCase()) ? key : fallback;
+}
+
+function mapNumber(map, key) {
+  return hasOwn(map, key) ? number(map[key]) : 0;
+}
 
 // Without a secret the hub cannot tell its own widget from any other caller, so it
 // must not expose account identity (email/plan/key) to the network. Binding to
@@ -82,9 +106,9 @@ function emptyUsageRangePayload() {
 }
 
 function addRangeTokenCost(mapTokens, mapCosts, key, tokens, cost) {
-  const id = String(key || '').trim() || 'unknown';
-  mapTokens[id] = (mapTokens[id] || 0) + tokens;
-  mapCosts[id] = (mapCosts[id] || 0) + cost;
+  const id = safeDynamicKey(key);
+  mapTokens[id] = mapNumber(mapTokens, id) + tokens;
+  mapCosts[id] = mapNumber(mapCosts, id) + cost;
 }
 
 // Sum tokscale graph daily history for inclusive calendar day keys.
@@ -220,6 +244,12 @@ function createHub({
   port = 17321,
   host = '0.0.0.0',
   secret = '',
+  adminSecret = '',
+  viewerSecret = '',
+  ingestCredentials = null,
+  allowLegacyAdmin = false,
+  allowLegacyIngest = false,
+  authPolicy = null,
   staleAfterMs = 10 * 60 * 1000,
   sseHeartbeatMs = 30000,
   repository = null,
@@ -228,14 +258,35 @@ function createHub({
   fallbackPricing = createCatalogPricingLookup(),
   webRoot,
   tls = null,
+  allowInsecureHttp = false,
+  authFailureLimit = 30,
+  ingestRateLimit = 240,
   logger = console
 } = {}) {
   const ownedPool = !repository && !pool;
   const activePool = pool || (repository ? null : createMySqlPool());
   const store = repository || createRepository(activePool);
-  const bindHost = resolveBindHost(host, secret);
+  let auth = authPolicy || createHubAuthPolicy({
+    adminSecret,
+    viewerSecret,
+    legacySecret: secret,
+    ingestCredentials,
+    allowLegacyAdmin,
+    allowLegacyIngest
+  });
+  const capabilities = hubCapabilities('node-hub');
+  const authFailures = createFixedWindowRateLimiter({ limit: authFailureLimit, windowMs: 60_000 });
+  const ingestRequests = createFixedWindowRateLimiter({ limit: ingestRateLimit, windowMs: 60_000 });
+  const bindHost = resolveBindHost(host, auth.configured ? 'configured' : '');
   const tlsOptions = loadTlsOptions(tls);
   const protocol = tlsOptions ? 'https' : 'http';
+  const insecureHttpAllowed = allowInsecureHttp === true
+    || ['1', 'true', 'yes', 'on'].includes(String(allowInsecureHttp || '').trim().toLowerCase());
+  if (!tlsOptions && !LOOPBACK_HOSTS.has(bindHost) && !insecureHttpAllowed) {
+    const error = new Error('A non-loopback Hub must use TLS. Set TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1 only for a trusted LAN or VPN.');
+    error.code = 'insecure_hub_transport';
+    throw error;
+  }
   let statsCache = null;
   let subscriptionsCache = emptySubscriptionDocument();
 
@@ -255,6 +306,8 @@ function createHub({
     stats.historyRevision = historyRevision(history);
     stats.deviceHistoryRevision = deviceHistoryRevision(records);
     stats.subscriptionsUpdatedAt = (await getSubscriptions()).updatedAt || '';
+    stats.apiVersion = HUB_API_VERSION;
+    stats.capabilities = capabilities;
     statsCache = stats;
     return stats;
   }
@@ -476,20 +529,80 @@ function createHub({
   }
 
   const sseClients = new Set();
+  const sseHeartbeats = new Map();
+  const sseStates = new Map();
   const statsListeners = new Set();
 
   function sseFormat(event, data) {
     return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   }
 
-  async function broadcastStats(reason = 'update') {
+  function dropSseClient(res) {
+    sseClients.delete(res);
+    const heartbeat = sseHeartbeats.get(res);
+    if (heartbeat) clearInterval(heartbeat);
+    sseHeartbeats.delete(res);
+    const state = sseStates.get(res);
+    if (state?.drainTimer) clearTimeout(state.drainTimer);
+    if (state?.drainHandler) res.off('drain', state.drainHandler);
+    sseStates.delete(res);
+    try { res.end(); } catch (_) { /* the socket may already be closed */ }
+  }
+
+  function queueLatestSse(state, payload, kind) {
+    // Data frames replace either kind of pending frame. Heartbeats are
+    // disposable and never replace a pending data snapshot.
+    if (!state.pending || kind === 'data' || state.pendingKind !== 'data') {
+      state.pending = payload;
+      state.pendingKind = kind;
+    }
+  }
+
+  function writeSse(res, payload, kind = 'data') {
+    const state = sseStates.get(res);
+    if (!state || !sseClients.has(res)) return false;
+    if (state.backpressured) {
+      queueLatestSse(state, payload, kind);
+      return true;
+    }
+    try {
+      if (res.write(payload)) return true;
+    } catch (_) {
+      dropSseClient(res);
+      return false;
+    }
+    // `false` means Node reached the writable high-water mark, not that the
+    // client is dead. A large but healthy first snapshot commonly crosses it.
+    // Wait for drain while keeping only one latest pending frame; only a socket
+    // that cannot drain within the bound is removed.
+    state.backpressured = true;
+    const onDrain = () => {
+      if (sseStates.get(res) !== state) return;
+      if (state.drainTimer) clearTimeout(state.drainTimer);
+      state.drainTimer = null;
+      state.drainHandler = null;
+      state.backpressured = false;
+      const pending = state.pending;
+      const pendingKind = state.pendingKind;
+      state.pending = null;
+      state.pendingKind = null;
+      if (pending) writeSse(res, pending, pendingKind);
+    };
+    state.drainHandler = onDrain;
+    res.once('drain', onDrain);
+    state.drainTimer = setTimeout(() => dropSseClient(res), SSE_WRITE_TIMEOUT_MS);
+    state.drainTimer.unref?.();
+    return true;
+  }
+
+  async function broadcastStats(reason = 'update', statsOverride = null) {
     if (sseClients.size === 0 && statsListeners.size === 0) return;
-    const stats = await getStats();
+    const stats = statsOverride || await getStats();
     const at = new Date().toISOString();
     if (sseClients.size > 0) {
       const payload = sseFormat('stats', { type: 'stats', reason, stats, at });
       for (const res of sseClients) {
-        try { res.write(payload); } catch (_) { sseClients.delete(res); }
+        writeSse(res, payload);
       }
     }
     for (const listener of statsListeners) {
@@ -497,10 +610,11 @@ function createHub({
     }
   }
 
-  async function ingest(payload) {
+  async function ingest(payload, { includeStats = false } = {}) {
     if (!payload || (!payload.deviceId && !payload.id)) {
       throw new Error('deviceId_required');
     }
+    validateDeviceRecordPayload(payload);
     const record = await store.transaction(async (connection) => {
       const deviceId = String(payload.deviceId || payload.id);
       const existing = await store.getDeviceRecord(deviceId, connection);
@@ -514,8 +628,12 @@ function createHub({
       return merged;
     });
     statsCache = null;
-    await broadcastStats('ingest');
-    return record;
+    let stats = null;
+    if (includeStats || sseClients.size > 0 || statsListeners.size > 0) {
+      stats = await getStats();
+      await broadcastStats('ingest', stats);
+    }
+    return includeStats ? { record, stats } : record;
   }
 
   async function deleteDevice(deviceId) {
@@ -523,6 +641,17 @@ function createHub({
     statsCache = null;
     await broadcastStats('delete');
     return deleted;
+  }
+
+  async function renameDevice(previousDeviceId, nextDeviceId) {
+    const result = await store.transaction((connection) => (
+      store.renameDevice(previousDeviceId, nextDeviceId, connection)
+    ));
+    if (result?.renamed) {
+      statsCache = null;
+      await broadcastStats('rename');
+    }
+    return result;
   }
 
   async function setPricing(model, prices, source = 'manual') {
@@ -594,9 +723,12 @@ function createHub({
         role: 'hub',
         runtime: 'node-hub',
         version: 1,
+        apiVersion: HUB_API_VERSION,
+        capabilities,
         hubBuild: currentHubBuild('node-hub'),
         deviceCount: await store.countDevices(),
-        secretRequired: Boolean(secret),
+        secretRequired: auth.secretRequired,
+        auth: auth.summary,
         now: new Date().toISOString()
       });
     }
@@ -605,20 +737,70 @@ function createHub({
     // Static files stay unauthenticated; every /api/* route still requires the secret.
     if (await tryServeStatic(req, res, webRoot ? { webRoot } : {})) return;
 
-    if (!isAuthorized(req, secret)) return sendJson(res, 401, { error: 'unauthorized' });
+    const authorize = (scope, options = {}) => {
+      const result = auth.authorize(req, scope, options);
+      if (result.ok) {
+        if (scope === INGEST_SCOPE && options.consumeRateLimit !== false) {
+          const limited = ingestRequests.take(result.principal.id);
+          if (!limited.ok) {
+            sendJson(res, 429, { error: 'rate_limited' }, { 'retry-after': String(Math.max(1, Math.ceil(limited.retryAfterMs / 1000))) });
+            return null;
+          }
+        }
+        return result;
+      }
+      const peer = String(req.socket?.remoteAddress || req.headers['cf-connecting-ip'] || 'unknown');
+      const limited = authFailures.take(peer);
+      if (!limited.ok) {
+        sendJson(res, 429, { error: 'rate_limited' }, { 'retry-after': String(Math.max(1, Math.ceil(limited.retryAfterMs / 1000))) });
+        return null;
+      }
+      sendJson(res, result.status, { error: result.error });
+      return null;
+    };
+    const audit = (principal, action, target = '') => {
+      logger.info?.(`[hub-audit] ${JSON.stringify({
+        at: new Date().toISOString(),
+        principal: principal?.id || 'unknown',
+        action,
+        target: String(target || '')
+      })}`);
+    };
+    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/api/capabilities') {
+      const result = authorize(READ_SCOPE);
+      if (!result) return;
+      return sendJson(res, 200, {
+        apiVersion: HUB_API_VERSION,
+        capabilities,
+        role: result.principal.role,
+        scopes: result.principal.scopes
+      });
+    }
+    const readRoute = (req.method === 'GET' || req.method === 'HEAD') && (
+      ['/api/stats', '/api/devices', '/api/history', '/api/subscriptions', '/api/usage/range', '/api/pricing', '/api/stats/stream'].includes(url.pathname)
+    );
+    if (readRoute && !authorize(READ_SCOPE)) return;
 
     if (req.method === 'GET' && url.pathname === '/api/stats') return sendJson(res, 200, await getStats());
     if (req.method === 'GET' && url.pathname === '/api/devices') {
-      return sendJson(res, 200, { devices: await store.listDeviceRecords() });
+      // Keep this endpoint on the same normalized/staleness boundary as
+      // /api/stats. Returning raw ingest snapshots here exposes top-level
+      // today/month/allTime fields, which the Android DTO intentionally does
+      // not consume, and lets an old snapshot masquerade as today's usage.
+      const stats = await getStats();
+      return sendJson(res, 200, { devices: stats.devices });
     }
     if (req.method === 'GET' && url.pathname === '/api/history') return sendJson(res, 200, await getHistory());
     if (req.method === 'GET' && url.pathname === '/api/subscriptions') {
       return sendJson(res, 200, { ok: true, ...(await getSubscriptions()) });
     }
     if (req.method === 'PUT' && url.pathname === '/api/subscriptions') {
+      const admin = authorize(ADMIN_SCOPE);
+      if (!admin) return;
       try {
         const payload = await readJsonBody(req);
         const stored = await setSubscriptions(payload?.subscriptions, payload?.baseUpdatedAt);
+        audit(admin.principal, 'subscriptions.replace');
         return sendJson(res, 200, { ok: true, ...stored });
       } catch (error) {
         if (error.code === 'stale_write') return sendJson(res, 409, { error: 'stale_write', ...error.current });
@@ -655,24 +837,46 @@ function createHub({
         'connection': 'keep-alive',
         'x-accel-buffering': 'no'
       });
-      res.write(sseFormat('snapshot', { type: 'stats', reason: 'snapshot', stats: snapshot, at: new Date().toISOString() }));
       sseClients.add(res);
+      sseStates.set(res, {
+        backpressured: false,
+        pending: null,
+        pendingKind: null,
+        drainHandler: null,
+        drainTimer: null
+      });
+      if (!writeSse(res, sseFormat('snapshot', { type: 'stats', reason: 'snapshot', stats: snapshot, at: new Date().toISOString() }))) return;
       // Heartbeats intentionally do not query MySQL. Slow reads therefore never
       // delay the fixed 30-second SSE keepalive cadence.
-      const heartbeat = setInterval(() => { try { res.write(': hb\n\n'); } catch (_) {} }, sseHeartbeatMs);
-      const cleanup = () => { clearInterval(heartbeat); sseClients.delete(res); };
+      const heartbeat = setInterval(() => { writeSse(res, ': hb\n\n', 'heartbeat'); }, sseHeartbeatMs);
+      sseHeartbeats.set(res, heartbeat);
+      const cleanup = () => dropSseClient(res);
       req.on('close', cleanup);
       req.on('error', cleanup);
       return;
     }
 
     if (req.method === 'POST' && url.pathname === '/api/ingest') {
+      if (!authorize(INGEST_SCOPE)) return;
       try {
         const payload = await readJsonBody(req);
-        const record = await ingest(payload);
-        return sendJson(res, 200, { ok: true, deviceId: record.deviceId, stats: await getStats() });
+        const deviceId = String(payload?.deviceId || payload?.id || '').trim();
+        if (!authorize(INGEST_SCOPE, { deviceId, consumeRateLimit: false })) return;
+        const minimalResponse = /(?:^|,)\s*return=minimal\s*(?:,|$)/i.test(String(req.headers.prefer || ''));
+        const result = await ingest(payload, { includeStats: !minimalResponse });
+        if (minimalResponse) return sendJson(res, 200, { ok: true, deviceId: result.deviceId });
+        return sendJson(res, 200, { ok: true, deviceId: result.record.deviceId, stats: result.stats });
       } catch (error) {
         if (error.message === 'deviceId_required') return sendJson(res, 400, { error: 'deviceId_required' });
+        if (error.code === 'field_too_long' || error.code === 'too_many_entries' || error.code === 'invalid_payload') {
+          return sendJson(res, 400, {
+            error: error.code,
+            message: error.message,
+            ...(error.field ? { field: error.field } : {}),
+            ...(error.maxLength ? { maxLength: error.maxLength } : {}),
+            ...(error.maxEntries ? { maxEntries: error.maxEntries } : {})
+          });
+        }
         if (error.code === 'payload_too_large') {
           res.shouldKeepAlive = false;
           return sendJson(res, 413, { error: 'payload_too_large', message: error.message }, { connection: 'close' });
@@ -682,10 +886,13 @@ function createHub({
     }
 
     if (req.method === 'PUT' && url.pathname.startsWith('/api/pricing/')) {
+      const admin = authorize(ADMIN_SCOPE);
+      if (!admin) return;
       try {
         const model = decodeURIComponent(url.pathname.slice('/api/pricing/'.length));
         if (!model) return sendJson(res, 400, { error: 'model_required' });
         const pricing = await setPricing(model, normalizePrices(await readJsonBody(req)));
+        audit(admin.principal, 'pricing.replace', model);
         return sendJson(res, 200, { ok: true, pricing });
       } catch (error) {
         return sendJson(res, 400, { error: error.code || 'bad_request', message: error.message });
@@ -693,22 +900,60 @@ function createHub({
     }
 
     if (req.method === 'POST' && url.pathname === '/api/pricing/fetch-upstream-all') {
-      return sendJson(res, 200, { results: await fetchAllUpstreamPricing() });
+      const admin = authorize(ADMIN_SCOPE);
+      if (!admin) return;
+      const results = await fetchAllUpstreamPricing();
+      audit(admin.principal, 'pricing.refresh_all');
+      return sendJson(res, 200, { results });
     }
 
     if (req.method === 'POST' && url.pathname.startsWith('/api/pricing/') && url.pathname.endsWith('/fetch-upstream')) {
+      const admin = authorize(ADMIN_SCOPE);
+      if (!admin) return;
       const model = decodeURIComponent(url.pathname.slice('/api/pricing/'.length, -'/fetch-upstream'.length));
       try {
-        return sendJson(res, 200, { ok: true, pricing: await fetchUpstreamPricing(model) });
+        const pricing = await fetchUpstreamPricing(model);
+        audit(admin.principal, 'pricing.refresh', model);
+        return sendJson(res, 200, { ok: true, pricing });
       } catch (error) {
         const status = error.code === 'pricing_not_found' || error.code === 'model_required' ? 422 : 502;
         return sendJson(res, status, { error: error.code || 'pricing_lookup_failed', message: error.message });
       }
     }
 
+    if (req.method === 'POST' && url.pathname.startsWith('/api/devices/') && url.pathname.endsWith('/rename')) {
+      const admin = authorize(ADMIN_SCOPE);
+      if (!admin) return;
+      const previousDeviceId = decodeURIComponent(url.pathname.slice('/api/devices/'.length, -'/rename'.length));
+      try {
+        const body = await readJsonBody(req);
+        const nextDeviceId = String(body?.deviceId || '').trim();
+        if (!previousDeviceId || !nextDeviceId) return sendJson(res, 400, { error: 'device_id_required' });
+        validateDeviceRecordPayload({ deviceId: previousDeviceId });
+        validateDeviceRecordPayload({ deviceId: nextDeviceId });
+        const result = await renameDevice(previousDeviceId, nextDeviceId);
+        if (result?.reason === 'not_found' || result?.reason === 'baseline_missing') {
+          return sendJson(res, 404, { error: result.reason });
+        }
+        if (result?.reason === 'target_exists') return sendJson(res, 409, { error: 'target_exists' });
+        if (!result?.renamed) return sendJson(res, 400, { error: result?.reason || 'rename_failed' });
+        audit(admin.principal, 'device.rename', `${previousDeviceId}->${nextDeviceId}`);
+        return sendJson(res, 200, { ok: true, ...result });
+      } catch (error) {
+        if (error.code === 'field_too_long') {
+          return sendJson(res, 400, { error: error.code, message: error.message, field: error.field, maxLength: error.maxLength });
+        }
+        if (error.code === 'payload_too_large') return sendJson(res, 413, { error: error.code, message: error.message });
+        return sendJson(res, 400, { error: error.code || 'bad_request', message: error.message });
+      }
+    }
+
     if (req.method === 'DELETE' && url.pathname.startsWith('/api/devices/')) {
+      const admin = authorize(ADMIN_SCOPE);
+      if (!admin) return;
       const deviceId = decodeURIComponent(url.pathname.slice('/api/devices/'.length));
       await deleteDevice(deviceId);
+      audit(admin.principal, 'device.delete', deviceId);
       return sendJson(res, 200, { ok: true, deviceId });
     }
 
@@ -739,8 +984,11 @@ function createHub({
   }
 
   async function stop() {
-    for (const res of sseClients) { try { res.end(); } catch (_) {} }
+    for (const res of [...sseClients]) dropSseClient(res);
     sseClients.clear();
+    for (const heartbeat of sseHeartbeats.values()) clearInterval(heartbeat);
+    sseHeartbeats.clear();
+    sseStates.clear();
     // Drop keep-alive / half-drained sockets so close() cannot hang (e.g. fetch
     // clients that never read a static body, or browsers that linger).
     if (typeof server.closeAllConnections === 'function') {
@@ -748,6 +996,19 @@ function createHub({
     }
     await new Promise((resolve) => server.close(() => resolve()));
     if (ownedPool && activePool) await activePool.end();
+  }
+
+  function replaceAuthPolicy(nextAuthPolicy) {
+    if (!nextAuthPolicy || typeof nextAuthPolicy.authorize !== 'function') {
+      throw new TypeError('next Hub auth policy must provide authorize()');
+    }
+    // Binding safety is decided before listen(). Do not permit a live public
+    // server to transition between configured and unauthenticated states.
+    if (Boolean(nextAuthPolicy.configured) !== Boolean(auth.configured)) {
+      throw new Error('live Hub auth replacement must preserve configured state');
+    }
+    auth = nextAuthPolicy;
+    return auth.summary;
   }
 
   return {
@@ -759,12 +1020,14 @@ function createHub({
     getSubscriptions,
     getUsageRange,
     ingest,
+    renameDevice,
     deleteDevice,
     onStats,
     setPricing,
     setSubscriptions,
     fetchUpstreamPricing,
     fetchAllUpstreamPricing,
+    replaceAuthPolicy,
     bindHost,
     protocol,
     getCachedStats: () => statsCache
@@ -777,8 +1040,22 @@ if (require.main === module) {
   const port = Number(args.port || process.env.TOKEN_MONITOR_PORT || 17321);
   const host = String(args.host || process.env.TOKEN_MONITOR_HOST || '0.0.0.0');
   const secret = String(args.secret || process.env.TOKEN_MONITOR_SECRET || '').trim();
+  const adminSecret = String(args.adminSecret || process.env.TOKEN_MONITOR_ADMIN_SECRET || '').trim();
+  const viewerSecret = String(args.viewerSecret || process.env.TOKEN_MONITOR_VIEWER_SECRET || '').trim();
+  const ingestCredentials = args.ingestCredentials || process.env.TOKEN_MONITOR_INGEST_CREDENTIALS || '';
   const staleAfterMs = Number(args.staleAfterMs || process.env.TOKEN_MONITOR_STALE_AFTER_MS || 10 * 60 * 1000);
-  const hub = createHub({ port, host, secret, staleAfterMs });
+  const hub = createHub({
+    port,
+    host,
+    secret,
+    adminSecret,
+    viewerSecret,
+    ingestCredentials,
+    allowLegacyAdmin: args.allowLegacyAdmin || process.env.TOKEN_MONITOR_ALLOW_LEGACY_ADMIN,
+    allowLegacyIngest: args.allowLegacyIngest || process.env.TOKEN_MONITOR_ALLOW_LEGACY_INGEST,
+    allowInsecureHttp: args.allowInsecureHttp || args['allow-insecure-http'] || process.env.TOKEN_MONITOR_ALLOW_INSECURE_HTTP,
+    staleAfterMs
+  });
   hub.start()
     .then(() => console.log(`Token Monitor hub listening on ${hub.protocol}://${hub.bindHost}:${port}`))
     .catch((error) => { console.error(`Could not start hub: ${error.message}`); process.exitCode = 1; });

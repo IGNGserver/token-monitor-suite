@@ -10,14 +10,13 @@ const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
 const { tokscalePackageNamesForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
-const { customPricingPath, tokscaleCacheDirs } = require('./tokscaleConfig');
+const { customPricingPath, tokscaleCacheDirs, tokscaleClientCacheDir } = require('./tokscaleConfig');
 const {
   applyPeriodDelta,
   emptyPeriod,
   extractUsageBundleFromTokscale,
   extractUsageFromTokscale,
   mergePeriods,
-  normalizeClientName,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
@@ -25,11 +24,8 @@ const { hermesProfileWatchDirs, resolveHermesHome } = require('./hermesProfiles'
 const { mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const {
-  CLIENT_HEALTH_VERSION,
-  MAX_DIAGNOSTICS_PER_CLIENT,
-  classifyClientSyncDetailCode,
-  deriveClientOverall
-} = require('./clientHealth');
+  classifyClientSyncDetailCode
+} = require('./clientSyncStatus');
 const {
   clampTimerDelayMs,
   createSelfSyncThrottle,
@@ -44,6 +40,7 @@ const {
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
   collectQoderCnRows,
+  collectQoderCnTranscriptRows,
   qoderCnDataPaths,
   resolveQoderCnPricing
 } = require('./qoderCnUsage');
@@ -62,6 +59,13 @@ const {
   collectClaudeDesktopRows,
   desktopSessionWatchDirs
 } = require('./claudeDesktopUsage');
+const {
+  buildDeepSeekHarnessHistoryGraph,
+  buildDeepSeekHarnessPeriods,
+  buildDeepSeekHarnessRangeJson,
+  collectDeepSeekHarnessRows,
+  deepseekHarnessSessionsDir
+} = require('./deepseekHarnessUsage');
 const { hashKey } = require('./hashKey');
 const { filterPeriodByCustomRange, normalizeCustomRange } = require('./customRange');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
@@ -529,7 +533,7 @@ function resetPromaPricingCache() {
   promaPricingCache.clear();
 }
 
-const LOCAL_PARSED_CLIENTS = new Set(['proma', 'claude-desktop', 'qodercn']);
+const LOCAL_PARSED_CLIENTS = new Set(['proma', 'claude-desktop', 'deepseek-harness', 'qodercn']);
 
 function collectionDate(now) {
   const value = typeof now === 'function' ? now() : now;
@@ -849,38 +853,42 @@ function antigravityDataPresent(home) {
 
 async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), options = {}) {
   const enabled = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
-  if (!enabled.has('antigravity')) return;
-  if (!antigravityDataPresent(home)) return;
+  if (!enabled.has('antigravity')) return { attempted: false, failed: false };
+  if (!antigravityDataPresent(home)) return { attempted: false, failed: false };
   const minIntervalMs = options.minIntervalMs ?? selfSyncThrottle.minIntervalForTick(
     options.force === true ? { forceSelfSync: ['antigravity'] } : {},
     'antigravity'
   );
-  if (!selfSyncThrottle.claim('antigravity', minIntervalMs)) return;
+  if (!selfSyncThrottle.claim('antigravity', minIntervalMs)) return { attempted: false, failed: false };
   const attempt = selfSyncThrottle.beginAttempt('antigravity');
   if (typeof options.run === 'function') {
     try {
       await options.run();
       selfSyncThrottle.completeAttempt('antigravity', attempt, false);
+      return { attempted: true, failed: false };
     } catch (error) {
       if (typeof logger === 'function') logger(`antigravity sync failed: ${error.message}`);
-      selfSyncThrottle.completeAttempt('antigravity', attempt, true, 'sync-failed', {
+      const details = {
         failureStage: error?.syncFailureStage,
         detailCode: error?.syncDetailCode || classifyClientSyncDetailCode({ client: 'antigravity', text: error?.message }),
         exitCode: error?.syncExitCode
+      };
+      selfSyncThrottle.completeAttempt('antigravity', attempt, true, 'sync-failed', {
+        ...details
       });
       options.onFailure?.('antigravity');
+      return { attempted: true, failed: true, ...details };
     }
-    return;
   }
   const { bin, prefixArgs, env } = tokscaleCommand();
-  await new Promise((resolve) => {
+  return await new Promise((resolve) => {
     let settled = false;
     const settle = (failed, code = '', details = {}) => {
       if (settled) return;
       settled = true;
       selfSyncThrottle.completeAttempt('antigravity', attempt, failed, code, details);
       if (failed) options.onFailure?.('antigravity');
-      resolve();
+      resolve({ attempted: true, failed, code, ...details });
     };
     const child = spawn(bin, [...prefixArgs, 'antigravity', 'sync'], { env, windowsHide: true });
     let stderr = '';
@@ -964,6 +972,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
   }
+  if (options.deepseekHarnessGraph) {
+    rawGraphs.push(options.deepseekHarnessGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.deepseekHarnessGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -1030,12 +1042,14 @@ async function collectUsageOnce(options) {
     options.homeDir || os.homedir(),
     { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
   );
-  // Proma and Qoder CN remain local compatibility adapters. Reasonix aggregate
-  // usage is supplied by the same Tokscale path as every other tracked client.
-  const localClients = new Set(['proma', 'claude-desktop', 'qodercn']);
+  // Proma, DeepSeek Harness, and Qoder CN remain local compatibility adapters.
+  // Reasonix aggregate usage is supplied by the same Tokscale path as every
+  // other tracked client.
+  const localClients = new Set(['proma', 'claude-desktop', 'deepseek-harness', 'qodercn']);
   const tokscaleClients = tokscaleClientsCsv(normalizedClients);
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesClaudeDesktop = normalizedClients.split(',').includes('claude-desktop');
+  const includesDeepSeekHarness = normalizedClients.split(',').includes('deepseek-harness');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
@@ -1063,15 +1077,21 @@ async function collectUsageOnce(options) {
   let claudeDesktopPeriods = null;
   let claudeDesktopRows = null;
   let claudeDesktopPricing = null;
+  let deepSeekHarnessPeriods = null;
+  let deepSeekHarnessRows = null;
+  let deepSeekHarnessPricing = null;
   let qoderCnPeriods = null;
   let qoderCnRows = null;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
+  let antigravitySyncFailed = false;
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     const progress = { ...periods };
     if (claudeDesktopPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, claudeDesktopPeriods.today);
     if (claudeDesktopPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, claudeDesktopPeriods.month);
+    if (deepSeekHarnessPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, deepSeekHarnessPeriods.today);
+    if (deepSeekHarnessPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, deepSeekHarnessPeriods.month);
     if (qoderCnPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, qoderCnPeriods.today);
     if (qoderCnPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, qoderCnPeriods.month);
     try { options.onProgress({ ...progress, updatedAt: new Date().toISOString() }); } catch (_) {}
@@ -1082,11 +1102,27 @@ async function collectUsageOnce(options) {
       minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'cursor'),
       onFailure: options.onSelfSyncFailed
     });
-    await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
+    const antigravitySync = await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
       minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'antigravity'),
       run: options.runAntigravitySync,
       onFailure: options.onSelfSyncFailed
     });
+    if (antigravitySync?.failed === true) {
+      antigravitySyncFailed = true;
+      const error = new Error('antigravity sync failed; retaining the last known usage snapshot');
+      error.code = 'client-sync-failed';
+      error.client = 'antigravity';
+      error.syncFailureStage = antigravitySync.failureStage;
+      error.syncDetailCode = antigravitySync.detailCode;
+      error.syncExitCode = antigravitySync.exitCode;
+      // A failed self-sync leaves the cache potentially stale or empty. Do not
+      // let the following Tokscale scan turn a known-good today snapshot into
+      // zero. Anchored ticks can safely keep the per-client partition; a cold or
+      // cross-day full scan has no trustworthy partition to retain, so it must
+      // fail the tick and leave the previous published record untouched.
+      if (!(anchorUsed && anchor.todayPartitions?.antigravity)) throw error;
+      if (typeof options.logger === 'function') options.logger('antigravity sync failed; using the anchored antigravity partition');
+    }
     if (includesProma && (!targetRequested || targetClients.includes('proma'))) {
       try {
         promaRows = collectPromaRows();
@@ -1128,9 +1164,42 @@ async function collectUsageOnce(options) {
         if (typeof options.logger === 'function') options.logger(`claude-desktop parse failed: ${error.message}`);
       }
     }
-    if (includesQoderCn && (!targetRequested || targetClients.includes('qodercn'))) {
+    if (includesDeepSeekHarness && (!targetRequested || targetClients.includes('deepseek-harness'))) {
       try {
-        const qoderCnSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
+        deepSeekHarnessRows = collectDeepSeekHarnessRows({
+          homeDir: options.homeDir || os.homedir(),
+          env: options.env || process.env,
+          logger: options.logger
+        });
+        deepSeekHarnessPricing = await resolvePromaPricing(deepSeekHarnessRows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        });
+        const harnessJson = buildDeepSeekHarnessPeriods({
+          now: collectedAt,
+          allTimeSince,
+          rows: deepSeekHarnessRows,
+          pricingByModel: deepSeekHarnessPricing
+        });
+        deepSeekHarnessPeriods = {
+          today: extractUsageFromTokscale(harnessJson.today),
+          month: extractUsageFromTokscale(harnessJson.month),
+          allTime: extractUsageFromTokscale(harnessJson.allTime)
+        };
+      } catch (error) {
+        if (typeof options.logger === 'function') options.logger(`deepseek-harness parse failed: ${error.message}`);
+      }
+    }
+    if (includesQoderCn && (!targetRequested || targetClients.includes('qodercn'))) {
+      const qoderCnSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
+      // Legacy SQLite parsing and transcript scanning can each fail without
+      // the other — e.g. a corrupted local.db must not suppress rows from
+      // the transcript scan (and vice versa), so each is read in its own
+      // try/catch; the period only counts as failed when neither source
+      // produced rows, which keeps the anchored fallback authoritative.
+      let qoderCnLegacyReadFailed = false;
+      try {
         qoderCnRows = await collectQoderCnRows({
           homeDir: options.homeDir || os.homedir(),
           platform: platformValue,
@@ -1138,6 +1207,20 @@ async function collectUsageOnce(options) {
           logger: options.logger,
           sinceMs: qoderCnSinceMs
         });
+      } catch (dbErr) {
+        qoderCnLegacyReadFailed = true;
+        if (typeof options.logger === 'function') options.logger(`qodercn legacy parse failed: ${dbErr.message}`);
+      }
+      try {
+        const qoderCnTranscriptRows = collectQoderCnTranscriptRows({ homeDir: options.homeDir || os.homedir(), sinceMs: qoderCnSinceMs });
+        if (qoderCnTranscriptRows.length) qoderCnRows = (qoderCnRows || []).concat(qoderCnTranscriptRows);
+      } catch (transcriptErr) {
+        if (typeof options.logger === 'function') options.logger(`qodercn transcript rows skipped: ${transcriptErr.message}`);
+      }
+      try {
+        if (qoderCnLegacyReadFailed && !(qoderCnRows && qoderCnRows.length)) {
+          throw new Error('qodercn read failed: legacy db unreadable and no transcript rows');
+        }
         qoderCnPricing = await resolveQoderCnPricing(qoderCnRows, {
           lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
           commandTimeoutMs: options.pricingTimeoutMs,
@@ -1185,11 +1268,17 @@ async function collectUsageOnce(options) {
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
       if (claudeDesktopPeriods) freshPartitions['claude-desktop'] = claudeDesktopPeriods.today;
+      if (deepSeekHarnessPeriods) freshPartitions['deepseek-harness'] = deepSeekHarnessPeriods.today;
       if (qoderCnPeriods) freshPartitions.qodercn = qoderCnPeriods.today;
       if (qoderCnPeriodReadFailed && anchor.todayPartitions?.qodercn) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
         freshPartitions.qodercn = anchor.todayPartitions.qodercn;
+      }
+      if (antigravitySyncFailed && anchor.todayPartitions?.antigravity) {
+        // The cache scan after a failed sync is not a fresh observation. Keep
+        // the exact partition that the anchor used for its month/allTime delta.
+        freshPartitions.antigravity = anchor.todayPartitions.antigravity;
       }
       todayPartitions = useTargetedPartitions
         ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, targetClients)
@@ -1240,6 +1329,12 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, claudeDesktopPeriods.month);
       allTime = mergePeriods(allTime, claudeDesktopPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), 'claude-desktop': claudeDesktopPeriods.today };
+    }
+    if (deepSeekHarnessPeriods && !anchorUsed) {
+      today = mergePeriods(today, deepSeekHarnessPeriods.today);
+      month = mergePeriods(month, deepSeekHarnessPeriods.month);
+      allTime = mergePeriods(allTime, deepSeekHarnessPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), 'deepseek-harness': deepSeekHarnessPeriods.today };
     }
     if (qoderCnPeriods && !anchorUsed) {
       today = mergePeriods(today, qoderCnPeriods.today);
@@ -1429,11 +1524,24 @@ async function collectUsageOnce(options) {
     let qoderCnGraph = null;
     let qoderCnHistoryReadFailed = false;
     if (includesQoderCn) {
+      let qoderCnTranscriptAllRows = [];
+      try {
+        qoderCnTranscriptAllRows = collectQoderCnTranscriptRows({ homeDir: options.homeDir });
+      } catch (err) {
+        qoderCnHistoryReadFailed = true;
+        if (typeof options.logger === 'function') options.logger(`qodercn transcript rows skipped: ${err.message}`);
+      }
       try {
         // Reuse the scan's full rows on non-anchored ticks; anchored ticks read
         // only since local midnight, so the graph needs its own full read there.
         // resolveQoderCnPricing is cached (6h TTL), so the second pass is cheap.
-        const rows = (!anchorUsed && qoderCnRows) ? qoderCnRows : await collectQoderCnRows({ homeDir: options.homeDir, logger: options.logger });
+        let rows = (!anchorUsed && qoderCnRows) ? qoderCnRows : await collectQoderCnRows({ homeDir: options.homeDir, logger: options.logger });
+        // Non-anchored ticks already carry transcript rows via qoderCnRows;
+        // anchored ticks need the full transcript set appended, and transcript
+        // rows are not delta-based — appending them twice would double-count.
+        if (anchorUsed && qoderCnTranscriptAllRows.length) {
+          rows = rows.concat(qoderCnTranscriptAllRows);
+        }
         const pricing = (!anchorUsed && qoderCnPricing) ? qoderCnPricing : await resolveQoderCnPricing(rows, {
           lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
           commandTimeoutMs: options.pricingTimeoutMs,
@@ -1459,6 +1567,16 @@ async function collectUsageOnce(options) {
           pricingByModel: claudeDesktopPricing || {}
         })
         : null,
+      deepseekHarnessGraph: includesDeepSeekHarness
+        ? buildDeepSeekHarnessHistoryGraph({
+          rows: deepSeekHarnessRows || collectDeepSeekHarnessRows({
+            homeDir: options.homeDir || os.homedir(),
+            env: options.env || process.env,
+            logger: options.logger
+          }),
+          pricingByModel: deepSeekHarnessPricing || {}
+        })
+        : null,
       qoderCnGraph: historyQoderCnGraph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
@@ -1477,20 +1595,6 @@ async function collectUsageOnce(options) {
       options.onQoderCnHistoryGraph(qoderCnGraph);
     }
   }
-  // After history, so `lastActivityDay` can come from the daily buckets this
-  // scan already produced rather than from a second source of truth.
-  const clientHealth = deriveClientHealth(normalizedClients, allTime, {
-    sourceChecks,
-    wslStatus,
-    observedAt: collectedAt,
-    lastActivityDays: mergeClientActivityDays(
-      options.lastActivityDays,
-      summary.history,
-      today,
-      localTodayKey(collectedAt)
-    )
-  });
-  if (clientHealth) summary.clientHealth = clientHealth;
   return summary;
 }
 
@@ -1585,13 +1689,9 @@ function hasCopilotChatSessions(workspaceRoot) {
 // derivation and, after the interval-only/self-synced projections below, the
 // chokidar watch list; Antigravity's read-only source roots are added back
 // explicitly below.
-// The watched roots, each tagged with a stable id for its *kind*. One id may
-// cover several paths: Copilot's workspaceStorage has a variant per platform and
-// Kiro's IDE globalStorage has four, but "the VS Code workspace storage is
-// missing" is the useful statement, not which spelling was probed. Absolute
-// paths contain the user's home directory and never leave this process, so a
-// health record carries the id instead — CLIENT_SOURCE_CHECK_IDS in
-// clientHealth.js is the allowlist every id here must appear in.
+// The watched roots are tagged with a stable id for local detection and tests.
+// One id may cover several equivalent paths: Copilot's workspaceStorage has a
+// variant per platform and Kiro's IDE globalStorage has four.
 function clientSourceRoots(clientsCsv) {
   const home = os.homedir();
   const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
@@ -1630,8 +1730,16 @@ function clientSourceRoots(clientsCsv) {
   const xdgHome = xdgDataHome(home);
   add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
-  add('cursor', ['tokscale-cursor-cache', path.join(home, '.config', 'tokscale', 'cursor-cache')]);
-  add('antigravity', ['tokscale-antigravity-cache', path.join(home, '.config', 'tokscale', 'antigravity-cache')]);
+  add('cursor', ['tokscale-cursor-cache', tokscaleClientCacheDir('cursor', {
+    homeDir: home,
+    env: process.env,
+    platform: process.platform
+  })]);
+  add('antigravity', ['tokscale-antigravity-cache', tokscaleClientCacheDir('antigravity', {
+    homeDir: home,
+    env: process.env,
+    platform: process.platform
+  })]);
   // A whitespace-only KIMI_CODE_HOME counts as unset, matching tokscale: it
   // joins `sessions` onto the raw value, so a blank export would resolve to the
   // root-level /sessions and hide the real one.
@@ -1749,6 +1857,9 @@ function clientSourceRoots(clientsCsv) {
   add('workbuddy', ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')]);
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
+  // DeepSeek Harness — default JSONL session store at ~/.dsh/sessions, or the
+  // sessions directory under DSH_HOME when the upstream override is set.
+  add('deepseek-harness', ['deepseek-harness-sessions', deepseekHarnessSessionsDir({ homeDir: home, env: process.env })]);
   add('claude-desktop', ...desktopSessionWatchDirs({ homeDir: home, includeMissing: true }).map((dir) => ['claude-desktop-sessions', dir]));
   // Qoder CN — SQLite DB under the platform Application Support dir.
   const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform: process.platform, env: process.env });
@@ -2321,139 +2432,6 @@ function deriveClientStatus(clientsCsv, allTimePeriod, options = {}) {
   return statusFromSignals(clients, clientDataDirPresence(clientsCsv, options), allTimePeriod?.clients || {});
 }
 
-// The most recent day each client has recorded usage on, read out of the daily
-// history buckets this scan already produced. Deliberately not called "last
-// used": it is the newest day the collector *holds data for*, which is the
-// honest answer to "is this tool quiet, or are we failing to read it". Per-turn
-// timestamps would be the stronger signal and tokscale does not expose them.
-function clientActivityDaysFromHistory(history) {
-  const days = {};
-  for (const bucket of history?.daily || []) {
-    const key = String(bucket?.date || '').slice(0, 10);
-    if (!key) continue;
-    for (const [rawClient, usage] of Object.entries(bucket?.perClient || {})) {
-      if (Number(usage?.tokens || 0) <= 0) continue;
-      // Folds tokscale's aliases onto the umbrella id, so an antigravity-cli day
-      // counts as an antigravity day — the same id the health record is keyed on.
-      const client = normalizeClientName(rawClient);
-      if (!client) continue;
-      if (!days[client] || key > days[client]) days[client] = key;
-    }
-  }
-  return days;
-}
-
-// A history refresh runs on its own slower cadence than a usage tick, so a tick
-// that skipped it keeps the caller's previous map rather than blanking the
-// field. Merged per client rather than swapped wholesale: collectHistoryOnce()
-// deliberately survives one source failing while another succeeds, so a refresh
-// that returns only Proma's days must not erase what the last one knew about
-// Codex. Today's already-collected period is also authoritative for the date: it
-// closes the cadence gap without another graph scan. A day only ever moves
-// forward, so the newest value wins where sources overlap.
-function mergeClientActivityDays(previous, history, todayPeriod, todayKey) {
-  const merged = { ...(previous || {}) };
-  const candidates = clientActivityDaysFromHistory(history);
-  const currentDay = String(todayKey || '').slice(0, 10);
-  if (currentDay) {
-    for (const [rawClient, tokens] of Object.entries(todayPeriod?.clients || {})) {
-      if (Number(tokens || 0) <= 0) continue;
-      const client = normalizeClientName(rawClient);
-      if (client && (!candidates[client] || currentDay > candidates[client])) {
-        candidates[client] = currentDay;
-      }
-    }
-  }
-  for (const [client, day] of Object.entries(candidates)) {
-    // Per client, newest wins. A plain spread would let a fresh-but-older value
-    // push a known day backwards — history is a rolling window and a refresh can
-    // legitimately return a shorter one, so "fresh" does not imply "later".
-    if (!merged[client] || day > merged[client]) merged[client] = day;
-  }
-  return merged;
-}
-
-// Per-client diagnostics. Every input is a filesystem or subprocess observation
-// that only this process can make, which is why the record is built here;
-// clientHealth.js owns the shape, the enums and the validation the hub re-runs.
-//
-// Detail is attached only to clients that are not healthy. A working client is
-// fully described by the fixed core, and this record is per client per device on
-// a document the hub keeps — so "which of Copilot's two roots is missing" is
-// worth its bytes exactly when something is wrong.
-function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
-  const clients = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean);
-  if (clients.length === 0) return null;
-  // Injectable so a test can state the filesystem instead of depending on one:
-  // every `overall` below turns on whether a directory exists, which makes the
-  // developer's machine and a CI runner disagree about the same input.
-  const checksByClient = options.sourceChecks || clientSourceChecks(clientsCsv);
-  const usageClients = allTimePeriod?.clients || {};
-  const wslDetected = new Set(options.wslStatus?.detected || []);
-  const wslWithData = new Set(options.wslStatus?.withData || []);
-  const activityDays = options.lastActivityDays || {};
-  const throttle = options.selfSyncThrottle || selfSyncThrottle;
-  const result = {};
-  for (const client of clients) {
-    const checks = checksByClient[client] || [];
-    const detected = checks.filter((check) => check.exists);
-    const liveTokens = Number(usageClients[client] || 0);
-    const sync = SELF_SYNCED_CLIENTS.has(client) ? throttle.syncStatus(client) : null;
-    const entry = {
-      source: {
-        state: checks.length === 0 ? 'unknown' : (detected.length > 0 ? 'detected' : 'missing'),
-        detectedCount: detected.length,
-        checkedCount: checks.length
-      },
-      collection: { state: sync ? sync.state : 'direct' },
-      data: { liveTokens: liveTokens > 0 ? liveTokens : 0 }
-    };
-    // Kept even for a healthy self-synced client: "last synced two minutes ago"
-    // is the answer to "why is today still 0", not a fault report.
-    if (sync?.lastAttemptAt) entry.collection.lastAttemptAt = new Date(sync.lastAttemptAt).toISOString();
-    if (sync?.lastSuccessAt) entry.collection.lastSuccessAt = new Date(sync.lastSuccessAt).toISOString();
-    if (sync?.state === 'failed') {
-      if (sync.failureStage) entry.collection.syncFailureStage = sync.failureStage;
-      if (sync.detailCode) entry.collection.syncDetailCode = sync.detailCode;
-      if (sync.exitCode !== null && sync.exitCode !== undefined) entry.collection.syncExitCode = sync.exitCode;
-    }
-    const activityDay = activityDays[client];
-    if (activityDay) entry.data.lastActivityDay = activityDay;
-    const overall = deriveClientOverall(entry);
-    if (overall !== 'healthy') {
-      if (checks.length > 0 && detected.length < checks.length) {
-        entry.source.checks = checks.map(({ id, exists }) => ({ id, exists }));
-      }
-      const codes = [];
-      // Only "nothing at all" is a fault. A client's roots are alternatives, not
-      // dependencies — Antigravity's IDE cache, native sources and CLI data are
-      // three ways to have it installed, and so are Kiro's three — so a partial
-      // set is the normal shape of a normal install. `checks` still ships as
-      // neutral evidence of which ones were found.
-      if (checks.length > 0 && detected.length === 0) codes.push('source-missing');
-      if (sync?.failureCode) codes.push(sync.failureCode);
-      if (detected.length > 0 && liveTokens <= 0) codes.push('no-usage-observed');
-      // States a fact, not a cause: a marker without usage can equally mean the
-      // tool is installed in that distro and simply unused.
-      if (wslDetected.has(client) && !wslWithData.has(client)) codes.push('wsl-detected-no-data');
-      // An object per diagnostic even though `code` is the only field today: the
-      // extension point is inside the entry, and every diagnostics format worth
-      // copying (LSP, ESLint, SARIF, RFC 9457) is shaped this way. Growing an
-      // object stays compatible; turning `string[]` into `object[]` would not.
-      // Severity is deliberately absent — it depends on which client the code
-      // lands on, which only the renderer knows.
-      if (codes.length > 0) {
-        entry.diagnostics = codes.slice(0, MAX_DIAGNOSTICS_PER_CLIENT).map((code) => ({ code }));
-      }
-    }
-    entry.overall = overall;
-    result[client] = entry;
-  }
-  const health = { version: CLIENT_HEALTH_VERSION, clients: result };
-  if (options.observedAt) health.observedAt = new Date(options.observedAt).toISOString();
-  return health;
-}
-
 // The frozen wslAnchor is only valid to merge into a preview period when it was
 // captured in the same calendar window: today only if the anchor is from today,
 // month only if from the same month. Otherwise a cross-day / cross-month full
@@ -2695,11 +2673,6 @@ function startCollector(options) {
   let anchor = null;
   let wslAnchor = null;
   let wslStatusAnchor = null;
-  // The last-activity days a history refresh produced, carried across the ticks
-  // that skip history. Read back out of the record this collector just published
-  // rather than kept as a second copy, so the two cannot drift; a restart simply
-  // relearns them from the first tick, which always includes history.
-  let activityDaysAnchor = {};
   // Keep the highest complete live day in this collector even when another
   // process owns the shared archive. A watch tick can then hand its value to a
   // later full/history tick instead of losing it at the tick boundary.
@@ -2929,7 +2902,6 @@ function startCollector(options) {
         todayOnlyAnchor: anchored ? anchor : null,
         wslAnchor: anchored ? wslAnchor : null,
         wslStatus: anchored ? wslStatusAnchor : null,
-        lastActivityDays: activityDaysAnchor,
         refreshWsl: anchored ? refreshWsl : false,
         qoderCnFallbackPeriods: anchor?.qoderCnPeriods || null,
         qoderCnHistoryFallbackGraph: qoderCnHistoryGraph,
@@ -2996,9 +2968,6 @@ function startCollector(options) {
           historyScanSucceeded,
           tickOptions.rolloverHistoryRetry === true
         );
-      }
-      for (const [client, entry] of Object.entries(summary.clientHealth?.clients || {})) {
-        if (entry.data?.lastActivityDay) activityDaysAnchor[client] = entry.data.lastActivityDay;
       }
       if (!anchored && captured) {
         anchor = {
@@ -3513,6 +3482,7 @@ async function collectCustomRangeOnce(options = {}) {
   const tokscaleClients = tokscaleClientsCsv(normalizedClients);
   const includesProma = includesLocalClient(normalizedClients, 'proma');
   const includesClaudeDesktop = includesLocalClient(normalizedClients, 'claude-desktop');
+  const includesDeepSeekHarness = includesLocalClient(normalizedClients, 'deepseek-harness');
   const homeDir = options.homeDir || os.homedir();
   let period = emptyPeriod();
 
@@ -3561,7 +3531,29 @@ async function collectCustomRangeOnce(options = {}) {
     }
   }
 
-  if (!tokscaleClients && !includesProma && !includesClaudeDesktop) {
+  if (includesDeepSeekHarness) {
+    try {
+      const harnessRows = collectDeepSeekHarnessRows({
+        homeDir,
+        env: options.env || process.env,
+        logger: options.logger
+      });
+      const harnessPricing = await resolvePromaPricing(harnessRows, {
+        lookupModelPricing: options.lookupModelPricing,
+        commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+        pricingRevision: options.pricingRevision
+      });
+      const harnessJson = buildDeepSeekHarnessRangeJson(range, {
+        rows: harnessRows,
+        pricingByModel: harnessPricing
+      });
+      period = mergePeriods(period, extractUsageFromTokscale(harnessJson));
+    } catch (err) {
+      if (typeof options.logger === 'function') options.logger(`deepseek-harness custom-range parse failed: ${err.message}`);
+    }
+  }
+
+  if (!tokscaleClients && !includesProma && !includesClaudeDesktop && !includesDeepSeekHarness) {
     return { range, period: emptyPeriod(), updatedAt: new Date().toISOString() };
   }
 
@@ -3603,7 +3595,6 @@ module.exports = {
   collectHistoryOnce,
   collectUsageOnce,
   collectCustomRangeOnce,
-  clientActivityDaysFromHistory,
   clientDataDirPresence,
   clientDiagnosticRoots,
   visibleDiagnosticRoots,
@@ -3615,9 +3606,7 @@ module.exports = {
   collectorAnchorTrust,
   configFingerprint,
   qoderCnDbPathForClients,
-  deriveClientHealth,
   deriveClientStatus,
-  mergeClientActivityDays,
   selfSyncSourceRootsForClients,
   watchAttributionRootsForClients,
   wslPeriodsForPreview,

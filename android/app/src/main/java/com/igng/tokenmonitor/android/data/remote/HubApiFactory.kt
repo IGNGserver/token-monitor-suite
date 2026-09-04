@@ -17,12 +17,13 @@ import javax.inject.Singleton
 @Singleton
 class HubApiFactory private constructor(
   private val json: Json,
-  private val requestTimeoutMs: Long
+  private val requestTimeoutMs: Long,
+  private val allowInsecureHttp: Boolean
 ) {
-  @Inject constructor(json: Json) : this(json, 20_000L)
+  @Inject constructor(json: Json) : this(json, 20_000L, false)
 
   fun create(config: ConnectionConfig): HubApi = Retrofit.Builder()
-    .baseUrl(normalizeUrl(config.hubUrl))
+    .baseUrl(checkedUrl(config.hubUrl))
     .client(client(config, eventStream = false))
     .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
     .build()
@@ -32,7 +33,7 @@ class HubApiFactory private constructor(
     EventSources.createFactory(client(config, eventStream = true)).newEventSource(request, listener)
 
   fun statsRequest(config: ConnectionConfig): Request = Request.Builder()
-    .url("${normalizeUrl(config.hubUrl)}api/stats/stream")
+    .url("${checkedUrl(config.hubUrl)}api/stats/stream")
     .header("Accept", "text/event-stream")
     .build()
 
@@ -62,8 +63,16 @@ class HubApiFactory private constructor(
       return if (withScheme.endsWith('/')) withScheme else "$withScheme/"
     }
 
-    fun forTesting(json: Json, requestTimeoutMs: Long = 100L): HubApiFactory = HubApiFactory(json, requestTimeoutMs)
+    fun forTesting(json: Json, requestTimeoutMs: Long = 100L): HubApiFactory = HubApiFactory(json, requestTimeoutMs, true)
   }
 
   private fun normalizeUrl(raw: String): String = Companion.normalizeUrl(raw)
+
+  private fun checkedUrl(raw: String): String {
+    val normalized = normalizeUrl(raw)
+    require(allowInsecureHttp || normalized.startsWith("https://", ignoreCase = true)) {
+      "Android 客户端只允许 HTTPS Hub；请为 LAN/VPN Hub 配置 TLS。"
+    }
+    return normalized
+  }
 }

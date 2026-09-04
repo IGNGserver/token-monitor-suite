@@ -197,7 +197,7 @@ import com.igng.tokenmonitor.android.ui.components.formatUsd
 
 @Composable
 
-fun MoreHubScreen(navController: NavHostController) {
+fun MoreHubScreen(navController: NavHostController, state: HubUiState) {
 
   Column(Modifier.fillMaxSize()) {
 
@@ -257,7 +257,7 @@ fun MoreHubScreen(navController: NavHostController) {
           onClick = { navController.navigate("status") }
         )
       }
-      item {
+      if (state.authorization?.capabilities?.pricing == true && state.authorization.scopes.contains("admin")) item {
 
         MoreNavCard(
 
@@ -1618,7 +1618,7 @@ fun SettingsScreen(
 
           label = { Text("Hub URL") },
 
-          placeholder = { Text("http://192.168.1.100:17321") },
+          placeholder = { Text("https://hub.example.com") },
 
           singleLine = true,
 

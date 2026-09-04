@@ -13,6 +13,7 @@ const {
   parseLimitProviders
 } = require('../shared/limitCollector');
 const { postSyncPayload } = require('../shared/syncPayload');
+const { requireSafeHubTransport } = require('../shared/hubTransport');
 const { applyProjectRollups } = require('../shared/usage');
 const { runAgent, runAgentOnce } = require('./runtime');
 const {
@@ -25,7 +26,14 @@ const {
 
 loadDotEnv();
 const args = parseArgs(process.argv.slice(2));
-const hubUrl = normalizeHubUrl(args.hub || args.hubUrl || process.env.TOKEN_MONITOR_HUB_URL || 'http://127.0.0.1:17321').replace(/\/$/, '');
+const allowInsecureHubHttp = parseBoolean(
+  args.allowInsecureHttp ?? args['allow-insecure-http'] ?? process.env.TOKEN_MONITOR_ALLOW_INSECURE_HTTP,
+  false
+);
+const hubUrl = requireSafeHubTransport(
+  normalizeHubUrl(args.hub || args.hubUrl || process.env.TOKEN_MONITOR_HUB_URL || 'http://127.0.0.1:17321'),
+  { allowInsecureHttp: allowInsecureHubHttp }
+);
 const secret = String(args.secret || process.env.TOKEN_MONITOR_SECRET || '').trim();
 const deviceId = String(args.device || args.deviceId || process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId());
 const collectionMode = String(args.collectionMode || process.env.TOKEN_MONITOR_COLLECTION_MODE || '').trim().toLowerCase();

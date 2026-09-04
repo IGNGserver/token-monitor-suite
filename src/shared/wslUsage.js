@@ -1,10 +1,15 @@
 'use strict';
 
 const fs = require('node:fs');
+const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { REASONIX_CLIENT } = require('./reasonixPaths');
 const { buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const {
+  buildDeepSeekHarnessPeriods,
+  collectDeepSeekHarnessRows
+} = require('./deepseekHarnessUsage');
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 
@@ -47,7 +52,8 @@ const WSL_DATA_MARKERS = [
   '.config/kiro/User/globalStorage/kiro.kiroagent',
   '.codebuddy/projects',
   '.workbuddy',
-  '.proma/agent-sessions'
+  '.proma/agent-sessions',
+  '.dsh/sessions'
 ];
 
 // Maps every WSL_DATA_MARKERS entry to the tracked-client id that owns it, so a
@@ -89,7 +95,8 @@ const MARKER_CLIENTS = {
   '.config/kiro/User/globalStorage/kiro.kiroagent': 'kiro',
   '.codebuddy/projects': 'codebuddy',
   '.workbuddy': 'workbuddy',
-  '.proma/agent-sessions': 'proma'
+  '.proma/agent-sessions': 'proma',
+  '.dsh/sessions': 'deepseek-harness'
 };
 
 // Default command runner. reg output is ANSI/utf8; wsl.exe output is UTF-16LE.
@@ -199,6 +206,8 @@ async function collectWslUsage(options = {}, deps = {}) {
   const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, now, runTokscale, logger, decoratePeriods } = options;
   const buildProma = options.buildPromaPeriods || buildPromaPeriods;
   const collectProma = options.collectPromaRows || collectPromaRows;
+  const buildDeepSeekHarness = options.buildDeepSeekHarnessPeriods || buildDeepSeekHarnessPeriods;
+  const collectDeepSeekHarness = options.collectDeepSeekHarnessRows || collectDeepSeekHarnessRows;
   const existsSync = deps.existsSync || fs.existsSync;
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const bundle = emptyWslBundle();
@@ -212,7 +221,7 @@ async function collectWslUsage(options = {}, deps = {}) {
   // are local-only as well.
   const tracked = new Set(String(trackedClients).split(',').map((c) => c.trim()).filter(Boolean));
   const clientsCsv = String(clients || '').split(',').map((c) => c.trim()).filter(Boolean)
-    .filter((client) => client !== REASONIX_CLIENT)
+    .filter((client) => client !== REASONIX_CLIENT && client !== 'proma' && client !== 'deepseek-harness')
     .join(',');
   for (const home of wslUsageHomes(deps)) {
     // Attribution is marker-based, independent of whether a parser returns data.
@@ -244,6 +253,28 @@ async function collectWslUsage(options = {}, deps = {}) {
         bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(proma.allTime));
       } catch (error) {
         if (typeof logger === 'function') logger(`wsl Proma usage parse failed for ${home}: ${error.message}`);
+      }
+    }
+    // DeepSeek Harness is local-parsed as well. An explicit dshHome keeps the
+    // host's DSH_HOME from leaking into a WSL scan; the WSL home's default is
+    // always /home/<user>/.dsh.
+    if (tracked.has('deepseek-harness') && homeDataClients.includes('deepseek-harness')) {
+      try {
+        const rows = collectDeepSeekHarness({
+          dshHome: path.join(home, '.dsh'),
+          homeDir: home,
+          env: {},
+          logger
+        });
+        const pricingByModel = typeof options.resolvePromaPricing === 'function'
+          ? await options.resolvePromaPricing(rows)
+          : options.deepSeekHarnessPricingByModel;
+        const harness = buildDeepSeekHarness({ now, allTimeSince, rows, pricingByModel });
+        bundle.today = mergePeriods(bundle.today, extractUsageFromTokscale(harness.today));
+        bundle.month = mergePeriods(bundle.month, extractUsageFromTokscale(harness.month));
+        bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(harness.allTime));
+      } catch (error) {
+        if (typeof logger === 'function') logger(`wsl DeepSeek Harness usage parse failed for ${home}: ${error.message}`);
       }
     }
     // Tokscale 4.6+ keeps explicit --home scans isolated from host-native roots,

@@ -1,12 +1,13 @@
 'use strict';
 
-const { MAX_JSON_BODY_BYTES } = require('./http');
+const { fetchBufferedWithTimeout, MAX_JSON_BODY_BYTES } = require('./http');
 const { syncLimits } = require('./limits');
 const { isReasonixSyntheticSession } = require('./reasonixSessionGuard');
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
 const SYNC_PAYLOAD_BUDGET_BYTES = MAX_JSON_BODY_BYTES - SYNC_PAYLOAD_MARGIN_BYTES;
 const SYNC_HISTORY_COMPONENT_DAYS = 30;
+const SYNC_REQUEST_TIMEOUT_MS = 30 * 1000;
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
@@ -170,7 +171,12 @@ function sessionsWithoutReasonix(sessions) {
       removed = true;
       continue;
     }
-    sanitized[key] = session;
+    Object.defineProperty(sanitized, key, {
+      value: session,
+      enumerable: true,
+      configurable: true,
+      writable: true
+    });
   }
   return removed ? sanitized : sessions;
 }
@@ -267,7 +273,13 @@ function syncPayload(summary, options = {}) {
   return serializeSyncPayload(summary, options).payload;
 }
 
-async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } = {}) {
+async function postSyncPayload(fetchFn, url, {
+  headers = {},
+  summary,
+  logger,
+  signal,
+  timeoutMs = SYNC_REQUEST_TIMEOUT_MS
+} = {}) {
   let serialized = serializeSyncPayload(summary);
   if (serialized.payload?.allTimeProjectsOmitted === true && typeof logger === 'function') {
     logger(`all-time project breakdown omitted; payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
@@ -284,7 +296,13 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } =
       .join(', ');
     logger(`project detail omitted for sync (${omitted}); payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
   }
-  let response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
+  const requestOptions = (body) => ({
+    method: 'POST',
+    headers: { prefer: 'return=minimal', ...headers },
+    body,
+    ...(signal ? { signal } : {})
+  });
+  let response = await fetchBufferedWithTimeout(fetchFn, url, requestOptions(serialized.body), timeoutMs);
   const retrySerialized = response.status === 413
     ? serializeSyncPayload(summary, {
         omitHistoryTokenComponents: true,
@@ -299,12 +317,13 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } =
     if (typeof logger === 'function') {
       logger('hub rejected the payload; retrying once without additive History components or all-time projects');
     }
-    response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
+    response = await fetchBufferedWithTimeout(fetchFn, url, requestOptions(serialized.body), timeoutMs);
   }
   return { response, payload: serialized.payload, retried: canRetryReduced };
 }
 
 module.exports = {
+  SYNC_REQUEST_TIMEOUT_MS,
   SYNC_PAYLOAD_BUDGET_BYTES,
   postSyncPayload,
   serializeSyncPayload,

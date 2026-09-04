@@ -7,7 +7,6 @@ const PARTIAL_USAGE_CARRY_FIELDS = Object.freeze([
   'month',
   'allTime',
   'clientStatus',
-  'clientHealth',
   'wslStatus',
   'periodWindows',
   'projectsEnabled',
@@ -31,14 +30,28 @@ function cloneValue(value, seen = new Map()) {
   }
   const copy = Object.create(Object.getPrototypeOf(value) === null ? null : Object.prototype);
   seen.set(value, copy);
-  for (const [key, entry] of Object.entries(value)) copy[key] = cloneValue(entry, seen);
+  for (const [key, entry] of Object.entries(value)) {
+    Object.defineProperty(copy, key, {
+      value: cloneValue(entry, seen),
+      enumerable: true,
+      configurable: true,
+      writable: true
+    });
+  }
   return copy;
 }
 
 function normalizedEnvelope(value) {
   const envelope = {};
   for (const [key, entry] of Object.entries(value || {})) {
-    if (entry !== undefined) envelope[key] = cloneValue(entry);
+    if (entry !== undefined) {
+      Object.defineProperty(envelope, key, {
+        value: cloneValue(entry),
+        enumerable: true,
+        configurable: true,
+        writable: true
+      });
+    }
   }
   return envelope;
 }

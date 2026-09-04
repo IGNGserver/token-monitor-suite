@@ -31,6 +31,10 @@ test('clientColors carries the known palette and a default', () => {
   assert.equal(clientColors.qoder, '#2ADB5C');
   assert.equal(clientColors.ollama, '#888888');
   assert.equal(typeof clientColors.default, 'string');
+  assert.equal(typeof clientColors.commandcode, 'string');
+  assert.equal(typeof clientColors.qodercn, 'string');
+  assert.equal(typeof clientColors.reasonix, 'string');
+  assert.equal(clientColors['deepseek-harness'], '#4d6bfe');
 });
 
 test('modelVendorFor maps families and modelColor falls back deterministically', () => {

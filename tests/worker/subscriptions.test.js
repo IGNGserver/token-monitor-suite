@@ -24,7 +24,7 @@ function fakeState() {
   };
 }
 
-async function hubDO(env = { TOKEN_MONITOR_SECRET: 'shh' }) {
+async function hubDO(env = { TOKEN_MONITOR_ADMIN_SECRET: 'shh' }) {
   const worker = await import(pathToFileURL(path.resolve(__dirname, '../../worker/src/index.js')).href);
   const state = fakeState();
   return { hub: new worker.HubDO(state, env), state };
@@ -87,15 +87,16 @@ test('the Worker refuses subscription reads without the secret and never publish
 
   // A Worker is internet-facing with no trusted-LAN fallback, so an unset secret
   // refuses the route outright rather than serving it open.
-  const { hub: openHub } = await hubDO({ TOKEN_MONITOR_SECRET: '' });
+  const { hub: openHub } = await hubDO({ TOKEN_MONITOR_ADMIN_SECRET: '' });
   assert.equal((await openHub.fetch(new Request('https://hub.example/api/subscriptions'))).status, 503);
 
   // Public stats are built from device records alone; hand-entered money must
   // never reach them even when the shared list is populated.
-  const { hub: publicHub } = await hubDO({ TOKEN_MONITOR_SECRET: 'shh', PUBLIC_STATS_ENABLED: 'true' });
+  const { hub: publicHub } = await hubDO({ TOKEN_MONITOR_ADMIN_SECRET: 'shh', PUBLIC_STATS_ENABLED: 'true' });
   await publicHub.fetch(request('PUT', { subscriptions: [RECORD], baseUpdatedAt: '' }));
   const stats = await (await publicHub.fetch(new Request('https://hub.example/api/public/stats'))).json();
-  assert.doesNotMatch(JSON.stringify(stats), /subscription/i);
+  assert.equal(Object.prototype.hasOwnProperty.call(stats, 'subscriptions'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(stats, 'subscriptionsUpdatedAt'), false);
   assert.doesNotMatch(JSON.stringify(stats), /amountMinor/);
 });
 
@@ -157,4 +158,3 @@ test('the Worker matches the Node hub on tokens and currencies', async () => {
   assert.match((await euro.json()).message, /EUR/);
   assert.equal((await (await hub.fetch(request('GET'))).json()).subscriptions.length, 2);
 });
-

@@ -161,7 +161,7 @@ test('applyTranslations updates text, title, aria-label, placeholders, and docum
   assert.equal(paste.title, '貼上密鑰');
   assert.equal(paste.getAttribute('aria-label'), '貼上密鑰');
   assert.equal(dismiss.getAttribute('aria-label'), '忽略此版本');
-  assert.equal(input.placeholder, '選填的共享密鑰');
+  assert.equal(input.placeholder, '與這個裝置 ID 綁定的令牌');
   assert.equal(langOption.textContent, '繁體中文');
   assert.equal(documentElement.getAttribute('lang'), 'zh-TW');
 });

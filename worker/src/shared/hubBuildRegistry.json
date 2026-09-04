@@ -41,6 +41,38 @@
       {
         "revision": 10,
         "buildId": "sha256:89524e0461890a11845cfd37b748c021379abdd97a8d5709d6cf93f3044bd30a"
+      },
+      {
+        "revision": 11,
+        "buildId": "sha256:e5e6e8e482dde745c5af493da7ed1b6c19e978a30562015cb6e59a8bf5959d28"
+      },
+      {
+        "revision": 12,
+        "buildId": "sha256:10009bf6fbdd9aaf76db32b882926a288b01434bf54c12605bfe52289894fa60"
+      },
+      {
+        "revision": 13,
+        "buildId": "sha256:1604929d03686fdd006149fefbd0c39f47ac8524f138f369d4d9a9a8329ba2ac"
+      },
+      {
+        "revision": 14,
+        "buildId": "sha256:b3acd39e5b1d73722790a59e1be401d4dcc3fd371be53b4964e4f97f43043425"
+      },
+      {
+        "revision": 15,
+        "buildId": "sha256:a91ace353094861ab55c531fde8fc76e7377221108a85b042336b09a4673f063"
+      },
+      {
+        "revision": 16,
+        "buildId": "sha256:dfb360fe3f1452434d3879017e4da80c593876094b3d932e183f64522172f2b4"
+      },
+      {
+        "revision": 17,
+        "buildId": "sha256:34043f20ae1251515933b69cd7e082d9a922f0a6b7edbd74790feaadf638628e"
+      },
+      {
+        "revision": 18,
+        "buildId": "sha256:d0dfd6b3ccdcf547574dc4dc6857bb08d9d3d8bf6141bcd10e9fe682f74c8c22"
       }
     ],
     "node-hub": [
@@ -67,6 +99,58 @@
       {
         "revision": 6,
         "buildId": "sha256:ef3fefb8e446d0a2adce860411327d538b4c06d3139e59d02854811b6d9bd30d"
+      },
+      {
+        "revision": 7,
+        "buildId": "sha256:fa4674fd482f684f08aeff62e65c061fa125dce51735aa6ea2aea67ab21eab91"
+      },
+      {
+        "revision": 8,
+        "buildId": "sha256:c8463e8b21a8fd529801919aee6eed4349b052b885ab516070a0978792c08c79"
+      },
+      {
+        "revision": 9,
+        "buildId": "sha256:839b4a541d98d4d256a2f1b579eddc5b294ce1135447c7ddf37fa347eda81c8b"
+      },
+      {
+        "revision": 10,
+        "buildId": "sha256:e2e19a06d4df25cd235b1de86dafe2107554f08ef4500c0238fec90c49f5fda0"
+      },
+      {
+        "revision": 11,
+        "buildId": "sha256:bdf5d266be32c46d714c44c75af8898ee479b7cb9c9b4c12379ba72224075ec0"
+      },
+      {
+        "revision": 12,
+        "buildId": "sha256:f720779932e22bc85e4f7342f32e05f8fd4de2faf0860bf6306ecf5420b01f2f"
+      },
+      {
+        "revision": 13,
+        "buildId": "sha256:c73cdf1abe95d3136982748b6aeda5e499a6f6232e4843db3fdce5f29eb82606"
+      },
+      {
+        "revision": 14,
+        "buildId": "sha256:fde0f6f7a5032dc74abeb7a38a6eea64d15edaa29236addd78b2952c0566e97a"
+      },
+      {
+        "revision": 15,
+        "buildId": "sha256:9a1759f5882321b706c0448b1859fae240dc1aa39bc67c0a01e5af38f5fb816f"
+      },
+      {
+        "revision": 16,
+        "buildId": "sha256:2f84854d934a26dd356dfa01e9866f0ddc30f750168080fe4aaaf81096896bdd"
+      },
+      {
+        "revision": 17,
+        "buildId": "sha256:4c1731c1eeee3afb1213dc58f9065fc83c7b5afaf5b30d4439984c804c14202b"
+      },
+      {
+        "revision": 18,
+        "buildId": "sha256:132fa9ec2d5b8a3b62daea69d3f49db8db7c367c93891141e3ff962b4b1b8416"
+      },
+      {
+        "revision": 19,
+        "buildId": "sha256:33d357be793ad93d22d01135e81b14209435ff875e3adac7bda75fb07955efdf"
       }
     ],
     "cloudflare-worker": [
@@ -77,6 +161,26 @@
       {
         "revision": 2,
         "buildId": "sha256:a0c3ad382602f42694f205100ab06a865ba5a0b5f5431a2310c7d8a264468e7d"
+      },
+      {
+        "revision": 3,
+        "buildId": "sha256:ec7d1057607cceced94089418632ee04ec2d79f9bc227835df920a8f92798cc4"
+      },
+      {
+        "revision": 4,
+        "buildId": "sha256:461bf33fca76f9b2a3f52460e4722dc7822187eb860cdd08f1e7ac43ef887b9a"
+      },
+      {
+        "revision": 5,
+        "buildId": "sha256:89de17eb1c3ac1b5ceb92ee8aed7b461a7dabd2c870e2dd2c6606a3446aee81d"
+      },
+      {
+        "revision": 6,
+        "buildId": "sha256:2be4836b209af9455a9e71520ae34ae2597fc5f628a085fee9f878012d6ece60"
+      },
+      {
+        "revision": 7,
+        "buildId": "sha256:4234dc17d19169b73b519e59be4719a91685639dd5b94a31db29dcc96380a25b"
       }
     ]
   }

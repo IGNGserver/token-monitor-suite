@@ -1013,12 +1013,13 @@
             <div id="hubClientFields" class="hub-mode-fields hidden">
               <label><span data-i18n="settings.sync.hubUrl">Hub URL</span><input id="hubUrlInput" type="text" spellcheck="false" placeholder="http://hub-host:17321" /></label>
               <div class="settings-field hub-secret-field">
-                <label for="secretInput" data-i18n="settings.sync.secret">Secret</label>
+                <label for="secretInput" data-i18n="settings.sync.secret">Device token</label>
                 <div class="hub-secret-row">
-                  <input id="secretInput" type="password" spellcheck="false" placeholder="optional shared secret" data-i18n-placeholder="settings.sync.secretPlaceholder" />
+                  <input id="secretInput" type="password" spellcheck="false" placeholder="token bound to this Device ID" data-i18n-placeholder="settings.sync.secretPlaceholder" />
                   <button id="secretPasteButton" type="button" class="icon-button" title="Paste secret" data-i18n-title="settings.sync.pasteSecret" aria-label="Paste secret" data-i18n-aria-label="settings.sync.pasteSecret">⎘</button>
                 </div>
               </div>
+              <label class="settings-item"><input id="allowInsecureHubHttpInput" type="checkbox" /><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.allowInsecureHttp">Allow remote HTTP on a trusted LAN/VPN</span><span class="settings-item-subtitle" data-i18n="settings.sync.allowInsecureHttpDesc">The token and usage data will not be encrypted in transit.</span></span></label>
               <label class="sync-upload-interval-row settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.uploadInterval">Sync upload frequency</span></span>
                 <select id="syncUploadIntervalInput">
                   <option value="0" data-i18n="settings.sync.uploadInterval.live">Live</option>
@@ -1031,16 +1032,28 @@
             </div>
             <div id="hubHostFields" class="hub-mode-fields hidden">
               <label><span data-i18n="settings.sync.port">Port</span><input id="hubPortInput" type="number" min="1" max="65535" spellcheck="false" /></label>
-              <label><span data-i18n="settings.sync.sharedSecret">Shared Secret</span>
+              <label><span data-i18n="settings.sync.viewerSecret">Read-only viewer token</span>
                 <div class="hub-secret-row">
                   <input id="hubSecretInput" type="text" spellcheck="false" readonly />
                   <button id="hubSecretCopyButton" type="button" class="icon-button" title="Copy secret" data-i18n-title="settings.sync.copySecret">⧉</button>
                   <button id="hubSecretRegenButton" type="button" class="icon-button" title="Regenerate" data-i18n-title="settings.sync.regenerateSecret">↺</button>
                 </div>
               </label>
+              <div class="settings-actions"><button id="hubAdminSecretCopyButton" type="button" data-i18n="settings.sync.copyAdminToken">Copy admin token</button></div>
+              <div class="settings-field">
+                <label for="hubDeviceCredentialId" data-i18n="settings.sync.deviceCredentialId">Remote Device ID</label>
+                <div class="hub-secret-row">
+                  <input id="hubDeviceCredentialId" type="text" spellcheck="false" placeholder="exact Device ID on the remote client" data-i18n-placeholder="settings.sync.deviceCredentialIdPlaceholder" />
+                  <button id="hubDeviceCredentialCreate" type="button" data-i18n="settings.sync.createDeviceToken">Create token</button>
+                </div>
+                <div id="hubDeviceCredentialResult" class="hub-secret-row hidden">
+                  <input id="hubDeviceCredentialToken" type="text" spellcheck="false" readonly />
+                  <button id="hubDeviceCredentialCopy" type="button" class="icon-button" title="Copy token" data-i18n-title="settings.sync.copyDeviceToken">⧉</button>
+                </div>
+              </div>
               <div id="hubStatusRow" class="hub-status"></div>
               <div id="hubAddressList" class="hub-address-list"></div>
-              <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. macOS / Windows may prompt to allow incoming connections the first time. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
+              <p class="settings-note" data-i18n="settings.sync.hostNote">Create a token for each remote Device ID. A device token can read dashboard data and upload only that device; the viewer token is read-only. macOS / Windows may prompt to allow incoming connections the first time.</p>
               <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
             </div>
             <label><span data-i18n="settings.sync.deviceId">Device ID</span><input id="deviceIdInput" type="text" spellcheck="false" placeholder="auto (hostname)" data-i18n-placeholder="settings.sync.deviceIdPlaceholder" /></label>
@@ -1160,6 +1173,7 @@
     <script src="homeModulePreferences.js"></script>
     <script src="preferenceDragSort.js"></script>
     <script src="i18n.js"></script>
+    <script src="../../shared/reasonixSessionGuard.js"></script>
     <script src="sessionRows.js"></script>
     <script src="breakdownRenderPolicy.js"></script>
     <script src="deviceBreakdown.js"></script>

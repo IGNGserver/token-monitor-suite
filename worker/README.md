@@ -6,10 +6,12 @@
 
 > Part of **[Token Monitor Suite](https://github.com/IGNGserver/token-monitor-suite)**. This directory is just the Cloudflare Worker hub; the desktop widget, headless agent, and full docs live in the main repo. A one-click deploy creates a standalone copy that won't auto-update, so check the main repo for new versions.
 
-Drop-in replacement for the self-hosted Node hub, deployed as a Cloudflare
-Worker with a Durable Object holding device state. Speaks the same HTTP
-protocol (`/api/ingest`, `/api/stats`, `/api/stats/stream`), so the widget and
-agent work unchanged — only the Hub URL differs.
+Alternative to the self-hosted Node hub, deployed as a Cloudflare Worker with
+a Durable Object holding device state. Speaks the shared HTTP
+protocol (`/api/ingest`, `/api/stats`, `/api/history`, `/api/stats/stream`), so
+the widget and agent work unchanged for those surfaces — only the Hub URL
+differs. Custom-range usage (`/api/usage/range`) and pricing-management
+endpoints remain Node/MySQL Hub-only until the capability contract is extended.
 
 Why use this instead of the Node hub:
 
@@ -29,7 +31,9 @@ Why use this instead of the Node hub:
 cd worker
 npm install
 npx wrangler login          # one-time browser auth
-npx wrangler secret put TOKEN_MONITOR_SECRET   # paste a long random string
+npx wrangler secret put TOKEN_MONITOR_ADMIN_SECRET
+npx wrangler secret put TOKEN_MONITOR_VIEWER_SECRET
+npx wrangler secret put TOKEN_MONITOR_INGEST_CREDENTIALS  # JSON: {"device-id":"token"}
 npx wrangler deploy
 ```
 
@@ -65,15 +69,15 @@ above always works: same code, without CF's flaky import step.
 npm run dev   # wrangler dev — local Worker with a real Durable Object
 ```
 
-Endpoints work the same as in production. Use a separate dev secret with
-`wrangler secret put TOKEN_MONITOR_SECRET --env dev` if needed.
+Endpoints work the same as in production. Use separate scoped development
+tokens under the same three secret names with `--env dev` if needed.
 
 ## Configure the widget
 
 Settings → Multi-device Sync:
 
 - Hub URL: `https://token-monitor-hub.<your-subdomain>.workers.dev`
-- Secret: the value you set with `wrangler secret put`
+- Secret: the device-bound token mapped to this widget's exact Device ID
 
 Save. The status pill should switch from `Local` to `Live` once the SSE stream
 connects.
@@ -84,7 +88,7 @@ Either via `.env` at the project root (copy from `.env.example`):
 
 ```env
 TOKEN_MONITOR_HUB_URL=https://token-monitor-hub.<your-subdomain>.workers.dev
-TOKEN_MONITOR_SECRET=<the same secret>
+TOKEN_MONITOR_SECRET=<this device's bound token>
 TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to hostname
 ```
 
@@ -92,7 +96,7 @@ Or by exporting them inline when launching:
 
 ```bash
 TOKEN_MONITOR_HUB_URL=https://token-monitor-hub.<your-subdomain>.workers.dev \
-TOKEN_MONITOR_SECRET=<the same secret> \
+TOKEN_MONITOR_SECRET=<this device's bound token> \
 npm run agent
 ```
 
@@ -113,16 +117,18 @@ Leave it unset to keep `/api/public/stats` disabled.
 
 ### Widgy
 
-Pick the **async / no main()** template. Use the `?secret=` query-string
-auth — Widgy's invisible WKWebView can trip over the CORS preflight that
-`Authorization: Bearer` triggers, and the URL stays on-device in the Widgy
-config, so the secret never hits an external log.
+Pick the **async / no main()** template. Prefer `Authorization: Bearer` when the
+client supports it. Use the read-only viewer token with the `?secret=` query-string form only for clients whose
+WKWebView cannot send the header without a CORS preflight. The query is sent to
+the Worker and may appear in client, proxy, or edge request logs. Admin and device
+tokens are rejected in query strings; do not put even the viewer token in a public
+widget, screenshot, or shareable URL.
 
 Minimum version — just one number:
 
 ```js
 const HUB = 'https://token-monitor-hub.<your-subdomain>.workers.dev';
-const SECRET = '<the same secret>';
+const SECRET = '<read-only viewer token>';
 const url = HUB + '/api/stats?secret=' + SECRET;
 fetch(url)
   .then(r => r.json())
@@ -148,7 +154,7 @@ formatting for tight widget layouts:
 
 ```js
 const HUB = 'https://token-monitor-hub.<your-subdomain>.workers.dev';
-const SECRET = '<the same secret>';
+const SECRET = '<read-only viewer token>';
 const PERIOD = 'today';        // 'today' | 'month' | 'allTime'
 const SHOW = 'tokens+cost';    // 'tokens' | 'cost' | 'tokens+cost'
 
@@ -182,7 +188,7 @@ Each Widgy text element gets its own script — duplicate it and change
 
 ```js
 const req = new Request('https://token-monitor-hub.<your-subdomain>.workers.dev/api/stats');
-req.headers = { authorization: 'Bearer <the same secret>' };
+req.headers = { authorization: 'Bearer <read-only viewer token>' };
 const stats = await req.loadJSON();
 const todayTokens = stats.periods.today.totalTokens;
 ```
@@ -262,27 +268,33 @@ endpoint includes account hashes for de-duplication. When enabled,
 | Method | Path                       | Auth   | Description                                |
 |--------|----------------------------|--------|--------------------------------------------|
 | GET    | `/api/health`              | none   | Liveness probe + device count              |
+| GET    | `/api/capabilities`        | read   | Feature set plus granted role/scopes       |
 | GET    | `/api/public/stats`        | none   | Public aggregate stats without devices/account ids when `PUBLIC_STATS_ENABLED=1` |
-| GET    | `/api/stats`               | secret | Aggregated stats (today / month / allTime) |
-| GET    | `/api/stats/stream`        | secret | SSE stream, push on every ingest           |
-| GET    | `/api/devices`             | secret | Raw per-device records                     |
-| POST   | `/api/ingest`              | secret | Upsert a device's usage summary            |
-| DELETE | `/api/devices/{deviceId}`  | secret | Remove a device record                     |
+| GET    | `/api/stats`               | read   | Aggregated stats (today / month / allTime) |
+| GET    | `/api/stats/stream`        | read   | SSE stream, push on every ingest           |
+| GET    | `/api/devices`             | read   | Raw per-device records                     |
+| POST   | `/api/ingest`              | ingest | Upsert only the credential-bound device    |
+| POST   | `/api/devices/{id}/rename` | admin  | Atomically rename a device record           |
+| DELETE | `/api/devices/{deviceId}`  | admin  | Remove a device record                     |
 
-The secret is accepted three ways (any one works):
+Credentials are accepted through headers; a viewer token has one additional compatibility form:
 
 1. `Authorization: Bearer <secret>` — preferred for agents, widget, and any
    server / desktop client.
 2. `x-token-monitor-secret: <secret>` — fallback for clients that cannot set
    `Authorization`.
-3. `?secret=<secret>` query string — workaround for iOS widget runtimes
+3. `?secret=<viewer-token>` query string — read-only workaround for iOS widget runtimes
    (Widgy, Scriptable) whose WKWebView struggles with CORS preflight for the
-   `Authorization` header. Only use this from clients where the URL stays
-   local to the device.
+   `Authorization` header. Query strings can enter client, proxy, or edge
+   request logs; use this only when that exposure is acceptable and never share
+   the resulting URL.
 
-The secret is required. When `TOKEN_MONITOR_SECRET` is unset, every data route
-returns `503 secret_required` — only `/api/health` and the opt-in
-`/api/public/stats` respond. Set it before (or during) deploy.
+At least one scoped credential is required. Configure independent admin,
+read-only viewer, and device-bound credentials. `TOKEN_MONITOR_SECRET` remains a
+legacy read-only migration credential; it cannot ingest or administer unless an
+explicit temporary legacy-elevation flag is enabled. With no credential, every
+private data route returns `503 secret_required`; only `/api/health` and the
+opt-in `/api/public/stats` respond.
 
 ## Storage and cost
 

@@ -299,6 +299,7 @@ test('serializeSyncPayload drops only all-time projects when they exceed the byt
 
 test('postSyncPayload retries a legacy 413 once without all-time projects', async () => {
   const bodies = [];
+  const preferences = [];
   const responses = [
     { status: 413, ok: false, async arrayBuffer() { return new ArrayBuffer(0); } },
     { status: 200, ok: true }
@@ -306,6 +307,7 @@ test('postSyncPayload retries a legacy 413 once without all-time projects', asyn
   const logs = [];
   const { response, payload, retried } = await postSyncPayload(async (_url, options) => {
     bodies.push(JSON.parse(options.body));
+    preferences.push(options.headers.prefer);
     return responses.shift();
   }, 'http://hub/api/ingest', {
     summary: {
@@ -328,6 +330,7 @@ test('postSyncPayload retries a legacy 413 once without all-time projects', asyn
   assert.equal(bodies[0].history.daily[0].tokenComponentsAvailable, true);
   assert.equal(Object.hasOwn(bodies[1].history.daily[0], 'tokenComponentsAvailable'), false);
   assert.equal(payload.allTimeProjectsOmitted, true);
+  assert.deepEqual(preferences, ['return=minimal', 'return=minimal']);
   assert.equal(logs.length, 1);
 });
 
@@ -507,4 +510,38 @@ test('postSyncPayload reports omitted session detail without changing period tot
   assert.deepEqual(posted.sessionDetailsOmitted, payload.sessionDetailsOmitted);
   assert.ok(payload.sessionDetailsOmitted.month > 0);
   assert.match(logs.at(-1), /^session detail omitted for sync \(month: \d+\)/);
+});
+
+test('postSyncPayload aborts a fetch that never settles', async () => {
+  let signal;
+  await assert.rejects(
+    postSyncPayload(async (_url, options) => {
+      signal = options.signal;
+      return new Promise(() => {});
+    }, 'http://hub/api/ingest', {
+      timeoutMs: 10,
+      summary: { deviceId: 'dev-a', allTime: { totalTokens: 1 } }
+    }),
+    (error) => error.code === 'request_timeout'
+  );
+  assert.equal(signal.aborted, true);
+});
+
+test('postSyncPayload deadline includes a response body that never settles', async () => {
+  let signal;
+  await assert.rejects(
+    postSyncPayload(async (_url, options) => {
+      signal = options.signal;
+      return {
+        status: 200,
+        ok: true,
+        async arrayBuffer() { return new Promise(() => {}); }
+      };
+    }, 'http://hub/api/ingest', {
+      timeoutMs: 10,
+      summary: { deviceId: 'dev-a', allTime: { totalTokens: 1 } }
+    }),
+    (error) => error.code === 'request_timeout'
+  );
+  assert.equal(signal.aborted, true);
 });

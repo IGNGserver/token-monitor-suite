@@ -18,7 +18,7 @@ android {
     applicationId = "com.igng.tokenmonitor.android"
     minSdk = 26
     targetSdk = 36
-    val releaseVersion = providers.gradleProperty("tokenMonitorVersion").orElse("0.45.0-rev.18").get()
+    val releaseVersion = providers.gradleProperty("tokenMonitorVersion").orElse("0.45.0-rev.21").get()
     versionCode = releaseVersionCode(releaseVersion)
     versionName = releaseVersion
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -116,9 +116,32 @@ fun registerJunitCoreTask(name: String, descriptionText: String, vararg testClas
     group = "verification"
     description = descriptionText
     dependsOn("transformDebugUnitTestClassesWithAsm", "bundleDebugClassesToRuntimeJar", "processDebugUnitTestJavaRes")
-    val launcher = javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) }
+    val launcher = javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(17)) }
     val testRuntime = configurations.named("debugUnitTestRuntimeClasspath")
     doFirst {
+      val discoveredTestClasses = if (testClasses.isNotEmpty()) {
+        testClasses.toList()
+      } else {
+        val outputRoot = repositoryTestOutput.get().asFile
+        outputRoot.walkTopDown()
+          .filter { file ->
+            file.isFile
+              && !file.nameWithoutExtension.contains('$')
+              && (file.name.endsWith("Test.class")
+                || file.name.endsWith("Tests.class")
+                || file.name.endsWith("TestCase.class"))
+          }
+          .map { file ->
+            file.relativeTo(outputRoot).invariantSeparatorsPath
+              .removeSuffix(".class")
+              .replace('/', '.')
+          }
+          .sorted()
+          .toList()
+      }
+      require(discoveredTestClasses.isNotEmpty()) {
+        "No compiled Android unit test classes were discovered under ${repositoryTestOutput.get().asFile}"
+      }
       val classpath = files(repositoryTestOutput, appRuntimeClasses, testJavaResources, testRuntime)
       commandLine(
         listOf(
@@ -126,7 +149,7 @@ fun registerJunitCoreTask(name: String, descriptionText: String, vararg testClas
           "-cp",
           classpath.asPath,
           "org.junit.runner.JUnitCore"
-        ) + testClasses
+        ) + discoveredTestClasses
       )
     }
   }
@@ -151,10 +174,7 @@ val runFormattersHelpersTests = registerJunitCoreTask(
 
 val runUnitTests = registerJunitCoreTask(
   "runUnitTests",
-  "Runs all local unit tests via JUnitCore (Windows argfile workaround).",
-  "com.igng.tokenmonitor.android.data.repository.HubRepositoryTest",
-  "com.igng.tokenmonitor.android.data.model.HubDtosHistoryLimitsTest",
-  "com.igng.tokenmonitor.android.ui.components.FormattersHelpersTest"
+  "Runs all compiled local unit tests via JUnitCore (Windows argfile workaround)."
 )
 
 tasks.withType<Test>().configureEach { enabled = false }

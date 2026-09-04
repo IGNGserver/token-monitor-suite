@@ -521,6 +521,7 @@ function shouldDownloadAutomaticAppUpdate({
     && updateState.dismissedVersion !== updateState.latest?.version
     && !updateState.downloaded
     && !updateState.installBusy
+    && !updateState.installRetryBlocked
   );
 }
 

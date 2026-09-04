@@ -44,6 +44,12 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     periods: aggregate.periods,
     devices: aggregate.devices,
     projectsIncomplete: aggregate.projectsIncomplete,
+    // Reasonix native sessions are deliberately local-only. aggregateDevices()
+    // normalizes wire records and therefore drops them, so reattach only the
+    // current local collector's renderer view after aggregation. They must never
+    // be copied from a remote Hub device or folded into period totals.
+    ...(hasOwn(localDevice, 'nativeSessions') ? { nativeSessions: localDevice.nativeSessions } : {}),
+    ...(hasOwn(localDevice, 'nativeProjects') ? { nativeProjects: localDevice.nativeProjects } : {}),
     limits: hasHubStaleAfterMs || !hasOwn(hubStats, 'limits') ? aggregate.limits : hubStats.limits
   };
 }

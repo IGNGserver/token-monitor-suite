@@ -2,6 +2,17 @@
 
 const { normalizeDeviceRecord } = require('../shared/usage');
 
+const RESERVED_DYNAMIC_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+function safeDynamicKey(value, fallback = 'unknown') {
+  const key = String(value ?? '').trim();
+  return key && !RESERVED_DYNAMIC_KEYS.has(key.toLowerCase()) ? key : fallback;
+}
+
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
 const NUMERIC_FIELDS = [
   'totalTokens',
   'inputTokens',
@@ -55,14 +66,14 @@ function eventKey(candidate) {
 function sessionCandidates(period, updatedAt) {
   const candidates = [];
   for (const session of Object.values(period.sessions || {})) {
-    const client = String(session?.client || '').trim();
+    const client = safeDynamicKey(session?.client, '');
     const sessionId = String(session?.sessionId || '').trim();
     if (!client || !sessionId) continue;
     const totalTokens = nonNegativeInteger(session.totalTokens);
     const models = Object.entries(session.models || {}).filter(([, tokens]) => number(tokens) > 0);
     const rows = models.length > 0 ? models : [['unknown', totalTokens]];
     for (const [rawModel, rawTokens] of rows) {
-      const model = String(rawModel || 'unknown').trim() || 'unknown';
+      const model = safeDynamicKey(rawModel);
       const modelTokens = nonNegativeInteger(rawTokens);
       const fraction = totalTokens > 0 ? modelTokens / totalTokens : 1;
       const providerNames = Object.keys(session.providers || {}).filter(Boolean);
@@ -91,10 +102,10 @@ function snapshotCandidates(period, updatedAt) {
   const candidates = [];
   const clientModels = period.clientModels || {};
   for (const [rawClient, models] of Object.entries(clientModels)) {
-    const client = String(rawClient || '').trim();
+    const client = safeDynamicKey(rawClient, '');
     if (!client || !models || typeof models !== 'object') continue;
     for (const [rawModel, rawTokens] of Object.entries(models)) {
-      const model = String(rawModel || 'unknown').trim() || 'unknown';
+      const model = safeDynamicKey(rawModel);
       const modelTokens = nonNegativeInteger(rawTokens);
       if (modelTokens === 0) continue;
       const modelTotal = Math.max(modelTokens, nonNegativeInteger(period.models?.[model]));
@@ -129,7 +140,7 @@ function snapshotCandidates(period, updatedAt) {
   if (candidates.length > 0) return candidates;
 
   for (const [rawClient, rawTokens] of Object.entries(period.clients || {})) {
-    const client = String(rawClient || '').trim();
+    const client = safeDynamicKey(rawClient, '');
     const totalTokens = nonNegativeInteger(rawTokens);
     if (!client || totalTokens === 0) continue;
     candidates.push({
@@ -218,7 +229,8 @@ function summarizeSessions(candidates) {
       if (field === 'payloadCostUsd') summary.costUsd += number(candidate[field]);
       else summary[field] = number(summary[field]) + number(candidate[field]);
     }
-    summary.models[candidate.model] = (summary.models[candidate.model] || 0) + number(candidate.totalTokens);
+    const model = safeDynamicKey(candidate.model);
+    summary.models[model] = (hasOwn(summary.models, model) ? summary.models[model] : 0) + number(candidate.totalTokens);
     if (Date.parse(candidate.startedAt) < Date.parse(summary.startedAt)) summary.startedAt = candidate.startedAt;
     if (Date.parse(candidate.recordedAt) > Date.parse(summary.lastUsedAt)) summary.lastUsedAt = candidate.recordedAt;
   }

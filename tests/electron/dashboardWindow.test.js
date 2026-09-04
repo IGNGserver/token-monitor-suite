@@ -39,7 +39,7 @@ test('dashboard readiness waits for data and recovers only from actual failures'
   assert.match(main, /webContents\.on\('render-process-gone'/);
   assert.match(main, /win\.on\('unresponsive'/);
   assert.match(main, /function discardFailedDashboardWindow\(win, reason\)[\s\S]*?win\.destroy\(\)/);
-  assert.match(main, /const controller = new AbortController\(\);[\s\S]*?signal: controller\.signal[\s\S]*?clearTimeout\(timeout\)/);
+  assert.match(main, /async function getDashboardHistory\(\)[\s\S]*?fetchBufferedWithTimeout\(fetch,[\s\S]*?HUB_REQUEST_TIMEOUT_MS\)/);
 });
 
 test('getDashboardHistory mirrors the local/sync split of fetchStats', () => {
@@ -56,6 +56,17 @@ test('getDashboardHistory reads local history directly without a blocking collec
   // quick close/reopen the response outlived the renderer and the dashboard
   // stuck on the empty state. The local branch must read localDevice directly.
   assert.doesNotMatch(fn[1], /localCollectorHandle\.tick/);
+});
+
+test('custom ranges honor an explicit Hub capability denial without local-only fallback', () => {
+  const main = read('src', 'electron', 'main.js');
+  const app = read('src', 'electron', 'renderer', 'app.js');
+  assert.match(main, /settings\.hubMode === 'client' && latestHubStats\?\.capabilities\?\.usageRange === false/);
+  assert.match(main, /error: 'hub-capability-unsupported'/);
+  assert.match(app, /state\.stats\?\.capabilities\?\.usageRange !== false/);
+  assert.match(app, /function reconcileCustomRangeCapability\(\)/);
+  assert.match(app, /els\.customRangeButton\.disabled = !supported/);
+  assert.match(app, /if \(!customRangeSupported\(\) \|\| !window\.tokenMonitor\.getCustomRangeStats\)/);
 });
 
 test('dashboard history is gated by the historyEnabled setting', () => {

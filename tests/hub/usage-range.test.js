@@ -45,6 +45,25 @@ test('aggregateHistoryRange sums inclusive local calendar day keys', () => {
   assert.equal(result.matchedDays, 2);
 });
 
+test('aggregateHistoryRange treats reserved keys as unknown without prototype pollution', () => {
+  const originalConstructor = Object.getOwnPropertyDescriptor(Object.prototype, 'constructor');
+  const result = aggregateHistoryRange({
+    daily: [{
+      date: '2026-07-20',
+      perClient: { __proto__: { tokens: 999 }, constructor: { tokens: 4 } },
+      perModel: { __proto__: { tokens: 999 }, prototype: { tokens: 5 } }
+    }]
+  }, new Date('2026-07-20T00:00:00'), new Date('2026-07-21T00:00:00'), {
+    startDate: '2026-07-20',
+    endDate: '2026-07-20'
+  });
+
+  assert.equal(result.clients.unknown, 4);
+  assert.equal(result.models.unknown, 5);
+  assert.equal(Object.getOwnPropertyDescriptor(Object.prototype, 'constructor')?.value, originalConstructor.value);
+  assert.equal(Object.prototype.auditPolluted, undefined);
+});
+
 test('GET /api/usage/range prefers history_daily over usage_events', async () => {
   const repository = new MemoryRepository();
   await repository.insertUsageEvents('dev-a', [{
@@ -185,4 +204,3 @@ test('GET /api/usage/range falls back to live today when history is empty', asyn
     await hub.stop();
   }
 });
-

@@ -7,14 +7,14 @@ const CLIENT_ID = '1507034330436862062';
 const GITHUB_URL = 'https://github.com/IGNGserver/token-monitor-suite';
 const KNOWN_CLIENT_ASSETS = new Set([
   'claude', 'codex', 'hermes', 'gemini', 'cursor', 'opencode', 'openclaw', 'antigravity', 'cline',
-  'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'claude-desktop'
+  'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'micode', 'commandcode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'reasonix', 'deepseek-harness', 'claude-desktop'
 ]);
 const CLIENT_LABELS = {
   claude: 'Claude', codex: 'Codex', hermes: 'Hermes',
   gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw',
   antigravity: 'Antigravity', cline: 'Cline',
   kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot',
-  pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', 'claude-desktop': 'Claude Desktop'
+  pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', commandcode: 'Command Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', 'deepseek-harness': 'DeepSeek Harness', 'claude-desktop': 'Claude Desktop'
 };
 const UPDATE_MIN_INTERVAL_MS = 15000;
 const RECONNECT_DELAY_MS = 30000;

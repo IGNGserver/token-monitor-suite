@@ -130,6 +130,7 @@ test('shouldDownloadAutomaticAppUpdate covers the automatic-download state matri
     ['older version dismissed', true, { ...ready, dismissedVersion: '0.28.0' }, true],
     ['already downloaded', true, { ...ready, downloaded: true }, false],
     ['check or download already in flight', true, { ...ready, installBusy: true }, false],
+    ['install attempt spent in this process', true, { ...ready, installRetryBlocked: true }, false],
     ['missing update state', true, null, false]
   ];
 

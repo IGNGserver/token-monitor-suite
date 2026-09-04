@@ -36,6 +36,11 @@ test('default tracked clients include claude-desktop local agent', () => {
   assert.ok(NEW_DEFAULT_CLIENTS.includes('claude-desktop'));
 });
 
+test('default tracked clients include DeepSeek Harness local sessions', () => {
+  assert.ok(DEFAULT_CLIENTS.split(',').includes('deepseek-harness'));
+  assert.ok(NEW_DEFAULT_CLIENTS.includes('deepseek-harness'));
+});
+
 test('micode is intentionally NOT default-tracked (mimocode.db double-counts Claude imports)', () => {
   assert.ok(!DEFAULT_CLIENTS.split(',').includes('micode'),
     'micode must stay opt-in until tokscale dedups claude-import sessions');
@@ -53,7 +58,7 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in m
 });
 
 test('default tracked clients are accepted by bundled tokscale', () => {
-  const locallyParsedClients = new Set(['proma', 'claude-desktop']);
+  const locallyParsedClients = new Set(['proma', 'claude-desktop', 'deepseek-harness']);
   const result = spawnSync(process.execPath, [require.resolve('tokscale/bin.js'), '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const help = `${result.stdout || ''}\n${result.stderr || ''}`;
@@ -73,17 +78,19 @@ test('clientsCsvForSetting normalizes saved client csv values', () => {
   assert.equal(clientsCsvForSetting(' Claude , Codex,,hermes '), 'claude,codex,hermes');
 });
 
-test('applyNewDefaultClientMigration appends claude-desktop once for pre-0.37 installs', () => {
-  const old = DEFAULT_CLIENTS.split(',').filter((c) => c !== 'claude-desktop').join(',');
+test('applyNewDefaultClientMigration appends newly introduced local clients once', () => {
+  const old = DEFAULT_CLIENTS.split(',').filter((c) => !['claude-desktop', 'deepseek-harness'].includes(c)).join(',');
   const first = applyNewDefaultClientMigration(old, '');
   assert.ok(first.clients.split(',').includes('claude-desktop'));
-  assert.equal(first.migratedDefaultClients, 'claude-desktop');
+  assert.ok(first.clients.split(',').includes('deepseek-harness'));
+  assert.equal(first.migratedDefaultClients, 'claude-desktop,deepseek-harness');
   assert.equal(first.changed, true);
 
-  const afterDisable = first.clients.split(',').filter((c) => c !== 'claude-desktop').join(',');
+  const afterDisable = first.clients.split(',').filter((c) => !['claude-desktop', 'deepseek-harness'].includes(c)).join(',');
   const second = applyNewDefaultClientMigration(afterDisable, first.migratedDefaultClients);
   // User disabled after migration — do not re-add.
   assert.ok(!second.clients.split(',').filter(Boolean).includes('claude-desktop'));
+  assert.ok(!second.clients.split(',').filter(Boolean).includes('deepseek-harness'));
   assert.equal(second.changed, false);
 });
 
@@ -91,4 +98,5 @@ test('applyNewDefaultClientMigration leaves empty tracked list empty', () => {
   const result = applyNewDefaultClientMigration('', '');
   assert.equal(result.clients, '');
   assert.ok(result.migratedDefaultClients.includes('claude-desktop'));
+  assert.ok(result.migratedDefaultClients.includes('deepseek-harness'));
 });

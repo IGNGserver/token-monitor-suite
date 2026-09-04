@@ -7,9 +7,34 @@ data class HealthDto(
   val ok: Boolean = false,
   val role: String? = null,
   val version: Int? = null,
+  val apiVersion: Int? = null,
+  val capabilities: HubCapabilitiesDto = HubCapabilitiesDto(),
+  val authenticatedRole: String? = null,
+  val grantedScopes: List<String> = emptyList(),
   val deviceCount: Int? = null,
   val secretRequired: Boolean? = null,
   val now: String? = null
+)
+
+@Serializable
+data class HubCapabilitiesDto(
+  val stats: Boolean = true,
+  val history: Boolean = true,
+  val statsStream: Boolean = true,
+  val subscriptions: Boolean = true,
+  val usageRange: Boolean = false,
+  val pricing: Boolean = false,
+  val deviceDelete: Boolean = false,
+  val deviceRename: Boolean = false,
+  val publicStats: Boolean = false
+)
+
+@Serializable
+data class HubAuthorizationDto(
+  val apiVersion: Int? = null,
+  val capabilities: HubCapabilitiesDto = HubCapabilitiesDto(),
+  val role: String? = null,
+  val scopes: List<String> = emptyList()
 )
 
 @Serializable

@@ -7,6 +7,14 @@ const { corsHeaders } = require('../shared/http');
 
 const DEFAULT_WEB_ROOT = path.join(__dirname, 'web');
 
+const SECURITY_HEADERS = Object.freeze({
+  'content-security-policy': "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'",
+  'referrer-policy': 'no-referrer',
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'permissions-policy': 'camera=(), microphone=(), geolocation=()'
+});
+
 const MIME_TYPES = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -115,6 +123,7 @@ async function resolveStaticAsset(webRoot, pathname) {
 
 function sendFile(res, filePath, stat, { method = 'GET' } = {}) {
   const headers = corsHeaders({
+    ...SECURITY_HEADERS,
     'content-type': contentTypeFor(filePath),
     'content-length': stat.size,
     'cache-control': cacheControlFor(filePath)
@@ -134,7 +143,10 @@ function sendFile(res, filePath, stat, { method = 'GET' } = {}) {
   const stream = fs.createReadStream(filePath);
   stream.on('error', () => {
     if (!res.headersSent) {
-      res.writeHead(500, corsHeaders({ 'content-type': 'text/plain; charset=utf-8' }));
+      res.writeHead(500, corsHeaders({
+        ...SECURITY_HEADERS,
+        'content-type': 'text/plain; charset=utf-8'
+      }));
     }
     res.end();
   });
@@ -156,6 +168,7 @@ async function tryServeStatic(req, res, { webRoot = DEFAULT_WEB_ROOT } = {}) {
 module.exports = {
   DEFAULT_WEB_ROOT,
   MIME_TYPES,
+  SECURITY_HEADERS,
   contentTypeFor,
   normalizeRequestPath,
   resolveWebFile,

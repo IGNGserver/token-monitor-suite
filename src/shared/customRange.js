@@ -1,6 +1,11 @@
 'use strict';
 
-const { emptyPeriod, projectRollupFromSessions } = require('./usage');
+const {
+  emptyPeriod,
+  normalizeClientName,
+  normalizeModelNameForClient,
+  projectRollupFromSessions
+} = require('./usage');
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -38,6 +43,14 @@ function timestampMs(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   const ms = Date.parse(String(value));
   return Number.isFinite(ms) ? ms : 0;
+}
+
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function mapNumber(map, key) {
+  return hasOwn(map, key) ? Number(map[key]) || 0 : 0;
 }
 
 function compareDateHour(aDate, aHour, bDate, bHour) {
@@ -89,9 +102,14 @@ function sessionOverlapsRange(session, startMs, endMs) {
 }
 
 function addSessionIntoPeriod(period, session) {
-  if (!session?.client || !session?.sessionId) return;
-  const key = `${session.client}:${session.sessionId}`;
-  period.sessions[key] = session;
+  const client = normalizeClientName(session?.client);
+  const sessionId = String(session?.sessionId || '').trim();
+  if (!client || !sessionId) return;
+  const normalizedSession = client === session.client && sessionId === session.sessionId
+    ? session
+    : { ...session, client, sessionId };
+  const key = `${client}:${sessionId}`;
+  period.sessions[key] = normalizedSession;
   const tokens = Math.max(0, Math.round(Number(session.totalTokens) || 0));
   const cost = Number(session.costUsd) || 0;
   const cacheRead = Math.max(0, Math.round(Number(session.cacheReadTokens) || 0));
@@ -103,25 +121,33 @@ function addSessionIntoPeriod(period, session) {
   period.cacheWriteTokens += cacheWrite;
   period.outputTokens += output;
   if (tokens > 0) {
-    period.clients[session.client] = (period.clients[session.client] || 0) + tokens;
-    if (cacheRead > 0) period.clientCacheReads[session.client] = (period.clientCacheReads[session.client] || 0) + cacheRead;
-    if (cacheWrite > 0) period.clientCacheWrites[session.client] = (period.clientCacheWrites[session.client] || 0) + cacheWrite;
-    if (output > 0) period.clientOutputs[session.client] = (period.clientOutputs[session.client] || 0) + output;
+    period.clients[client] = mapNumber(period.clients, client) + tokens;
+    if (cacheRead > 0) period.clientCacheReads[client] = mapNumber(period.clientCacheReads, client) + cacheRead;
+    if (cacheWrite > 0) period.clientCacheWrites[client] = mapNumber(period.clientCacheWrites, client) + cacheWrite;
+    if (output > 0) period.clientOutputs[client] = mapNumber(period.clientOutputs, client) + output;
   }
-  if (cost > 0) period.clientCosts[session.client] = (period.clientCosts[session.client] || 0) + cost;
+  if (cost > 0) period.clientCosts[client] = mapNumber(period.clientCosts, client) + cost;
   for (const [model, modelTokens] of Object.entries(session.models || {})) {
+    const modelKey = normalizeModelNameForClient(model, client);
+    if (!modelKey) continue;
     const t = Math.max(0, Math.round(Number(modelTokens) || 0));
     if (!t) continue;
-    period.models[model] = (period.models[model] || 0) + t;
-    if (!period.clientModels[session.client]) period.clientModels[session.client] = {};
-    period.clientModels[session.client][model] = (period.clientModels[session.client][model] || 0) + t;
+    period.models[modelKey] = mapNumber(period.models, modelKey) + t;
+    if (!hasOwn(period.clientModels, client) || !period.clientModels[client] || typeof period.clientModels[client] !== 'object') {
+      period.clientModels[client] = {};
+    }
+    period.clientModels[client][modelKey] = mapNumber(period.clientModels[client], modelKey) + t;
   }
   for (const [model, modelCost] of Object.entries(session.modelCosts || {})) {
+    const modelKey = normalizeModelNameForClient(model, client);
+    if (!modelKey) continue;
     const c = Number(modelCost) || 0;
     if (!c) continue;
-    period.modelCosts[model] = (period.modelCosts[model] || 0) + c;
-    if (!period.clientModelCosts[session.client]) period.clientModelCosts[session.client] = {};
-    period.clientModelCosts[session.client][model] = (period.clientModelCosts[session.client][model] || 0) + c;
+    period.modelCosts[modelKey] = mapNumber(period.modelCosts, modelKey) + c;
+    if (!hasOwn(period.clientModelCosts, client) || !period.clientModelCosts[client] || typeof period.clientModelCosts[client] !== 'object') {
+      period.clientModelCosts[client] = {};
+    }
+    period.clientModelCosts[client][modelKey] = mapNumber(period.clientModelCosts[client], modelKey) + c;
   }
 }
 

@@ -14,6 +14,8 @@ const {
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
   collectQoderCnRows,
+  collectQoderCnTranscriptRows,
+  estimateQoderCnContentTokens,
   normalizeQoderCnDbRow,
   qoderCnDataPaths,
   readQoderCnDbRows,
@@ -508,4 +510,91 @@ test('reads survive a database without the chat_session table (fallback SQL)', a
   }
   assert.equal(rows.length, 1, 'fallback query still returns rows');
   assert.equal(rows[0].project_name, undefined, 'no project column in fallback');
+});
+
+test('estimateQoderCnContentTokens: pure CJK rounds correctly', () => {
+  // 4 CJK chars -> ceil(4/1.5) = ceil(2.67) = 3
+  const result = estimateQoderCnContentTokens({ content: '你好世界' });
+  assert.equal(result, 3, '4 CJK chars should produce 3 tokens');
+});
+
+test('estimateQoderCnContentTokens: pure ASCII rounds correctly', () => {
+  // 11 ASCII chars -> ceil(11/4) = ceil(2.75) = 3
+  const result = estimateQoderCnContentTokens({ content: 'hello world' });
+  assert.equal(result, 3, '11 ASCII chars should produce 3 tokens');
+});
+
+test('estimateQoderCnContentTokens: mixed content rounds once', () => {
+  // 2 CJK + 3 ASCII -> ceil(2/1.5 + 3/4) = ceil(1.333 + 0.75) = ceil(2.083) = 3
+  const result = estimateQoderCnContentTokens({ content: '你好abc' });
+  assert.equal(result, 3, 'mixed content should produce 3 tokens (single blend)');
+});
+
+test('estimateQoderCnContentTokens: emoji code points do not inflate CJK count', () => {
+  // 2 emoji (surrogate pairs) + 2 CJK -> 2 other + 2 CJK -> ceil(2/1.5 + 2/4) = ceil(1.333 + 0.5) = ceil(1.833) = 2
+  const result = estimateQoderCnContentTokens({ content: '😀😀你好' });
+  assert.equal(result, 2, 'emoji should not be counted as CJK (surrogate pairs)');
+});
+
+test('collectQoderCnTranscriptRows: nested directory walk', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-test-'));
+  const projectsDir = path.join(tmpDir, '.qoder-cn', 'projects', 'myproj', 'sub', 'deeper');
+  fs.mkdirSync(projectsDir, { recursive: true });
+  const sessionFile = path.join(projectsDir, 'session.jsonl');
+  const line = JSON.stringify({
+    timestamp: '2026-08-15T10:00:00Z',
+    message: { role: 'assistant', content: 'hello', model: 'dfmodel', usage: { credits: 1 } }
+  });
+  fs.writeFileSync(sessionFile, line + '\n');
+  const rows = collectQoderCnTranscriptRows({ homeDir: tmpDir });
+  assert.equal(rows.length, 1, 'nested directory file should be collected');
+  assert.equal(rows[0].model, 'DeepSeek-V4-Flash', 'model should be resolved from display names');
+  assert.equal(rows[0].input, 0, 'first request has 0 cumulative context');
+  assert.equal(rows[0].output, 2, 'hello = ceil(5/4) = 2 tokens');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('collectQoderCnTranscriptRows: skips oversized lines and bad JSON', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-test-'));
+  const projectsDir = path.join(tmpDir, '.qoder-cn', 'projects', 'p1');
+  fs.mkdirSync(projectsDir, { recursive: true });
+  const sessionFile = path.join(projectsDir, 'session.jsonl');
+  const validLine = JSON.stringify({
+    timestamp: '2026-08-15T10:00:00Z',
+    message: { role: 'assistant', content: 'hi', model: 'dfmodel', usage: { credits: 1 } }
+  });
+  const validLine2 = JSON.stringify({
+    timestamp: '2026-08-15T10:30:00Z',
+    message: { role: 'assistant', content: 'ok', model: 'dfmodel', usage: { credits: 2 } }
+  });
+  const oversizedLine = 'x'.repeat(300000);
+  const badJsonLine = 'not json at all';
+  fs.writeFileSync(sessionFile, [validLine, oversizedLine, badJsonLine, validLine2].join('\n') + '\n');
+  const rows = collectQoderCnTranscriptRows({ homeDir: tmpDir });
+  assert.equal(rows.length, 1, 'two valid lines for same day/model merge into one row');
+  assert.equal(rows[0].messages, 2, 'both valid lines contributed to the bucket');
+  assert.equal(rows[0].input, 1, 'second line: cumulativeTokens=1 (from first line msg)');
+  assert.equal(rows[0].output, 2, 'hi(1 token) + ok(1 token) = 2 output tokens');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('collectQoderCnTranscriptRows: respects sinceMs filter', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-test-'));
+  const projectsDir = path.join(tmpDir, '.qoder-cn', 'projects', 'p1');
+  fs.mkdirSync(projectsDir, { recursive: true });
+  const sessionFile = path.join(projectsDir, 'session.jsonl');
+  const oldLine = JSON.stringify({
+    timestamp: '2026-08-01T10:00:00Z',
+    message: { role: 'assistant', content: 'old', model: 'dfmodel', usage: { credits: 1 } }
+  });
+  const newLine = JSON.stringify({
+    timestamp: '2026-08-15T10:00:00Z',
+    message: { role: 'assistant', content: 'new', model: 'dfmodel', usage: { credits: 1 } }
+  });
+  fs.writeFileSync(sessionFile, [oldLine, newLine].join('\n') + '\n');
+  const sinceMs = Date.parse('2026-08-10T00:00:00Z');
+  const rows = collectQoderCnTranscriptRows({ homeDir: tmpDir, sinceMs });
+  assert.equal(rows.length, 1, 'only line after sinceMs should be included');
+  assert.ok(rows[0].sessionId.includes('2026-08-15'));
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 });

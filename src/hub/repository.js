@@ -3,6 +3,28 @@
 const mysql = require('mysql2/promise');
 const { emptySubscriptionDocument } = require('../shared/subscriptionDisplay');
 
+const RESERVED_DYNAMIC_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function safeDynamicKey(value, fallback = 'unknown') {
+  const key = String(value ?? '').trim();
+  return key && !RESERVED_DYNAMIC_KEYS.has(key.toLowerCase()) ? key : fallback;
+}
+
+function mapNumber(map, key) {
+  return hasOwn(map, key) ? number(map[key]) : 0;
+}
+
+function ensureNestedMap(map, key) {
+  if (!hasOwn(map, key) || !map[key] || typeof map[key] !== 'object' || Array.isArray(map[key])) {
+    map[key] = {};
+  }
+  return map[key];
+}
+
 function createMySqlPool(options = {}) {
   return mysql.createPool({
     host: options.host || process.env.MYSQL_HOST || '127.0.0.1',
@@ -91,14 +113,18 @@ function emptyUsageRange() {
 }
 
 function addTokenCost(mapTokens, mapCosts, key, tokens, cost) {
-  const id = String(key || '').trim() || 'unknown';
-  mapTokens[id] = (mapTokens[id] || 0) + tokens;
-  mapCosts[id] = (mapCosts[id] || 0) + cost;
+  const id = safeDynamicKey(key);
+  mapTokens[id] = mapNumber(mapTokens, id) + tokens;
+  mapCosts[id] = mapNumber(mapCosts, id) + cost;
 }
 
 function createRepository(pool) {
   async function listDeviceRecords(executor = pool) {
-    const [rows] = await executor.query('SELECT snapshot_json FROM device_ingest_state ORDER BY device_id');
+    const [rows] = await executor.query(`SELECT state.snapshot_json
+      FROM device_ingest_state state
+      INNER JOIN devices device ON device.device_id = state.device_id
+      WHERE device.deleted_at IS NULL
+      ORDER BY state.device_id`);
     return rows.map((row) => parseJson(row.snapshot_json, {}));
   }
 
@@ -121,7 +147,7 @@ function createRepository(pool) {
       projects_enabled = VALUES(projects_enabled), all_time_projects_omitted = VALUES(all_time_projects_omitted),
       all_time_projects_incomplete = VALUES(all_time_projects_incomplete),
       sync_upload_interval_ms = VALUES(sync_upload_interval_ms), period_windows = VALUES(period_windows),
-      limits = VALUES(limits), history = VALUES(history)`, [
+      limits = VALUES(limits), history = VALUES(history), deleted_at = NULL`, [
       record.deviceId, record.hostname || '', record.platform || '', date(record.updatedAt), date(record.receivedAt),
       record.agentVersion || '', record.agentRuntime || '', json(record.trackedClients), json(record.clientStatus),
       json(record.wslStatus), record.projectsEnabled ?? null, record.allTimeProjectsOmitted ?? null,
@@ -133,7 +159,7 @@ function createRepository(pool) {
   }
 
   async function countDevices(executor = pool) {
-    const [rows] = await executor.query('SELECT COUNT(*) AS count FROM devices');
+    const [rows] = await executor.query('SELECT COUNT(*) AS count FROM devices WHERE deleted_at IS NULL');
     return Number(rows[0]?.count || 0);
   }
 
@@ -253,11 +279,37 @@ function createRepository(pool) {
 
   async function deleteDevice(deviceId, executor = pool) {
     await executor.execute('DELETE FROM sessions WHERE device_id = ?', [deviceId]);
-    await executor.execute('DELETE FROM device_ingest_state WHERE device_id = ?', [deviceId]);
-    const [result] = await executor.execute('DELETE FROM devices WHERE device_id = ?', [deviceId]);
-    // usage_events stay as an immutable ledger; only detach the device pointer.
-    await executor.execute('UPDATE usage_events SET device_id = NULL WHERE device_id = ?', [deviceId]);
+    // DELETE is a display operation, not a counter reset. Keep both the ingest
+    // baseline and immutable ledger identity so re-ingesting the same cumulative
+    // snapshot produces a zero delta instead of counting its history twice.
+    const [result] = await executor.execute(
+      'UPDATE devices SET deleted_at = CURRENT_TIMESTAMP(3) WHERE device_id = ? AND deleted_at IS NULL',
+      [deviceId]
+    );
     return Number(result.affectedRows || 0) > 0;
+  }
+
+  async function renameDevice(previousDeviceId, nextDeviceId, executor = pool) {
+    const previousId = String(previousDeviceId || '').trim();
+    const nextId = String(nextDeviceId || '').trim();
+    if (!previousId || !nextId) return { renamed: false, reason: 'device_id_required' };
+    if (previousId === nextId) return { renamed: true, deviceId: nextId, unchanged: true };
+    const [rows] = await executor.execute(
+      'SELECT device_id FROM devices WHERE device_id IN (?, ?) FOR UPDATE',
+      [previousId, nextId]
+    );
+    const ids = new Set(rows.map((row) => String(row.device_id)));
+    if (!ids.has(previousId)) return { renamed: false, reason: 'not_found' };
+    if (ids.has(nextId)) return { renamed: false, reason: 'target_exists' };
+    const existing = await getDeviceRecord(previousId, executor);
+    if (!existing) return { renamed: false, reason: 'baseline_missing' };
+
+    await saveDevice({ ...existing, deviceId: nextId }, executor);
+    await executor.execute('UPDATE usage_events SET device_id = ? WHERE device_id = ?', [nextId, previousId]);
+    await executor.execute('UPDATE sessions SET device_id = ? WHERE device_id = ?', [nextId, previousId]);
+    await executor.execute('DELETE FROM device_ingest_state WHERE device_id = ?', [previousId]);
+    await executor.execute('DELETE FROM devices WHERE device_id = ?', [previousId]);
+    return { renamed: true, deviceId: nextId, previousDeviceId: previousId };
   }
 
   async function listKnownModels(executor = pool) {
@@ -296,16 +348,16 @@ function createRepository(pool) {
     for (const row of rows) {
       const tokens = Math.round(number(row.tokens));
       const cost = number(row.cost_usd);
-      const client = String(row.client || 'unknown');
-      const model = String(row.model || 'unknown');
+      const client = safeDynamicKey(row.client);
+      const model = safeDynamicKey(row.model);
       result.totalTokens += tokens;
       result.costUsd += cost;
       addTokenCost(result.clients, result.clientCosts, client, tokens, cost);
       addTokenCost(result.models, result.modelCosts, model, tokens, cost);
-      if (!result.clientModels[client]) result.clientModels[client] = {};
-      if (!result.clientModelCosts[client]) result.clientModelCosts[client] = {};
-      result.clientModels[client][model] = (result.clientModels[client][model] || 0) + tokens;
-      result.clientModelCosts[client][model] = (result.clientModelCosts[client][model] || 0) + cost;
+      const clientModels = ensureNestedMap(result.clientModels, client);
+      const clientModelCosts = ensureNestedMap(result.clientModelCosts, client);
+      clientModels[model] = mapNumber(clientModels, model) + tokens;
+      clientModelCosts[model] = mapNumber(clientModelCosts, model) + cost;
     }
     return result;
   }
@@ -336,6 +388,7 @@ function createRepository(pool) {
     listDeviceRecords,
     listKnownModels,
     listPricing,
+    renameDevice,
     replaceSessions,
     saveDevice,
     setSubscriptions,

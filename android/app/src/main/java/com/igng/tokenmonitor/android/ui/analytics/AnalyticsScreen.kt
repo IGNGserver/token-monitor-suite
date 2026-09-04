@@ -137,12 +137,13 @@ private fun ShareAnalyticsTab(
 ) {
   val haptics = rememberAppHaptics()
   var showPicker by rememberSaveable { mutableStateOf(false) }
-  val periodLabels = listOf("今日", "本月", "全部", "自定义")
+  val customSupported = state.authorization?.capabilities?.usageRange == true
+  val periodLabels = if (customSupported) listOf("今日", "本月", "全部", "自定义") else listOf("今日", "本月", "全部")
   val selectedIndex = when (state.analyticsPeriod) {
     AnalyticsPeriodKind.Today -> 0
     AnalyticsPeriodKind.Month -> 1
     AnalyticsPeriodKind.AllTime -> 2
-    AnalyticsPeriodKind.Custom -> 3
+    AnalyticsPeriodKind.Custom -> if (customSupported) 3 else 0
   }
   val period: PeriodDto? = when (state.analyticsPeriod) {
     AnalyticsPeriodKind.Today -> state.stats?.periods?.today
@@ -289,7 +290,7 @@ private fun ShareAnalyticsTab(
     }
   }
 
-  if (showPicker) {
+  if (showPicker && customSupported) {
     DateTimeRangePickerDialog(
       onDismiss = { showPicker = false },
       onConfirm = { startDate, endDate, startHour, endHour ->
@@ -728,6 +729,5 @@ private fun SummaryGrid(items: List<Pair<String, String>>) {
     }
   }
 }
-
 
 

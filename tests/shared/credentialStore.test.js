@@ -27,6 +27,7 @@ test('stores credential settings in a versioned provider document', (t) => {
   const store = new CredentialStore(dataDir);
   store.replaceSettingsCredentials({
     hubHostSecret: 'host-secret',
+    hubHostAdminSecret: 'admin-secret',
     secret: 'client-secret',
     deepseekApiKey: 'deepseek-key',
     kimiWebAccessToken: 'kimi-web-token',
@@ -39,6 +40,7 @@ test('stores credential settings in a versioned provider document', (t) => {
   const document = JSON.parse(fs.readFileSync(path.join(dataDir, 'credentials.json'), 'utf8'));
   assert.equal(document.version, 1);
   assert.equal(document.credentials.hub.hostSecret, 'host-secret');
+  assert.equal(document.credentials.hub.adminSecret, 'admin-secret');
   assert.equal(document.credentials.hub.clientSecret, 'client-secret');
   assert.equal(document.credentials.providers.deepseek.apiKey, 'deepseek-key');
   assert.equal(document.credentials.providers.kimi.webAccessToken, 'kimi-web-token');
@@ -50,6 +52,7 @@ test('stores credential settings in a versioned provider document', (t) => {
 
   assert.deepEqual(store.settingsCredentials(), {
     hubHostSecret: 'host-secret',
+    hubHostAdminSecret: 'admin-secret',
     secret: 'client-secret',
     opencodeProfiles: { work: { cookie: 'auth=secret', enabled: true } },
     openrouterProfiles: { personal: { apiKey: 'sk-or-secret', enabled: true } },
@@ -215,4 +218,27 @@ test('stores, migrates, and removes MiMo account cookies in the unified store', 
   assert.equal(store.removeMimoCredential('account-1'), true);
   assert.equal(store.readMimoCredential('account-1'), '');
   assert.equal(store.writeMimoCredential('__proto__', 'serviceToken=unsafe'), false);
+});
+
+test('stores device-bound Hub credentials without exposing them as settings', (t) => {
+  const store = new CredentialStore(tempDataDir(t));
+  assert.equal(store.writeHubIngestCredential('device-a', 'token-a'), true);
+  assert.equal(store.writeHubIngestCredential('device-b', 'token-b'), true);
+  assert.deepEqual(store.readHubIngestCredentials(), { 'device-a': 'token-a', 'device-b': 'token-b' });
+  assert.equal(store.settingsCredentials().hubHostIngestCredentials, undefined);
+  assert.equal(store.removeHubIngestCredential('device-a'), true);
+  assert.deepEqual(store.readHubIngestCredentials(), { 'device-b': 'token-b' });
+  assert.equal(store.writeHubIngestCredential('__proto__', 'unsafe'), false);
+});
+
+test('renames a device-bound Hub credential in one document update', (t) => {
+  const store = new CredentialStore(tempDataDir(t));
+  assert.equal(store.writeHubIngestCredential('before', 'bound-token'), true);
+
+  assert.equal(store.renameHubIngestCredential('before', 'after'), true);
+  assert.deepEqual(store.readHubIngestCredentials(), { after: 'bound-token' });
+
+  store.writeHubIngestCredential('existing', 'existing-token');
+  assert.equal(store.renameHubIngestCredential('after', 'existing'), true);
+  assert.deepEqual(store.readHubIngestCredentials(), { existing: 'existing-token' });
 });

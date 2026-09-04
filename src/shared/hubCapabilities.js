@@ -1,0 +1,20 @@
+'use strict';
+
+const HUB_API_VERSION = 2;
+
+function hubCapabilities(runtime, options = {}) {
+  const worker = runtime === 'cloudflare-worker';
+  return Object.freeze({
+    stats: true,
+    history: true,
+    statsStream: true,
+    subscriptions: true,
+    usageRange: !worker,
+    pricing: !worker,
+    deviceDelete: true,
+    deviceRename: true,
+    publicStats: Boolean(options.publicStats)
+  });
+}
+
+module.exports = { HUB_API_VERSION, hubCapabilities };

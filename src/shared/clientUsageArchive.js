@@ -2,9 +2,27 @@
 
 const { PERIODS, normalizePeriod } = require('./usage');
 
+const RESERVED_DYNAMIC_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function mapNumber(map, key) {
+  return hasOwn(map, key) ? numberValue(map[key]) : 0;
+}
+
+function ensureNestedMap(map, key) {
+  if (!hasOwn(map, key) || !map[key] || typeof map[key] !== 'object' || Array.isArray(map[key])) {
+    map[key] = {};
+  }
+  return map[key];
+}
+
 function normalizeClientId(value) {
   const raw = String(value || '').trim().toLowerCase();
   if (!raw) return null;
+  if (RESERVED_DYNAMIC_KEYS.has(raw)) return null;
   return raw.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || null;
 }
 
@@ -56,7 +74,7 @@ function hasUsage(period) {
 
 function normalizeModelName(value) {
   const raw = String(value || '').trim();
-  return raw || null;
+  return raw && !RESERVED_DYNAMIC_KEYS.has(raw.toLowerCase()) ? raw : null;
 }
 
 function normalizedModelMap(input, roundTokens = true) {
@@ -66,7 +84,7 @@ function normalizedModelMap(input, roundTokens = true) {
     const key = normalizeModelName(model);
     if (!key) continue;
     const next = roundTokens ? Math.max(0, Math.round(numberValue(value))) : numberValue(value);
-    if (next > 0) result[key] = (result[key] || 0) + next;
+    if (next > 0) result[key] = mapNumber(result, key) + next;
   }
   return result;
 }
@@ -162,17 +180,23 @@ function addClientUsage(period, client, usage) {
   const cost = numberValue(usage?.costUsd);
   period.totalTokens += tokens;
   period.costUsd += cost;
-  if (tokens > 0) period.clients[client] = (period.clients[client] || 0) + tokens;
-  if (cost > 0) period.clientCosts[client] = (period.clientCosts[client] || 0) + cost;
+  if (tokens > 0) period.clients[client] = mapNumber(period.clients, client) + tokens;
+  if (cost > 0) period.clientCosts[client] = mapNumber(period.clientCosts, client) + cost;
   for (const [model, modelTokens] of Object.entries(usage?.models || {})) {
-    period.models[model] = (period.models[model] || 0) + Math.max(0, Math.round(numberValue(modelTokens)));
-    if (!period.clientModels[client]) period.clientModels[client] = {};
-    period.clientModels[client][model] = (period.clientModels[client][model] || 0) + Math.max(0, Math.round(numberValue(modelTokens)));
+    const modelKey = normalizeModelName(model);
+    if (!modelKey) continue;
+    const next = Math.max(0, Math.round(numberValue(modelTokens)));
+    period.models[modelKey] = mapNumber(period.models, modelKey) + next;
+    const models = ensureNestedMap(period.clientModels, client);
+    models[modelKey] = mapNumber(models, modelKey) + next;
   }
   for (const [model, modelCost] of Object.entries(usage?.modelCosts || {})) {
-    period.modelCosts[model] = (period.modelCosts[model] || 0) + numberValue(modelCost);
-    if (!period.clientModelCosts[client]) period.clientModelCosts[client] = {};
-    period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + numberValue(modelCost);
+    const modelKey = normalizeModelName(model);
+    if (!modelKey) continue;
+    const next = numberValue(modelCost);
+    period.modelCosts[modelKey] = mapNumber(period.modelCosts, modelKey) + next;
+    const costs = ensureNestedMap(period.clientModelCosts, client);
+    costs[modelKey] = mapNumber(costs, modelKey) + next;
   }
   const normalizedSessions = normalizePeriod({ sessions: usage?.sessions }).sessions;
   for (const [key, session] of Object.entries(normalizedSessions)) {
@@ -191,9 +215,9 @@ function addSessionBreakdown(period, client, session) {
   const output = Math.max(0, Math.round(numberValue(session?.outputTokens)));
   if (cacheRead === 0 && cacheWrite === 0 && output === 0) return;
 
-  if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
-  if (cacheWrite > 0) period.clientCacheWrites[client] = (period.clientCacheWrites[client] || 0) + cacheWrite;
-  if (output > 0) period.clientOutputs[client] = (period.clientOutputs[client] || 0) + output;
+  if (cacheRead > 0) period.clientCacheReads[client] = mapNumber(period.clientCacheReads, client) + cacheRead;
+  if (cacheWrite > 0) period.clientCacheWrites[client] = mapNumber(period.clientCacheWrites, client) + cacheWrite;
+  if (output > 0) period.clientOutputs[client] = mapNumber(period.clientOutputs, client) + output;
 
   const modelTokens = Object.entries(session?.models || {})
     .map(([model, tokens]) => [model, numberValue(tokens)])
@@ -203,13 +227,15 @@ function addSessionBreakdown(period, client, session) {
 
   // A session is almost always one model; split proportionally for the rare mix.
   for (const [model, tokens] of modelTokens) {
+    const modelKey = normalizeModelName(model);
+    if (!modelKey) continue;
     const share = modelTokens.length === 1 ? 1 : tokens / totalModelTokens;
     const cr = Math.round(cacheRead * share);
     const cw = Math.round(cacheWrite * share);
     const ou = Math.round(output * share);
-    if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
-    if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
-    if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;
+    if (cr > 0) period.modelCacheReads[modelKey] = mapNumber(period.modelCacheReads, modelKey) + cr;
+    if (cw > 0) period.modelCacheWrites[modelKey] = mapNumber(period.modelCacheWrites, modelKey) + cw;
+    if (ou > 0) period.modelOutputs[modelKey] = mapNumber(period.modelOutputs, modelKey) + ou;
   }
 }
 

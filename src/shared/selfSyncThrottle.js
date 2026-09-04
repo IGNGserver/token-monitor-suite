@@ -23,7 +23,7 @@ const {
   normalizeClientSyncDetailCode,
   normalizeClientSyncExitCode,
   normalizeClientSyncFailureStage
-} = require('./clientHealth');
+} = require('./clientSyncStatus');
 
 // Re-running these syncs on every ordinary tick is pure overhead, so they keep
 // their own slow cadence rather than the collector's.

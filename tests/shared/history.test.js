@@ -86,6 +86,17 @@ test('parseGraphResult is defensive about missing/garbage input', () => {
   });
 });
 
+test('history aggregation ignores reserved dynamic keys without mutating Object.prototype', () => {
+  const originalConstructor = Object.getOwnPropertyDescriptor(Object.prototype, 'constructor');
+  const parsed = parseGraphResult(JSON.parse('{"contributions":[{"date":"2026-06-07","clients":[{"client":"__proto__","modelId":"constructor","tokens":{"input":7}},{"client":"codex","modelId":"__proto__","tokens":{"input":11}}]}]}'));
+  const day = parsed.contributions[0];
+  assert.deepEqual(Object.keys(day.perClient), ['unknown', 'codex']);
+  assert.deepEqual(Object.keys(day.perModel), ['unknown']);
+  assert.equal(day.tokens, 18);
+  assert.equal(Object.getOwnPropertyDescriptor(Object.prototype, 'constructor')?.value, originalConstructor.value);
+  assert.equal(Object.prototype.auditPolluted, undefined);
+});
+
 test('computeIntensities keeps legacy cost intensity and exposes explicit metrics', () => {
   const days = [
     { date: 'a', tokens: 0, cost: 0 },
@@ -295,4 +306,3 @@ test('historyPreview keeps recent totals only (no per-client)', () => {
   assert.deepEqual(p.monthly[0], { month: '2026-05', tokens: 9, cost: 1, activeTimeMs: 0 });
   assert.deepEqual(p.summary, { totalTokens: 100 });
 });
-

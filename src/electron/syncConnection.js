@@ -6,6 +6,7 @@
 const ERRNO_REASONS = {
   ECONNREFUSED: 'refused',
   ETIMEDOUT: 'timeout',
+  request_timeout: 'timeout',
   ENOTFOUND: 'dns',
   EAI_AGAIN: 'dns',
   EHOSTUNREACH: 'unreachable',

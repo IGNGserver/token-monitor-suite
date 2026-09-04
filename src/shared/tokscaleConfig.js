@@ -78,4 +78,14 @@ function customPricingPath(opts) {
   return path.join(tokscaleConfigDir(opts), 'custom-pricing.json');
 }
 
-module.exports = { tokscaleCacheDirs, tokscaleConfigDir, customPricingPath };
+// Self-sync clients keep their materialized cache beside Tokscale's other
+// config files, not under the generic `cache/` directory. Keep this derivation
+// next to tokscaleConfigDir so diagnostics and watchers use the same platform
+// rules as the spawned Tokscale process (notably %APPDATA% on Windows).
+function tokscaleClientCacheDir(client, opts = {}) {
+  const id = String(client || '').trim().toLowerCase();
+  if (!/^[a-z0-9_-]+$/.test(id)) throw new TypeError('Tokscale client id must be a simple name');
+  return path.join(tokscaleConfigDir(opts), `${id}-cache`);
+}
+
+module.exports = { tokscaleCacheDirs, tokscaleConfigDir, tokscaleClientCacheDir, customPricingPath };

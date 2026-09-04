@@ -58,7 +58,7 @@ jobs:
           - os: macos-15
             target: mac
             arch: arm64
-            dist_script: dist:mac:widget
+            dist_script: dist:mac
             artifact_name: token-monitor-mac-arm64
             artifact_path: |
               dist/*.dmg
@@ -68,7 +68,7 @@ jobs:
           - os: macos-15-intel
             target: mac
             arch: x64
-            dist_script: dist:mac:widget:x64
+            dist_script: dist:mac:x64
             artifact_name: token-monitor-mac-x64
             artifact_path: |
               dist/*.dmg
@@ -152,9 +152,7 @@ jobs:
         shell: bash
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
-          DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
-          TOKEN_MONITOR_APP_GROUP: ${{ secrets.TOKEN_MONITOR_APP_GROUP }}
-          TOKEN_MONITOR_WIDGET_BUNDLE_ID: ${{ secrets.TOKEN_MONITOR_WIDGET_BUNDLE_ID }}
+          TOKEN_MONITOR_WIDGET_ENABLED: '0'
           MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}

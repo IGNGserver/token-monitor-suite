@@ -594,6 +594,113 @@ html[data-theme="dark"] .heat.lvl-4 { fill: rgba(110, 168, 255, 0.92); }
   outline: none;
 }
 .field select { min-height: 44px; }
+.account-provider-select {
+  position: relative;
+  min-width: 0;
+  z-index: 1;
+}
+.account-provider-select.is-open { z-index: 60; }
+.account-select-trigger {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease, transform 120ms ease;
+}
+.account-select-trigger:hover { background: var(--bg-soft); }
+.account-select-trigger:active { transform: translateY(1px); }
+.account-select-trigger:focus-visible,
+.account-provider-select.is-open .account-select-trigger {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--line-strong));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+  outline: none;
+}
+.account-select-trigger:disabled {
+  opacity: .62;
+  cursor: not-allowed;
+}
+.account-select-current,
+.account-select-option {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.account-select-current { gap: 9px; }
+.account-select-current > span,
+.account-select-option > span:not(.account-select-option-check) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-select-current-icon,
+.account-select-option-icon {
+  flex: none;
+  object-fit: contain;
+  border-radius: 5px;
+}
+.account-select-current-icon { width: 20px; height: 20px; }
+.account-select-option-icon { width: 18px; height: 18px; }
+.account-select-chevron {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--muted);
+  transition: transform 160ms ease;
+}
+.account-select-chevron .ui-icon { width: 16px; height: 16px; }
+.account-provider-select.is-open .account-select-chevron { transform: rotate(180deg); }
+.account-select-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: min(320px, 50vh);
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--bg-elevated);
+  box-shadow: 0 18px 42px color-mix(in srgb, var(--text) 18%, transparent);
+}
+.account-select-menu[hidden] { display: none; }
+.account-select-option {
+  width: 100%;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.account-select-option:hover,
+.account-select-option:focus-visible {
+  background: var(--bg-soft);
+  border-color: var(--line);
+  outline: none;
+}
+.account-select-option.selected {
+  background: color-mix(in srgb, var(--accent) 11%, var(--bg-soft));
+  color: var(--accent);
+}
+.account-select-option-check {
+  display: inline-grid;
+  place-items: center;
+  margin-left: auto;
+  color: var(--accent);
+}
+.account-select-option-check .ui-icon { width: 15px; height: 15px; }
 .check-row {
   display: flex;
   align-items: center;

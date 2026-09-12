@@ -62,6 +62,8 @@ const UI_ICON_PATHS = Object.freeze({
   settings: '<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/><path d="m19.4 15 .1.1a2 2 0 0 1-2.8 2.8l-.1-.1a2 2 0 0 0-3.4 1.4v.2a2 2 0 0 1-4 0v-.2a2 2 0 0 0-3.4-1.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A2 2 0 0 0 1.6 12a2 2 0 0 1 2-2h.2a2 2 0 0 0 1.4-3.4l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A2 2 0 0 0 11.4 2h.2a2 2 0 0 1 2 2v.2A2 2 0 0 0 17 5.6l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A2 2 0 0 0 21.2 12a2 2 0 0 1-2 2H19a2 2 0 0 0-1.4 3.4"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
   warning: '<path d="m12 3 9 16H3z"/><path d="M12 9v4M12 16h.01"/>',
+  check: '<path d="m5 12 4 4L19 6"/>',
+  chevronDown: '<path d="m6 9 6 6 6-6"/>',
   arrowUpRight: '<path d="M7 17 17 7M8 7h9v9"/>'
 });
 
@@ -186,6 +188,7 @@ const state = {
   accountEditId: '',
   accountFormMode: 'simple',
   accountSelectedProvider: 'deepseek',
+  accountProviderMenuOpen: false,
   oauthSession: null,
   oauthLoading: false,
   limitProvider: '',
@@ -1302,6 +1305,7 @@ function renderTrends() {
 }
 
 function render() {
+  if (state.prefs.view !== 'accounts') state.accountProviderMenuOpen = false;
   renderChrome();
   if (state.loading && !state.stats) {
     els.content.innerHTML = loadingHtml();
@@ -1577,12 +1581,32 @@ function renderAccounts() {
     }).join('')}</div>`
     : emptyHtml('accounts.empty');
 
-  const providerOptionsHtml = HUB_ACCOUNT_PROVIDERS.map((p) => {
-    const selected = p.id === currentProvider ? ' selected' : '';
-    return `<option value="${escapeHtml(p.id)}"${selected}>${escapeHtml(p.label || clientLabel(p.id))}</option>`;
-  }).join('');
-
   const isEditing = Boolean(editing);
+  const selectedProvider = HUB_ACCOUNT_PROVIDERS.find((provider) => provider.id === currentProvider)
+    || { id: currentProvider, label: clientLabel(currentProvider) };
+  const providerMenuOpen = !isEditing && state.accountProviderMenuOpen;
+  const providerOptionsHtml = HUB_ACCOUNT_PROVIDERS.map((provider) => {
+    const selected = provider.id === currentProvider;
+    return `<button type="button" class="account-select-option${selected ? ' selected' : ''}" role="option" aria-selected="${selected ? 'true' : 'false'}" data-account-provider-option="${escapeHtml(provider.id)}">
+      <img class="account-select-option-icon" src="${escapeHtml(clientIconPath(provider.id))}" alt="" aria-hidden="true" onerror="this.style.display='none'" />
+      <span>${escapeHtml(provider.label || clientLabel(provider.id))}</span>
+      ${selected ? `<span class="account-select-option-check">${uiIcon('check')}</span>` : ''}
+    </button>`;
+  }).join('');
+  const providerSelectHtml = `
+    <div class="account-provider-select${providerMenuOpen ? ' is-open' : ''}" data-account-provider-select data-value="${escapeHtml(currentProvider)}">
+      <input type="hidden" name="provider" value="${escapeHtml(currentProvider)}" data-account-provider-input />
+      <button type="button" class="account-select-trigger" data-account-provider-trigger aria-haspopup="listbox" aria-expanded="${providerMenuOpen ? 'true' : 'false'}" aria-controls="account-provider-menu" ${isEditing ? 'disabled' : ''}>
+        <span class="account-select-current">
+          <img class="account-select-current-icon" src="${escapeHtml(clientIconPath(selectedProvider.id))}" alt="" aria-hidden="true" onerror="this.style.display='none'" />
+          <span>${escapeHtml(selectedProvider.label || clientLabel(selectedProvider.id))}</span>
+        </span>
+        <span class="account-select-chevron">${uiIcon('chevronDown')}</span>
+      </button>
+      <div id="account-provider-menu" class="account-select-menu" role="listbox" aria-label="${escapeHtml(tr('accounts.provider'))}"${providerMenuOpen ? '' : ' hidden'}>
+        ${providerOptionsHtml}
+      </div>
+    </div>`;
   const formTitle = isEditing ? tr('accounts.edit') : tr('accounts.add');
   const isOAuthCandidate = !isEditing && (currentProvider === 'codex' || currentProvider === 'antigravity');
   // If editing, default to simple; if OAuth candidate and mode not explicitly switched to simple/json, default to oauth
@@ -1738,9 +1762,7 @@ function renderAccounts() {
     <div class="form-grid">
       <label class="field">
         <span>${tr('accounts.provider')}</span>
-        <select name="provider" data-account-provider-select ${isEditing ? 'disabled' : ''}>
-          ${providerOptionsHtml}
-        </select>
+        ${providerSelectHtml}
       </label>
       <label class="field">
         <span>${tr('accounts.name')}</span>
@@ -1783,6 +1805,22 @@ function renderAccounts() {
     : '';
 
   return `${panel(tr('accounts.title'), `<div class="summary-grid account-summary">${summary}</div>${list}`)}${management}`;
+}
+
+function setAccountProviderMenuOpen(open) {
+  const wrapper = els.content.querySelector('[data-account-provider-select]');
+  if (!wrapper) {
+    state.accountProviderMenuOpen = false;
+    return;
+  }
+  state.accountProviderMenuOpen = Boolean(open);
+  wrapper.classList.toggle('is-open', state.accountProviderMenuOpen);
+  const trigger = wrapper.querySelector('[data-account-provider-trigger]');
+  const menu = wrapper.querySelector('[data-account-provider-menu]');
+  trigger?.setAttribute('aria-expanded', state.accountProviderMenuOpen ? 'true' : 'false');
+  if (menu) {
+    menu.hidden = !state.accountProviderMenuOpen;
+  }
 }
 
 async function saveAccountFromForm(form) {
@@ -2375,6 +2413,7 @@ function bindEvents() {
       state.accountEditId = accountEdit.dataset.accountEdit || '';
       state.accountFormError = '';
       state.accountFormMode = 'simple';
+      state.accountProviderMenuOpen = false;
       render();
       return;
     }
@@ -2383,6 +2422,7 @@ function bindEvents() {
       state.accountEditId = '';
       state.accountFormError = '';
       state.accountFormMode = 'simple';
+      state.accountProviderMenuOpen = false;
       render();
       return;
     }
@@ -2398,11 +2438,37 @@ function bindEvents() {
       render();
       return;
     }
+    const accountProviderTrigger = event.target.closest('[data-account-provider-trigger]');
+    if (accountProviderTrigger) {
+      setAccountProviderMenuOpen(!state.accountProviderMenuOpen);
+      return;
+    }
+    const accountProviderOption = event.target.closest('[data-account-provider-option]');
+    if (accountProviderOption) {
+      const provider = String(accountProviderOption.dataset.accountProviderOption || '').trim().toLowerCase();
+      const previousProvider = state.accountSelectedProvider;
+      state.accountSelectedProvider = provider || 'deepseek';
+      state.accountProviderMenuOpen = false;
+      if (previousProvider === state.accountSelectedProvider) {
+        setAccountProviderMenuOpen(false);
+        return;
+      }
+      state.oauthSession = null;
+      state.accountFormError = '';
+      state.accountFormMode = state.accountSelectedProvider === 'codex' || state.accountSelectedProvider === 'antigravity'
+        ? 'oauth'
+        : 'simple';
+      render();
+      return;
+    }
+    if (state.accountProviderMenuOpen && !event.target.closest('[data-account-provider-select]')) {
+      setAccountProviderMenuOpen(false);
+    }
     const accountOAuthStart = event.target.closest('[data-account-oauth-start]');
     if (accountOAuthStart) {
       const form = accountOAuthStart.closest('form');
-      const providerSelect = form?.querySelector('[data-account-provider-select]');
-      const provider = String(providerSelect?.value || accountOAuthStart.dataset.accountOAuthStart || state.accountSelectedProvider || '').trim().toLowerCase();
+      const providerInput = form?.querySelector('[data-account-provider-input]');
+      const provider = String(providerInput?.value || accountOAuthStart.dataset.accountOAuthStart || state.accountSelectedProvider || '').trim().toLowerCase();
       state.oauthLoading = true;
       render();
       void (async () => {
@@ -2553,20 +2619,38 @@ function bindEvents() {
       render();
       return;
     }
-    const accountProvider = event.target.closest('[data-account-provider-select]');
-    if (accountProvider) {
-      const prevProvider = state.accountSelectedProvider;
-      state.accountSelectedProvider = accountProvider.value || 'deepseek';
-      if (prevProvider !== state.accountSelectedProvider) {
-        state.oauthSession = null;
-        state.accountFormError = '';
-        if (state.accountSelectedProvider === 'codex' || state.accountSelectedProvider === 'antigravity') {
-          state.accountFormMode = 'oauth';
-        } else {
-          state.accountFormMode = 'simple';
-        }
+  });
+
+  els.content.addEventListener('keydown', (event) => {
+    const trigger = event.target.closest('[data-account-provider-trigger]');
+    if (trigger) {
+      if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        setAccountProviderMenuOpen(true);
+        els.content.querySelector('[data-account-provider-option]')?.focus();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        setAccountProviderMenuOpen(false);
       }
-      render();
+      return;
+    }
+    const option = event.target.closest('[data-account-provider-option]');
+    if (!option) return;
+    const options = [...els.content.querySelectorAll('[data-account-provider-option]')];
+    const index = options.indexOf(option);
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const nextIndex = event.key === 'ArrowDown'
+        ? (index + 1) % options.length
+        : (index - 1 + options.length) % options.length;
+      options[nextIndex]?.focus();
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      option.click();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      setAccountProviderMenuOpen(false);
+      els.content.querySelector('[data-account-provider-trigger]')?.focus();
     }
   });
 
@@ -2635,7 +2719,15 @@ function bindEvents() {
     els.navScrim.addEventListener('click', () => openNav(false));
   }
   window.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') openNav(false);
+    if (event.key === 'Escape') {
+      openNav(false);
+      setAccountProviderMenuOpen(false);
+    }
+  });
+  document.addEventListener('click', (event) => {
+    if (state.accountProviderMenuOpen && !event.target.closest('[data-account-provider-select]')) {
+      setAccountProviderMenuOpen(false);
+    }
   });
   window.addEventListener('resize', () => {
     if (!isMobileNav()) openNav(false);

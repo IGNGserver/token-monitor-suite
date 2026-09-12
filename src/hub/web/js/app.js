@@ -151,6 +151,8 @@ const state = {
   accountEditId: '',
   accountFormMode: 'simple',
   accountSelectedProvider: 'deepseek',
+  oauthSession: null,
+  oauthLoading: false,
   limitProvider: '',
   loading: true,
   error: null,
@@ -1547,7 +1549,9 @@ function renderAccounts() {
 
   const isEditing = Boolean(editing);
   const formTitle = isEditing ? tr('accounts.edit') : tr('accounts.add');
+  const isOAuthCandidate = !isEditing && (currentProvider === 'codex' || currentProvider === 'antigravity');
   const simpleModeActive = state.accountFormMode === 'simple';
+  const oauthModeActive = state.accountFormMode === 'oauth' && isOAuthCandidate;
 
   let simpleFieldsHtml;
   switch (currentProvider) {
@@ -1636,12 +1640,46 @@ function renderAccounts() {
       break;
   }
 
-  const credentialInputsHtml = simpleModeActive
-    ? `<div class="form-grid account-simple-fields">${simpleFieldsHtml}</div>`
-    : `<label class="field field-wide">
+  let credentialInputsHtml;
+  if (oauthModeActive) {
+    const session = state.oauthSession && state.oauthSession.provider === currentProvider
+      ? state.oauthSession
+      : null;
+    credentialInputsHtml = `
+      <div class="account-oauth-wizard">
+        <div class="account-oauth-step">
+          <strong>${escapeHtml(tr('accounts.oauthStep1'))}</strong>
+          <p class="muted tiny">${escapeHtml(tr('accounts.oauthStep1Desc'))}</p>
+          ${session ? `
+            <div class="account-oauth-link-row">
+              <input type="text" readonly value="${escapeHtml(session.authUrl)}" class="account-oauth-link-input" />
+              <button type="button" class="primary-btn" data-account-oauth-open="${escapeHtml(session.authUrl)}">${tr('accounts.oauthOpenLink')}</button>
+              <button type="button" class="ghost-btn" data-account-oauth-copy="${escapeHtml(session.authUrl)}">${tr('accounts.oauthCopyLink')}</button>
+            </div>
+          ` : `
+            <button type="button" class="primary-btn" data-account-oauth-start="${escapeHtml(currentProvider)}" ${state.oauthLoading ? 'disabled' : ''}>
+              ${state.oauthLoading ? tr('accounts.oauthStarting') : tr('accounts.oauthStart')}
+            </button>
+          `}
+        </div>
+        ${session ? `
+          <div class="account-oauth-step" style="margin-top:14px;">
+            <strong>${escapeHtml(tr('accounts.oauthStep2'))}</strong>
+            <p class="muted tiny">${escapeHtml(tr('accounts.oauthStep2Desc'))}</p>
+            <input name="redirectUrl" required placeholder="${escapeHtml(tr('accounts.oauthUrlPlaceholder'))}" class="account-oauth-redirect-input" spellcheck="false" autocomplete="off" />
+            <input type="hidden" name="oauthSessionId" value="${escapeHtml(session.sessionId)}" />
+          </div>
+        ` : ''}
+      </div>
+    `;
+  } else if (simpleModeActive) {
+    credentialInputsHtml = `<div class="form-grid account-simple-fields">${simpleFieldsHtml}</div>`;
+  } else {
+    credentialInputsHtml = `<label class="field field-wide">
         <span>${tr('accounts.modeJson')}</span>
         <textarea name="credentialJson" rows="4" spellcheck="false" autocomplete="off" placeholder='{"apiKey":"sk-..."}'></textarea>
       </label>`;
+  }
 
   const form = `<form class="management-form account-form" data-account-form>
     <div class="form-section-head">
@@ -1651,8 +1689,9 @@ function renderAccounts() {
       </div>
       <div class="account-form-head-actions">
         <div class="mode-toggle-group">
-          <button type="button" class="ghost-btn ${simpleModeActive ? 'active' : ''}" data-account-mode="simple">${tr('accounts.modeSimple')}</button>
-          <button type="button" class="ghost-btn ${!simpleModeActive ? 'active' : ''}" data-account-mode="json">${tr('accounts.modeJson')}</button>
+          ${isOAuthCandidate ? `<button type="button" class="ghost-btn ${oauthModeActive ? 'active' : ''}" data-account-mode="oauth">${tr('accounts.oauthModeToggle')}</button>` : ''}
+          <button type="button" class="ghost-btn ${!oauthModeActive && simpleModeActive ? 'active' : ''}" data-account-mode="simple">${tr('accounts.modeSimple')}</button>
+          <button type="button" class="ghost-btn ${!oauthModeActive && !simpleModeActive ? 'active' : ''}" data-account-mode="json">${tr('accounts.modeJson')}</button>
         </div>
         ${isEditing ? `<button type="button" class="ghost-btn" data-account-reset>${tr('actions.cancel')}</button>` : ''}
       </div>
@@ -1785,6 +1824,34 @@ async function saveAccountFromForm(form) {
     if (agree !== 'on') {
       throw new Error(tr('accounts.disclaimerRequired'));
     }
+  }
+
+  // Handle OAuth session exchange mode
+  if (!editing && state.accountFormMode === 'oauth' && (provider === 'codex' || provider === 'antigravity')) {
+    const sessionId = String(values.get('oauthSessionId') || '').trim();
+    const redirectUrl = String(values.get('redirectUrl') || '').trim();
+    if (!sessionId || !redirectUrl) {
+      throw new Error(tr('accounts.oauthStep2Desc'));
+    }
+    state.accountsSaving = true;
+    render();
+    try {
+      await fetchJson('/api/accounts/oauth/exchange', {
+        secret: state.secret,
+        method: 'POST',
+        body: { sessionId, redirectUrl, name, label }
+      });
+      state.oauthSession = null;
+      showToast(tr('accounts.updated'));
+      await loadAccounts({ force: true });
+      await refreshStats();
+    } catch (error) {
+      showToast(error.message || tr('error.generic'));
+    } finally {
+      state.accountsSaving = false;
+      render();
+    }
+    return;
   }
 
   state.accountsSaving = true;
@@ -2270,8 +2337,44 @@ function bindEvents() {
     }
     const accountMode = event.target.closest('[data-account-mode]');
     if (accountMode) {
-      state.accountFormMode = accountMode.dataset.accountMode === 'json' ? 'json' : 'simple';
+      state.accountFormMode = accountMode.dataset.accountMode;
       render();
+      return;
+    }
+    const accountOAuthStart = event.target.closest('[data-account-oauth-start]');
+    if (accountOAuthStart) {
+      const provider = accountOAuthStart.dataset.accountOAuthStart;
+      state.oauthLoading = true;
+      render();
+      void (async () => {
+        try {
+          const res = await fetchJson('/api/accounts/oauth/start', {
+            secret: state.secret,
+            method: 'POST',
+            body: { provider }
+          });
+          state.oauthSession = res;
+        } catch (err) {
+          showToast(err.message || tr('error.generic'));
+        } finally {
+          state.oauthLoading = false;
+          render();
+        }
+      })();
+      return;
+    }
+    const accountOAuthOpen = event.target.closest('[data-account-oauth-open]');
+    if (accountOAuthOpen) {
+      const url = accountOAuthOpen.dataset.accountOauthOpen;
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    const accountOAuthCopy = event.target.closest('[data-account-oauth-copy]');
+    if (accountOAuthCopy) {
+      const url = accountOAuthCopy.dataset.accountOauthCopy;
+      void navigator.clipboard.writeText(url).then(() => {
+        showToast(tr('accounts.oauthLinkCopied'));
+      });
       return;
     }
     const subscriptionEdit = event.target.closest('[data-subscription-edit]');

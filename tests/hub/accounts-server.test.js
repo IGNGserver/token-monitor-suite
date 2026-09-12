@@ -175,12 +175,21 @@ test('Hub drops device limits and serves centrally refreshed limits from stats',
 
 test('Hub account API supports adding codex and antigravity accounts with explicit credentials', async () => {
   const repository = new MemoryRepository();
+  let counter = 0;
   const hub = createHub({
     port: 0,
     host: '127.0.0.1',
     adminSecret: 'admin-token',
     accountCredentialKey: 'account-encryption-key',
-    accountProbe: async (provider) => accountProbe(provider),
+    accountProbe: async (provider) => {
+      counter += 1;
+      const row = accountProbe(provider);
+      return {
+        ...row,
+        accountKey: `${provider}-${counter}`,
+        accountEmail: `${provider}-${counter}@example.test`
+      };
+    },
     accountRefreshMs: 60_000,
     repository,
     logger: { error() {}, warn() {}, info() {} }
@@ -211,6 +220,32 @@ test('Hub account API supports adding codex and antigravity accounts with explic
     });
     assert.equal(agy.response.status, 201);
     assert.equal(agy.body.account.provider, 'antigravity');
+
+    // Test OAuth start flow
+    const oauthStart = await requestJson(port, '/api/accounts/oauth/start', {
+      method: 'POST',
+      token: 'admin-token',
+      body: { provider: 'antigravity' }
+    });
+    assert.equal(oauthStart.response.status, 200);
+    assert.equal(oauthStart.body.ok, true);
+    assert.ok(oauthStart.body.sessionId);
+    assert.match(oauthStart.body.authUrl, /codeium\.com\/profile/);
+
+    // Test OAuth exchange with direct token paste
+    const oauthExchange = await requestJson(port, '/api/accounts/oauth/exchange', {
+      method: 'POST',
+      token: 'admin-token',
+      body: {
+        sessionId: oauthStart.body.sessionId,
+        redirectUrl: `http://localhost:8080/callback?api_key=exchanged-agy-token`,
+        name: 'agy-oauth-exchanged'
+      }
+    });
+    assert.equal(oauthExchange.response.status, 201);
+    assert.equal(oauthExchange.body.ok, true);
+    assert.equal(oauthExchange.body.account.name, 'agy-oauth-exchanged');
+    assert.equal(oauthExchange.body.account.provider, 'antigravity');
   } finally {
     await hub.stop();
   }

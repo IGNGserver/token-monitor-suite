@@ -32,6 +32,7 @@ const { createMySqlPool, createRepository } = require('./repository');
 const { createCatalogPricingLookup, pricingNotFound } = require('./pricing-upstream');
 const { calculateUsageEventDeltas, summarizeSessions } = require('./usage-events');
 const { createHubAccountService } = require('./accountService');
+const { createOAuthSessionManager } = require('./oauthService');
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 const PRICE_FIELDS = [
@@ -309,6 +310,7 @@ function createHub({
       onUpdate: () => { void broadcastStats('account-update'); }
     })
     : null;
+  const oauthManager = createOAuthSessionManager();
   const capabilities = hubCapabilities('node-hub', { hubAccounts: Boolean(accountService) });
   const authFailures = createFixedWindowRateLimiter({ limit: authFailureLimit, windowMs: 60_000 });
   const ingestRequests = createFixedWindowRateLimiter({ limit: ingestRateLimit, windowMs: 60_000 });
@@ -928,6 +930,52 @@ function createHub({
       } catch (error) {
         return sendJson(res, accountErrorStatus(error), {
           error: error.code || 'account_add_failed',
+          message: errorMessageForApi(error)
+        });
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/accounts/oauth/start') {
+      const admin = authorize(ADMIN_SCOPE);
+      if (!admin) return;
+      if (!accountService) return accountUnavailable(res);
+      try {
+        const body = await readJsonBody(req);
+        const provider = String(body?.provider || '').trim().toLowerCase();
+        const session = oauthManager.startSession(provider);
+        return sendJson(res, 200, { ok: true, ...session });
+      } catch (error) {
+        return sendJson(res, 400, { error: error.code || 'oauth_start_failed', message: error.message });
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/accounts/oauth/exchange') {
+      const admin = authorize(ADMIN_SCOPE);
+      if (!admin) return;
+      if (!accountService) return accountUnavailable(res);
+      try {
+        const body = await readJsonBody(req);
+        const sessionId = String(body?.sessionId || '').trim();
+        const redirectUrl = String(body?.redirectUrl || '').trim();
+        const name = String(body?.name || '').trim();
+        const label = String(body?.label || '').trim();
+        if (!sessionId || !redirectUrl) {
+          return sendJson(res, 400, { error: 'invalid_params', message: 'sessionId and redirectUrl are required' });
+        }
+        const exchanged = await oauthManager.exchangeSession(sessionId, redirectUrl, {
+          fetch: accountProbe ? undefined : fetch
+        });
+        const account = await accountService.addAccount({
+          provider: exchanged.provider,
+          name: name || `${exchanged.provider}-${Date.now().toString(36)}`,
+          label,
+          credential: exchanged.credential
+        });
+        await recordAccountAudit(admin.principal, 'account.add_oauth', account.id, { provider: account.provider });
+        return sendJson(res, 201, { ok: true, account });
+      } catch (error) {
+        return sendJson(res, accountErrorStatus(error), {
+          error: error.code || 'oauth_exchange_failed',
           message: errorMessageForApi(error)
         });
       }

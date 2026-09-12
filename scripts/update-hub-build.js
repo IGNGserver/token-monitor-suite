@@ -18,4 +18,4 @@ if (JSON.stringify(previous) === JSON.stringify(next)) {
 }
 
 fs.writeFileSync(REGISTRY_PATH, `${JSON.stringify(next, null, 2)}\n`);
-console.log('Updated Hub build registry. Run npm run sync:worker to copy it into worker/.');
+console.log('Updated Hub build registry.');

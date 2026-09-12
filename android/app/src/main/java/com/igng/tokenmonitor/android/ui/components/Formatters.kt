@@ -167,7 +167,7 @@ fun agentRuntimeLabel(runtime: String?): String {
   return when {
     value == "widget" || value.contains("electron") || value.contains("widget") -> "widget"
     value.contains("headless") || value == "agent" -> "headless-agent"
-    value.contains("embedded") -> "embedded-hub"
+    value.contains("embedded") -> "legacy"
     else -> raw
   }
 }

@@ -85,6 +85,18 @@
       {
         "revision": 21,
         "buildId": "sha256:40e94f132c0924803e7519a3f65cd8808470648212941b09e93308c9854dded1"
+      },
+      {
+        "revision": 22,
+        "buildId": "sha256:72f771d973c2a7db42746c7dfd63b24550be58f48cce487ac24f616e4c8a2042"
+      },
+      {
+        "revision": 23,
+        "buildId": "sha256:01c28dbc09237aacbb1a629a04c04ae2c211bc8634747bc28eeda7c837e56fd8"
+      },
+      {
+        "revision": 24,
+        "buildId": "sha256:b37c336c7647321b184fda351ef63ff3fe5c698d771cfdb315aea54dfedf594d"
       }
     ],
     "node-hub": [
@@ -239,36 +251,18 @@
       {
         "revision": 38,
         "buildId": "sha256:c03e535507972975b813c2dc7653623b5c958bdd3951518a6af20187d51a25f7"
-      }
-    ],
-    "cloudflare-worker": [
-      {
-        "revision": 1,
-        "buildId": "sha256:a02f96b20ea72eb22ce4ee81f738023661742830f705c1f89fb71259ec41fd72"
       },
       {
-        "revision": 2,
-        "buildId": "sha256:a0c3ad382602f42694f205100ab06a865ba5a0b5f5431a2310c7d8a264468e7d"
+        "revision": 39,
+        "buildId": "sha256:44aed311f37f526a352e1a9ad0b8174c32f725d4d6f8a08be38b6e6838f3c91f"
       },
       {
-        "revision": 3,
-        "buildId": "sha256:ec7d1057607cceced94089418632ee04ec2d79f9bc227835df920a8f92798cc4"
+        "revision": 40,
+        "buildId": "sha256:5b0df8e80fa5320944faa4e6e42738fb319f0862a270278a41c69623c22cf17e"
       },
       {
-        "revision": 4,
-        "buildId": "sha256:461bf33fca76f9b2a3f52460e4722dc7822187eb860cdd08f1e7ac43ef887b9a"
-      },
-      {
-        "revision": 5,
-        "buildId": "sha256:89de17eb1c3ac1b5ceb92ee8aed7b461a7dabd2c870e2dd2c6606a3446aee81d"
-      },
-      {
-        "revision": 6,
-        "buildId": "sha256:2be4836b209af9455a9e71520ae34ae2597fc5f628a085fee9f878012d6ece60"
-      },
-      {
-        "revision": 7,
-        "buildId": "sha256:4234dc17d19169b73b519e59be4719a91685639dd5b94a31db29dcc96380a25b"
+        "revision": 41,
+        "buildId": "sha256:14b32d9cd870d5bf14a4ecc22cf8cba7f5ac632930fcd7cabdc732701de57261"
       }
     ]
   }

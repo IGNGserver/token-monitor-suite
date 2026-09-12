@@ -140,8 +140,8 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 
 - **マルチデバイスリアルタイム同期** — Server-Sent Events。1 台の変更が数秒以内に他のデバイスに反映
 - **ローカルファースト** — 単一デバイスではサーバー不要
-- **セルフホスト同期** — ウィジェット内 hub、Node CLI hub、Cloudflare Worker
-- **iOS ウィジェット** — Worker hub + Widgy、Scriptable
+- **セルフホスト同期** — Docker Compose Hub
+- **iOS ウィジェット** — Widgy と Scriptable がセルフホスト Hub API を利用可能
 - **プライバシー優先** — プロンプト、応答、ソースコード、ファイル内容はすべてデバイス内に保持
 
 ### インターフェースと表示
@@ -173,46 +173,29 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 
 ## マルチデバイス同期
 
-すべてのデバイス（および headless agent）が接続する **hub を 1 つ** 選びます。各デバイスでウィジェットを開き、**設定 → マルチデバイス同期** でモードを選択します。ウィジェットがこのデバイスの使用量を自動的にアップロードします。ウィジェットがないマシンでのみ `npm run agent` を実行してください。
+マルチデバイス同期を使う場合は、すべてのデバイス（ウィジェットのない headless agent を含む）を同じ Docker Compose Hub に接続します。各デバイスでウィジェットを開き、設定 → マルチデバイス同期で **Hub に接続** を選びます。ウィジェットのないマシンでだけ `npm run agent` を実行してください。
 
-Hub 認証情報は権限別です。viewer は読み取り専用、device token は紐付けられた Device ID だけを送信でき、admin だけが変更を行えます。リモート接続は既定で HTTPS が必要で、Android リリース版は HTTP を許可しません。
+この一人用プロジェクトでは、`TOKEN_MONITOR_SECRET` が全デバイスで使う唯一の Hub キーです。読み取り、ingest、管理操作（手動追加した quota アカウントを含む）をすべて許可します。古い分離型の admin/viewer/device 認証情報は互換モードとして残っています。リモート接続はデフォルトで HTTPS が必要です。デスクトップ/agent の HTTP は信頼できる LAN を明示的に許可した場合だけ、Android リリースビルドは常に HTTPS を使います。
 
-古い設定がローカル以外の `http://` Hub を指していても、アップグレード時に安全性を下げることはありません。ローカル収集は続行しますが、Hub の読み取り／アップロード／ライブストリームは HTTPS に変更するか、ユーザーが信頼済み LAN オプションを明示的に有効にするまで blocked のままです。同期設定では各チャネルを分けて表示し、設定変更後は同じプロセス内で復旧できます。
+古い設定がループバック以外の `http://` Hub を指していても、アップグレード時に安全性を下げることはありません。ローカル収集は継続しますが、HTTPS に変更するか信頼できる LAN オプションを明示的に有効にするまで、Hub の読み取り・アップロード・ストリームはブロックされます。
 
-#### オプション A — ウィジェットから hub をホスト（最も簡単、CLI 不要）
+#### オプション A — ローカルのみ（デフォルト）
 
-常時起動のマシンで **このデバイスでHubをホスト** を選び、リモート Device ID ごとに紐付き device token を作成します。
+単一デバイスではウィジェットのローカルモードを使います。このマシンのローカルデータを直接読み取り、Hub や agent は必要ありません。
 
-Token Monitor が実行中の間のみ hub が動作します。アプリを終了すると（ウィンドウを閉じるだけではなく）hub が停止し、接続されたデバイスが切断されます。
+#### オプション B — Docker Compose Hub に接続
 
-#### オプション B — Node hub をセルフホスト（常時 headless マシン）
+常時起動するマシンにリポジトリルートの `docker-compose.yml` をデプロイします。
 
 ```bash
-# 常時起動のマシンで
 cp .env.example .env
-# .env に ADMIN/VIEWER/INGEST 認証情報と TLS を設定:
-npm run hub
+# .env に TOKEN_MONITOR_SECRET と MySQL パスワードを設定
+docker compose up -d
 ```
 
-#### オプション C — Cloudflare Worker hub（ネットワーク間、iPhone 含む）
+各ウィジェットで 設定 → マルチデバイス同期を開き、**Hub に接続** を選んで Hub URL と同じ Hub キーを入力します。ウィジェットのないマシンでは同じ URL とキーで `npm run agent` を実行します。
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IGNGserver/token-monitor-suite/tree/main/worker)
-
-デプロイ後、3 種類の権限付き認証情報を設定します:
-
-```bash
-cd worker
-npm install
-npx wrangler login
-npx wrangler secret put TOKEN_MONITOR_ADMIN_SECRET
-npx wrangler secret put TOKEN_MONITOR_VIEWER_SECRET
-npx wrangler secret put TOKEN_MONITOR_INGEST_CREDENTIALS
-npx wrangler deploy
-```
-
-デプロイ URL を各デバイスの **設定 → マルチデバイス同期** に貼り付けます。iOS ウィジェットは [worker/README.md](worker/README.md)、HTTP API は [docs/API.md](docs/API.md) を参照してください。
-
-Worker は ingest・統計・履歴・SSE を提供し、バージョン付き Hub capabilities でカスタム範囲と料金を非対応と明示します。デスクトップ、Web、Android はその情報で機能を制御します。
+リポジトリルートの Docker Compose スタックが唯一サポートされる Hub デプロイです。HTTP API、ダッシュボード、PWA、デバイスの ingest、SSE ストリームを提供します。
 
 ## アプリデータ
 
@@ -251,7 +234,7 @@ npm run pack         # インストーラーなしのアプリディレクトリ
     デバイス C agent ──▶
 ```
 
-ウィジェットは **設定 → マルチデバイス同期** に応じてローカル/同期を選択します。hub は `npm run hub`、Cloudflare Worker、またはウィジェット内 Host モードで実行できます。同期モードでは hub が SSE で集計統計をプッシュし、1 台の変更が数秒以内に他のデバイスに反映されます。
+ウィジェットは **設定 → マルチデバイス同期** に応じてローカル/同期を選択します。Docker Compose Hub が各デバイスの標準化された概要を受け取り、SSE で集計統計を接続中のクライアントへ配信するため、1 台の変更が数秒以内に他のデバイスに反映されます。
 
 ## セッションデータの保持期間
 

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "widgetModes": ["local", "client"],
+  "hubDistribution": ["docker-compose"],
+  "embeddedWidgetHub": false,
+  "standaloneHubCommand": false,
+  "cloudflareWorker": false,
+  "headlessAgent": true
+}

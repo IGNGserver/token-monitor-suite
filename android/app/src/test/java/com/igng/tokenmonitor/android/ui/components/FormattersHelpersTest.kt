@@ -62,6 +62,7 @@ class FormattersHelpersTest {
   fun agentRuntimeLabelNormalizes() {
     assertEquals("widget", agentRuntimeLabel("electron-widget"))
     assertEquals("headless-agent", agentRuntimeLabel("headless-agent"))
+    assertEquals("legacy", agentRuntimeLabel("embedded-hub"))
     assertEquals("", agentRuntimeLabel(null))
   }
 

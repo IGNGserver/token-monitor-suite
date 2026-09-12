@@ -31,14 +31,8 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
-      - name: Verify vendored worker shared code is in sync
-        # Drift check is OS-independent; running it once on Linux avoids
-        # false positives from Windows CRLF checkout vs the LF sync writes.
-        if: runner.os == 'Linux'
-        run: |
-          npm run sync:worker
-          git diff --exit-code worker/src/shared \
-            || { echo "::error::worker/src/shared is stale — run 'npm run sync:worker' and commit."; exit 1; }
+      - name: Verify product scope
+        run: npm run verify:product-scope
       - run: npm run lint
       - run: npm test
 

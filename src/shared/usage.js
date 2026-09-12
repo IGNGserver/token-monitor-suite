@@ -618,7 +618,7 @@ function normalizePeriod(input, options = {}) {
   period.timedTokens = Math.max(0, Math.round(asNumber(input.timedTokens ?? input.timed_tokens ?? 0)));
   // Capped at outputTokens because the gate makes that a physical bound: output is counted
   // whole or not at all, so a period cannot have timed more output than it produced. The
-  // collector satisfies this by construction, but the hub and Worker normalize records posted
+  // collector satisfies this by construction, but the Hub normalizes records posted
   // by any agent, and an inflated value here divides straight into a headline tok/s.
   period.timedOutputTokens = Math.min(
     period.outputTokens,
@@ -1253,8 +1253,8 @@ function isPlausibleProducerDay(key, nowMs) {
 //
 // The aggregate's "today" is not the aggregating machine's today. Every day key in
 // a History is the *producer's* local calendar day, but this runs wherever the Hub
-// happens to be: a self-hosted Node hub can sit in another zone, and a Cloudflare
-// Worker isolate always reads UTC. Reading the wall clock there re-keys every
+// happens to be: a Docker Hub can sit in another zone. Reading the wall clock
+// there re-keys every
 // producer's day against a boundary they never used, which sorts a device's current
 // day past the rolling window (dropping it from the daily tier while the monthly
 // tier still counts it) or starts the streak walk on a day that holds no data.
@@ -1287,7 +1287,7 @@ function isPlausibleProducerDay(key, nowMs) {
 // after, and dropping the key there rather than advancing it is not neutral: the
 // fallback would re-select the very day the window just declared finished, which is
 // how a UTC+14 laptop asleep across its own midnight kept feeding a live streak to a
-// UTC Worker for the next fourteen hours. Advancing it also retires a dormant fleet on
+// Hub in another timezone for the next fourteen hours. Advancing it also retires a dormant fleet on
 // its own, since a window closed long enough ago has a successor no zone has been on
 // for years, and the plausibility bound drops it.
 //

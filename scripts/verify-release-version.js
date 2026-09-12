@@ -7,11 +7,8 @@ const { parseProjectVersion } = require('../src/shared/versioning');
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const VERSION_FILES = [
   ['package.json', ['version']],
-  ['worker/package.json', ['version']],
   ['package-lock.json', ['version']],
-  ['package-lock.json', ['packages', '', 'version']],
-  ['worker/package-lock.json', ['version']],
-  ['worker/package-lock.json', ['packages', '', 'version']]
+  ['package-lock.json', ['packages', '', 'version']]
 ];
 
 function readJson(relativePath) {

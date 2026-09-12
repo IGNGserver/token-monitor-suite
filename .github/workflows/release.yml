@@ -33,12 +33,7 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - name: Verify vendored Worker shared code is in sync
-        run: |
-          npm run sync:worker
-          git diff --exit-code worker/src/shared \
-            || { echo "::error::worker/src/shared is stale — run 'npm run sync:worker' and commit."; exit 1; }
-      - name: Run Node verification
+      - name: Verify product scope and Node code
         run: npm run verify
       - uses: actions/setup-java@v4
         with:

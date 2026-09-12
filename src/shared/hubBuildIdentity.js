@@ -2,7 +2,7 @@
 
 const registry = require('./hubBuildRegistry.json');
 
-const RUNTIMES = new Set(['node-hub', 'cloudflare-worker']);
+const RUNTIMES = new Set(['node-hub']);
 
 function latestEntry(component) {
   const entries = registry?.components?.[component];
@@ -12,7 +12,6 @@ function latestEntry(component) {
 function normalizeRuntime(value) {
   const runtime = String(value || '').trim().toLowerCase();
   if (runtime === 'node' || runtime === 'hub') return 'node-hub';
-  if (runtime === 'worker') return 'cloudflare-worker';
   return RUNTIMES.has(runtime) ? runtime : '';
 }
 

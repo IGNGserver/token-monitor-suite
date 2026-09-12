@@ -623,7 +623,7 @@
           <article class="card surface-card reveal">
             <div class="surface-mock ios" aria-hidden="true"><span class="panel-label">Today</span><span class="num">147.9M</span><span class="ios-sub">$122.29</span></div>
             <h3 data-i18n="surfaces.ios.title">iOS widget</h3>
-            <p data-i18n="surfaces.ios.body">Today's totals on your Home Screen via the Worker hub, with Widgy or Scriptable.</p>
+            <p data-i18n="surfaces.ios.body">Today's totals on your Home Screen via the self-hosted Hub API, with Widgy or Scriptable.</p>
           </article>
         </div>
       </section>
@@ -733,11 +733,9 @@
           </div>
         </div>
         <div class="backend-rail reveal">
-          <p class="lede" data-i18n="how.backends">Pick a sync backend; all three speak the same ingest protocol.</p>
-          <div class="backend-options" role="list" aria-label="Self-hostable sync backends" data-i18n-attr="aria-label:how.backends.label">
-            <span role="listitem" data-i18n="how.backend.widget">In-widget hub</span>
-            <span role="listitem" data-i18n="how.backend.node">Node CLI hub</span>
-            <span role="listitem" data-i18n="how.backend.worker">Cloudflare Worker</span>
+          <p class="lede" data-i18n="how.backends">The Docker Compose Hub is the supported sync backend.</p>
+          <div class="backend-options" role="list" aria-label="Supported sync backend" data-i18n-attr="aria-label:how.backends.label">
+            <span role="listitem" data-i18n="how.backend.compose">Docker Compose Hub</span>
           </div>
         </div>
       </section>
@@ -828,7 +826,7 @@
           <span data-i18n="nav.github">GitHub</span>
         </a>
         <a href="https://github.com/IGNGserver/token-monitor-suite/blob/main/docs/API.md" data-i18n="footer.api">API docs</a>
-        <a href="https://github.com/IGNGserver/token-monitor-suite/blob/main/worker/README.md" data-i18n="footer.worker">Worker docs</a>
+        <a href="https://github.com/IGNGserver/token-monitor-suite/blob/main/docs/hub-compose.md" data-i18n="footer.hub">Hub deployment guide</a>
         <a href="https://github.com/IGNGserver/token-monitor-suite/blob/main/LICENSE" data-i18n="footer.license">License</a>
       </div>
     </footer>

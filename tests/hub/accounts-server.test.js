@@ -99,6 +99,36 @@ test('Hub account API stores credentials centrally and never returns them', asyn
   }
 });
 
+test('one Hub secret enables account administration and encryption', async () => {
+  const repository = new MemoryRepository();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: 'single-hub-secret',
+    accountProbe: async (provider) => accountProbe(provider),
+    accountRefreshMs: 60_000,
+    repository,
+    logger: { error() {}, warn() {}, info() {} }
+  });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const added = await requestJson(port, '/api/accounts', {
+      method: 'POST',
+      token: 'single-hub-secret',
+      body: {
+        provider: 'deepseek',
+        name: 'single-key',
+        credential: { apiKey: 'single-key-api-secret' }
+      }
+    });
+    assert.equal(added.response.status, 201);
+    assert.ok(repository.hubCredentials.get(added.body.account.id));
+  } finally {
+    await hub.stop();
+  }
+});
+
 test('Hub drops device limits and serves centrally refreshed limits from stats', async () => {
   const repository = new MemoryRepository();
   const hub = createHub({

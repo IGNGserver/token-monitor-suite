@@ -7,8 +7,6 @@ const MODE_STRUCTURAL_KEYS = Object.freeze([
   'hubUrl',
   'allowInsecureHubHttp',
   'secret',
-  'hubHostPort',
-  'hubHostSecret',
   'deviceId'
 ]);
 const USAGE_STRUCTURAL_KEYS = Object.freeze([

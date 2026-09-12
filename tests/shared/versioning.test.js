@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const packageJson = require('../../package.json');
 
 const {
   compareProjectVersions,
@@ -46,6 +47,6 @@ test('project versions compare upstream components before local revisions', () =
 });
 
 test('release version verification checks the synchronized package metadata', () => {
-  assert.equal(verifyReleaseVersion('v0.45.0-rev.22'), '0.45.0-rev.22');
+  assert.equal(verifyReleaseVersion(`v${packageJson.version}`), packageJson.version);
   assert.throws(() => verifyReleaseVersion('0.37.23'), /Invalid project release version/);
 });

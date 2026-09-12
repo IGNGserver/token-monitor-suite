@@ -19,9 +19,6 @@ yarn-debug.log*
 yarn-error.log*
 .DS_Store
 Thumbs.db
-worker/.wrangler/
-worker/node_modules/
-worker/.dev.vars
 devlog/
 
 # Hub compose release bundle output

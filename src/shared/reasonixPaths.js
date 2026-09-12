@@ -1,8 +1,8 @@
 'use strict';
 
-// Reasonix resolves its state directory in this order. Keep this module free of
-// Node built-ins so the source-check id and resolver can be vendored with the
-// Worker shared closure without making the Worker filesystem-aware.
+// Reasonix resolves its state directory in this order. Keep this module
+// dependency-light so the collector and source checks can reuse it across the
+// Electron widget, headless agent, and Hub.
 const REASONIX_CLIENT = 'reasonix';
 const REASONIX_SOURCE_CHECK_ID = 'reasonix-stats';
 
@@ -125,8 +125,8 @@ function currentDirectory({ env = {}, cwdDir = '' } = {}) {
   if (nonEmpty(cwdDir)) return nonEmpty(cwdDir);
   if (nonEmpty(env.PWD)) return nonEmpty(env.PWD);
   if (nonEmpty(env.INIT_CWD)) return nonEmpty(env.INIT_CWD);
-  // The Worker has no Node `process`; the guarded fallback keeps this pure
-  // module useful when called directly from Node while remaining vendorable.
+  // The guarded fallback keeps this pure module useful with explicit env/cwd
+  // inputs while still working when called directly from Node.
   return typeof process !== 'undefined' && typeof process.cwd === 'function' ? process.cwd() : '';
 }
 

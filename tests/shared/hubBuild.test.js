@@ -12,17 +12,12 @@ const registry = require('../../src/shared/hubBuildRegistry.json');
 const {
   CORE_SOURCE_FILES,
   NODE_RUNTIME_SOURCE_FILES,
-  WORKER_RUNTIME_SOURCE_FILES,
-  WORKER_SHARED_MODULES,
   currentHubSourceBuildIds,
   latestEntry,
   nodeLockBuildInput,
   nodePackageBuildInput,
   updatedRegistry,
   validateRegistry,
-  workerLockBuildInput,
-  workerPackageBuildInput,
-  workerSharedPackageContents
 } = require('../../scripts/hub-build-manifest');
 
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -51,7 +46,7 @@ function localDependencySpecifiers(file, source) {
   const messages = linter.verify(source, [{
     languageOptions: {
       ecmaVersion: 'latest',
-      sourceType: file === 'worker/src/index.js' ? 'module' : 'commonjs'
+      sourceType: 'commonjs'
     }
   }], { filename: file });
   assert.deepEqual(messages.filter((message) => message.fatal), [], `cannot parse dependencies in ${file}`);
@@ -112,52 +107,13 @@ function localDependencyClosure(entryFiles) {
 
 test('Hub build registry matches the current core and runtime source closures', () => {
   const sourceBuildIds = currentHubSourceBuildIds();
-  for (const component of ['core', 'node-hub', 'cloudflare-worker']) {
+  for (const component of ['core', 'node-hub']) {
     assert.equal(
       latestEntry(registry, component)?.buildId,
       sourceBuildIds[component],
       `${component} changed; run npm run update:hub-build after the implementation is final`
     );
   }
-});
-
-test('Worker package product version does not affect its build identity input', () => {
-  const common = { type: 'module', devDependencies: { wrangler: '^4.118.0' } };
-  assert.equal(
-    workerPackageBuildInput({ ...common, version: '0.42.0' }),
-    workerPackageBuildInput({ ...common, version: '0.43.0' })
-  );
-});
-
-test('Worker resolved toolchain changes affect its build identity without following the product version', () => {
-  const lock = {
-    name: 'token-monitor-hub-worker',
-    version: '0.42.0',
-    lockfileVersion: 3,
-    requires: true,
-    packages: {
-      '': { name: 'token-monitor-hub-worker', version: '0.42.0' },
-      'node_modules/wrangler': { version: '4.118.0', integrity: 'sha512:first' }
-    }
-  };
-  assert.equal(
-    workerLockBuildInput(lock),
-    workerLockBuildInput({
-      ...lock,
-      version: '0.43.0',
-      packages: { ...lock.packages, '': { ...lock.packages[''], version: '0.43.0' } }
-    })
-  );
-  assert.notEqual(
-    workerLockBuildInput(lock),
-    workerLockBuildInput({
-      ...lock,
-      packages: {
-        ...lock.packages,
-        'node_modules/wrangler': { version: '4.119.0', integrity: 'sha512:second' }
-      }
-    })
-  );
 });
 
 test('Node Hub identity follows only its declared dotenv runtime dependency and resolution', () => {
@@ -208,36 +164,18 @@ test('Node Hub identity follows only its declared dotenv runtime dependency and 
   );
 });
 
-test('Worker runtime identity includes its generated CommonJS boundary', () => {
-  assert.match(workerSharedPackageContents(), /"type": "commonjs"/);
-  assert.notEqual(workerSharedPackageContents(), workerSharedPackageContents({ type: 'module' }));
+test('desktop comparison changes do not alter the Hub core closure', () => {
+  assert.ok(CORE_SOURCE_FILES.includes('src/shared/hubBuildIdentity.js'));
+  assert.ok(!CORE_SOURCE_FILES.includes('src/shared/hubBuildComparison.js'));
 });
 
-test('desktop comparison changes do not alter the portable Hub core closure', () => {
-  assert.ok(WORKER_SHARED_MODULES.includes('hubBuildIdentity.js'));
-  assert.ok(!WORKER_SHARED_MODULES.includes('hubBuildComparison.js'));
-});
-
-test('Hub build manifests cover the complete Node and Worker local dependency graphs', () => {
+test('Hub build manifests cover the complete Node local dependency graph', () => {
   // The registry is runtime metadata produced from these hashes, so hashing it
   // back into either component would make the build identity self-referential.
   const nodeRegistryMetadata = 'src/shared/hubBuildRegistry.json';
   assert.deepEqual(
     localDependencyClosure(['src/hub/server.js']),
     [...new Set([...CORE_SOURCE_FILES, ...NODE_RUNTIME_SOURCE_FILES, nodeRegistryMetadata])].sort()
-  );
-
-  const workerRegistryMetadata = 'worker/src/shared/hubBuildRegistry.json';
-  const workerRuntimeModules = WORKER_RUNTIME_SOURCE_FILES.filter((file) => ['.js', '.cjs', '.mjs'].includes(path.extname(file)));
-  assert.deepEqual(
-    localDependencyClosure(['worker/src/index.js']),
-    [
-      ...new Set([
-        ...workerRuntimeModules,
-        ...WORKER_SHARED_MODULES.map((name) => `worker/src/shared/${name}`),
-        workerRegistryMetadata
-      ])
-    ].sort()
   );
 });
 
@@ -249,7 +187,6 @@ test('Hub build registry enforces canonical component histories', () => {
     components: {
       core: componentHistory('12'),
       'node-hub': componentHistory('34'),
-      'cloudflare-worker': componentHistory('56')
     }
   };
   assert.equal(validateRegistry(valid), valid);
@@ -268,7 +205,7 @@ test('Hub build registry enforces canonical component histories', () => {
   assert.throws(() => validateRegistry(skippedRevision), /node-hub revision at index 1 must be 2/);
 
   const malformedBuildId = clone();
-  malformedBuildId.components['cloudflare-worker'][0].buildId = `sha256:${'F'.repeat(64)}`;
+  malformedBuildId.components.core[0].buildId = `sha256:${'F'.repeat(64)}`;
   assert.throws(() => validateRegistry(malformedBuildId), /valid SHA-256 build ID/);
 });
 
@@ -278,21 +215,18 @@ test('Hub build registry advances only the component whose source changed', () =
     components: {
       core: componentHistory('123'),
       'node-hub': componentHistory('4567'),
-      'cloudflare-worker': componentHistory('89abc')
     }
   };
   const next = updatedRegistry(base, {
     core: buildId('3'),
     'node-hub': buildId('d'),
-    'cloudflare-worker': buildId('c')
   });
   assert.equal(next.components.core.length, 3);
   assert.deepEqual(next.components['node-hub'].at(-1), { revision: 5, buildId: buildId('d') });
-  assert.equal(next.components['cloudflare-worker'].length, 5);
 });
 
 test('Hub build comparison distinguishes current, older, newer, and divergent builds', () => {
-  const current = currentHubBuild('cloudflare-worker');
+  const current = currentHubBuild('node-hub');
   assert.equal(compareHubBuild(current).status, 'current');
   assert.equal(compareHubBuild(current, {
     ...current,
@@ -312,7 +246,7 @@ test('Hub build comparison distinguishes current, older, newer, and divergent bu
 });
 
 test('only absent build metadata is legacy and current-schema metadata fails closed', () => {
-  const current = currentHubBuild('cloudflare-worker');
+  const current = currentHubBuild('node-hub');
   assert.equal(compareHubBuild(undefined).status, 'legacy');
   for (const invalid of [null, [], '', { ...current, schemaVersion: 0 }, { ...current, schemaVersion: 'nope' }]) {
     assert.equal(compareHubBuild(invalid).status, 'unknown');
@@ -332,7 +266,7 @@ test('only absent build metadata is legacy and current-schema metadata fails clo
 });
 
 test('known historical revisions must retain their canonical build ids', () => {
-  const current = currentHubBuild('cloudflare-worker');
+  const current = currentHubBuild('node-hub');
   const expectedNext = {
     ...current,
     coreRevision: current.coreRevision + 1,

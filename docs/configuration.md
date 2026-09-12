@@ -3,9 +3,9 @@
 Token Monitor has two configuration surfaces:
 
 - **Widget (GUI)** — everything the desktop app does, configured from the `⚙` settings panel. This is the only surface most people need.
-- **`.env`** — for the headless agent and standalone hub, which have no UI.
+- **`.env`** — for the headless agent and the Docker Compose Hub, which have no UI.
 
-The widget reads `.env` values as *first-run defaults*; once you change a setting in the GUI, the saved value takes over. The agent and hub follow the precedence **CLI flag → env var (real or `.env`) → built-in default**.
+The widget reads `.env` values as *first-run defaults*; once you change a setting in the GUI, the saved value takes over. The agent and Docker Compose Hub follow the precedence **CLI flag → env var (real or `.env`) → built-in default**.
 
 ---
 
@@ -21,14 +21,14 @@ Click the `⚙` button in the bottom-right corner of the widget to open the sett
 | **Appearance** | Interface theme (presets such as Default and Obsidian, a porcelain light mode, or custom colors), per-vendor tool colors, and system glass opacity / blur. |
 | **Collection** | Tracked tools (and hide / pin / drag-reorder for the main list), collection cadence, **Keep usage from deleted sessions**, custom pricing, data export, and — on Windows — the built-in WSL scan toggle. |
 | **AI Tool Limits** | View quota windows received from the Hub. Accounts and credentials are added manually to the Hub; the device does not discover local developer-tool accounts or switch a local provider login. |
-| **Multi-device Sync** | **Local only** (no hub), **Connect to a hub** (paste another machine's Hub URL + secret), or **Host hub on this device** (run a hub locally; the panel lists reachable LAN / Tailscale / ZeroTier addresses). |
+| **Multi-device Sync** | **Local only** (no Hub) or **Connect to a Hub** (paste the Docker Compose Hub URL and this device's secret). |
 
 The `⇧` button in the title bar cycles the window behavior.
 
 ### Central Hub accounts and quotas
 
 Quota accounts are a Hub-owned resource. Add an account from the widget's
-**AI Tool Limits** section while connected to a Node Hub, or call the Hub's
+**AI Tool Limits** section while connected to the Docker Compose Hub, or call the Hub's
 `/api/accounts` admin API. The request contains a provider, display name, and
 the credential supplied by the user. The Hub encrypts the credential at rest,
 refreshes the provider on its own schedule, and publishes only normalized quota
@@ -44,19 +44,21 @@ the Hub's central result.
 The first version using this model intentionally invalidates old device-local
 provider credentials and removes the legacy local credential files/settings.
 There is no automatic secret migration: every account must be logged in again
-manually in the Hub after upgrading. Set a stable
-`TOKEN_MONITOR_HUB_CREDENTIAL_KEY` for a standalone Hub; changing that key also
-requires re-adding the affected accounts.
+manually in the Hub after upgrading. In the single-key deployment, configure
+only `TOKEN_MONITOR_SECRET`; the Hub uses it for authentication and derives the
+account-encryption key from it. `TOKEN_MONITOR_HUB_CREDENTIAL_KEY` remains an
+optional legacy override. Changing the effective encryption key requires
+re-adding the affected accounts.
 
 ---
 
-## Headless agent & hub (`.env`)
+## Headless agent & Docker Compose Hub (`.env`)
 
-The agent and hub have no UI. Configure them with a `.env` file in the project root (copy it from `.env.example`):
+The agent and Docker Compose Hub have no UI. Configure them with a `.env` file in the project root (copy it from `.env.example`):
 
 ```env
-TOKEN_MONITOR_HUB_URL=               # required in sync mode — HTTPS Worker/Hub URL
-TOKEN_MONITOR_SECRET=                # this device's token from TOKEN_MONITOR_INGEST_CREDENTIALS
+TOKEN_MONITOR_HUB_URL=               # required in sync mode — HTTPS Docker Compose Hub URL
+TOKEN_MONITOR_SECRET=                # the single Hub key; use the same value on every device
 TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to the hostname
 TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # optional — 0/live, 600000/10min, 1200000/20min, 1800000/30min
 TOKEN_MONITOR_CLIENTS=               # optional — defaults to all supported tools; empty disables tracking
@@ -65,7 +67,7 @@ TOKEN_MONITOR_HISTORY_ENABLED=       # optional — defaults on; 0 skips trend h
 TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # optional — defaults on; 0 stops archiving deleted-session usage
 TOKEN_MONITOR_LIMITS_ENABLED=        # legacy compatibility; device quota probing is removed
 TOKEN_MONITOR_LIMIT_PROVIDERS=       # legacy compatibility; Hub accounts select providers
-TOKEN_MONITOR_HUB_CREDENTIAL_KEY=    # stable Hub account-encryption key for standalone Hub
+TOKEN_MONITOR_HUB_CREDENTIAL_KEY=    # optional legacy account-encryption override; normally leave empty
 QODERCN_CONFIG_DIR=                   # Qoder CN's optional config root; transcript default is $QODERCN_CONFIG_DIR/projects
 TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR= # optional direct override for Qoder CN 0.1.x JSONL transcripts
 TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH=    # optional direct override for the Qoder 0.1.x main.sqlite store
@@ -73,8 +75,9 @@ TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH=    # optional direct override for the Qoder
 
 For a trusted LAN/VPN Hub that still uses `http://<lan-ip>:17321`, also set
 `TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1` on the connecting agent. Remote HTTP is
-rejected by default; prefer HTTPS whenever possible. The Hub's admin, viewer,
-legacy, and per-device tokens must all be generated independently.
+rejected by default; prefer HTTPS whenever possible. In the single-user mode,
+all devices intentionally use the same Hub key. Split admin/viewer/device
+credentials remain available only for legacy deployments.
 
 Provider credentials for quota accounts are entered manually in the Hub and
 are not read from a device's local developer-tool installation. Proxy settings
@@ -98,7 +101,7 @@ For a target-machine Qoder CN check, run `QODERCN_VERSION=0.1.x npm run evidence
 
 For a trusted LAN/VPN Hub that still uses non-loopback HTTP, keep the default blocked state until the user explicitly enables the trusted-LAN option in the widget (or sets `TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1` for the agent). Upgrading an old HTTP profile does not silently enable cleartext transport; the widget continues local collection while Hub read/write/stream status reports the blocked transport.
 
-The widget reads these as first-run defaults; the agent and hub take a CLI flag over an env var over the built-in default.
+The widget reads these as first-run defaults; the agent and Docker Compose Hub take a CLI flag over an env var over the built-in default.
 
 One-shot run (collect once and exit — useful for cron / launchd):
 

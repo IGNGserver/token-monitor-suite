@@ -140,8 +140,8 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 
 - **멀티 디바이스 실시간 동기화** — Server-Sent Events. 한 기기의 변경이 수 초 내 다른 기기에 반영
 - **로컬 우선** — 단일 기기는 서버 불필요
-- **자체 호스트 동기화** — 위젯 내 hub, Node CLI hub, Cloudflare Worker
-- **iOS 위젯** — Worker hub + Widgy, Scriptable
+- **자체 호스트 동기화** — Docker Compose Hub
+- **iOS 위젯** — Widgy와 Scriptable 클라이언트가 자체 호스트 Hub API를 사용
 - **프라이버시 우선** — 프롬프트, 응답, 소스 코드, 파일 내용은 모두 기기에만 보관
 
 ### 인터페이스와 표시
@@ -173,46 +173,29 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 
 ## 멀티 디바이스 동기화
 
-모든 기기(및 headless agent)가 연결할 **hub 하나**를 고릅니다. 각 기기에서 위젯을 열고 **설정 → 멀티 디바이스 동기화**에서 모드를 선택합니다. 위젯이 이 기기 사용량을 자동으로 올리며, 위젯이 없는 기기에서만 `npm run agent`를 실행하면 됩니다.
+멀티 디바이스 동기화를 사용하려면 모든 기기(위젯이 없는 headless agent 포함)를 같은 Docker Compose Hub에 연결합니다. 각 기기에서 위젯을 열고 설정 → 멀티 디바이스 동기화에서 **Hub에 연결**을 선택하세요. 위젯이 없는 기기에서만 `npm run agent`를 실행하면 됩니다.
 
-Hub 자격 증명은 권한별로 분리됩니다. viewer는 읽기 전용, device token은 바인딩된 Device ID만 업로드할 수 있고 admin만 변경을 수행합니다. 원격 연결은 기본적으로 HTTPS가 필요하며 Android 릴리스 빌드는 HTTP를 허용하지 않습니다.
+이 1인용 프로젝트에서는 `TOKEN_MONITOR_SECRET`가 모든 기기에서 사용하는 유일한 Hub 키입니다. 읽기, 업로드, 수동으로 추가한 quota 계정을 포함한 관리자 작업을 모두 허용합니다. 이전의 분리된 admin/viewer/device 자격 증명은 호환 모드로만 남아 있습니다. 원격 연결은 기본적으로 HTTPS가 필요합니다. 데스크톱/agent의 HTTP는 신뢰할 수 있는 LAN을 명시적으로 허용한 경우에만 사용할 수 있고, Android 릴리스 빌드는 항상 HTTPS를 요구합니다.
 
-이전 설정이 로컬이 아닌 `http://` Hub를 가리켜도 업그레이드가 보안을 자동으로 약화하지 않습니다. 로컬 수집은 계속되지만 HTTPS로 바꾸거나 사용자가 신뢰할 수 있는 LAN 옵션을 명시적으로 켤 때까지 Hub 읽기／업로드／라이브 스트림은 blocked 상태로 유지됩니다. 동기화 설정은 각 채널을 따로 표시하며 설정 변경 후 같은 프로세스에서 복구할 수 있습니다.
+이전 설정이 로컬이 아닌 `http://` Hub를 가리켜도 업그레이드가 보안을 자동으로 약화하지 않습니다. 로컬 수집은 계속되지만 HTTPS로 바꾸거나 신뢰할 수 있는 LAN 옵션을 명시적으로 켤 때까지 Hub 읽기·업로드·라이브 스트림은 차단됩니다.
 
-#### 옵션 A — 위젯에서 hub 호스트 (가장 쉬움, CLI 불필요)
+#### 옵션 A — 로컬 전용 (기본값)
 
-항상 켜 둔 기기에서 **이 기기에서 Hub 호스팅**을 선택하고 각 원격 Device ID에 바인딩된 device token을 생성합니다.
+단일 기기에서는 위젯의 로컬 모드를 사용합니다. 이 기기의 로컬 데이터를 직접 읽으며 Hub나 agent가 필요하지 않습니다.
 
-Token Monitor가 실행 중일 때만 hub가 동작합니다. 앱을 종료하면(창만 닫는 것과 다름) hub가 멈추고 연결된 기기가 끊깁니다.
+#### 옵션 B — Docker Compose Hub에 연결
 
-#### 옵션 B — Node hub 자체 호스트 (상시 headless 기기)
+항상 켜 두는 기기에 저장소 루트의 `docker-compose.yml`을 배포합니다.
 
 ```bash
-# 상시 켜 둔 기기에서
 cp .env.example .env
-# .env에 ADMIN/VIEWER/INGEST 자격 증명과 TLS를 설정한 뒤:
-npm run hub
+# .env에 TOKEN_MONITOR_SECRET과 MySQL 비밀번호를 설정합니다
+docker compose up -d
 ```
 
-#### 옵션 C — Cloudflare Worker hub (네트워크 간, iPhone 포함)
+각 위젯에서 설정 → 멀티 디바이스 동기화로 이동해 **Hub에 연결**을 선택하고 Hub URL과 같은 Hub 키를 입력합니다. 위젯이 없는 기기에서는 같은 URL과 키로 `npm run agent`를 실행하면 됩니다.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IGNGserver/token-monitor-suite/tree/main/worker)
-
-배포 후 세 가지 권한별 자격 증명을 설정합니다:
-
-```bash
-cd worker
-npm install
-npx wrangler login
-npx wrangler secret put TOKEN_MONITOR_ADMIN_SECRET
-npx wrangler secret put TOKEN_MONITOR_VIEWER_SECRET
-npx wrangler secret put TOKEN_MONITOR_INGEST_CREDENTIALS
-npx wrangler deploy
-```
-
-배포 URL을 각 기기 **설정 → 멀티 디바이스 동기화**에 붙여 넣습니다. iOS 위젯은 [worker/README.md](worker/README.md), HTTP API는 [docs/API.md](docs/API.md)를 참고하세요.
-
-Worker는 ingest·통계·기록·SSE를 제공하고 버전화된 Hub capabilities에서 사용자 지정 범위와 가격 기능을 미지원으로 표시합니다. 데스크톱·Web·Android는 이 정보로 관련 기능을 제어합니다.
+저장소 루트의 Docker Compose 스택이 유일하게 지원되는 Hub 배포 방식입니다. HTTP API, 대시보드, PWA, 장치 업로드와 SSE 스트림을 제공합니다.
 
 ## 앱 데이터
 
@@ -251,7 +234,7 @@ npm run pack         # 설치 없이 앱 디렉터리만 (로컬 테스트)
     기기 C agent ──▶
 ```
 
-위젯은 **설정 → 멀티 디바이스 동기화**에 따라 로컬/동기화를 선택합니다. hub는 `npm run hub`, Cloudflare Worker, 또는 위젯 내 Host 모드로 실행할 수 있습니다. 동기화 모드에서는 hub가 SSE로 집계 통계를 푸시해 한 기기의 변경이 수 초 내 다른 기기에 반영됩니다.
+위젯은 **설정 → 멀티 디바이스 동기화**에 따라 로컬/동기화를 선택합니다. Docker Compose Hub가 각 기기의 정규화된 요약을 받고 SSE로 집계 통계를 연결된 클라이언트에 푸시하므로 한 기기의 변경이 수 초 내 다른 기기에 반영됩니다.
 
 ## 세션 데이터 보존 기간
 

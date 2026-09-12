@@ -13,16 +13,24 @@ OpenCode、Hermes 和 ZCode 等工具的当前用量保存在 SQLite 数据库�
 可靠的架构是：
 
 ```text
-WSL headless agent → Windows host hub → Token Monitor widget
+WSL headless agent → Windows Docker Compose Hub → Token Monitor widget
 ```
 
 Agent 在数据库旁边运行 Linux 版 tokscale，再把规范化后的用量摘要发送给 hub。
 
-## 1. 在 Windows 启动 Hub
+## 1. 在 Windows 启动 Docker Compose Hub
 
-打开 Token Monitor 的 **设置 → 多设备同步**，选择 **在这台设备托管 Hub**。在 **设备令牌** 中输入 `wsl-agent`，创建后记下 Hub URL 和生成的设备令牌。
+在准备长期运行的 Windows 机器上部署仓库根目录的 Compose 服务：
 
-请只在可信网络中开放 hub，并保留生成的令牌。如果 WSL 无法访问界面显示的主机名，请改用 Windows 主机 IP，端口保持不变，默认是 `17321`。
+```bash
+cp .env.example .env
+# 设置 TOKEN_MONITOR_SECRET、MYSQL_PASSWORD 和 MYSQL_ROOT_PASSWORD
+
+docker compose up -d
+curl http://127.0.0.1:17321/api/health
+```
+
+Windows Hub 和 WSL agent 使用同一个 `TOKEN_MONITOR_SECRET`。请只在可信网络中开放 Hub 并保留密钥。如果 WSL 无法访问 Windows 主机名，请改用 Windows 主机 IP，端口保持不变，默认是 `17321`。
 
 ## 2. 在 WSL 安装 Headless Agent
 
@@ -48,9 +56,8 @@ TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1
 
 `TOKEN_MONITOR_DEVICE_ID` 必须与 Windows widget 的设备 ID 不同。Hub 会把相同 ID 当作同一台设备，后发送的记录会覆盖前一条。
 
-设备令牌必须来自 Hub 的 `TOKEN_MONITOR_INGEST_CREDENTIALS`，其中键名与
-`wsl-agent` 一致；不要复用 admin 或 viewer 令牌。仅当 Hub 位于可信 LAN/VPN
-且暂时无法启用 HTTPS 时，才使用上述明文 HTTP 开关。
+`TOKEN_MONITOR_SECRET` 必须与 Hub 上配置的单一密钥一致。仅当 Hub 位于可信
+LAN/VPN 且暂时无法启用 HTTPS 时，才使用上述明文 HTTP 开关。
 
 ## 3. 明确采集边界
 

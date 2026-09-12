@@ -31,7 +31,6 @@ function jsFilesUnder(dir) {
 
 function sourceFiles() {
   return jsFilesUnder(path.join(root, 'src'))
-    .concat(jsFilesUnder(path.join(root, 'worker', 'src')))
     // Windows would otherwise report `src\shared\...` and never match.
     .map((file) => ({ name: path.relative(root, file).split(path.sep).join('/'), text: fs.readFileSync(file, 'utf8') }));
 }

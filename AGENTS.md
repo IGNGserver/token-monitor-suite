@@ -6,20 +6,20 @@ This is the single source of project guidance, shared by every coding agent (Cla
 
 ```bash
 npm start          # launch the Electron widget (= npm run widget / npm run dev)
-npm run hub        # start the Node hub on port 17321
 npm run agent      # start the headless collector→hub agent
 npm run agent:once # one-shot collect+post, then exit (useful for cron/launchd)
 npm test           # run the node:test suite (node --test "tests/**/*.test.js")
 npm run lint       # ESLint flat config (eslint.config.js)
-npm run verify     # lint + test (single local entry point)
+npm run verify:product-scope # enforce the approved two-mode / Compose-only product boundary
+npm run verify     # product-scope guard + lint + test (single local entry point)
 ```
 
-Automated verification is `npm run verify` (= `npm run lint && npm test`); CI (`.github/workflows/ci.yml`) runs lint + test on push/PR across Node 22 & 24. The toolchain (ESLint 10 + the node:test glob) needs Node 22.13+, which is why `engines.node` is `>=22.13.0` (Node 18 & 20 are both EOL as of 2026-06).
+Automated verification is `npm run verify` (= `npm run verify:product-scope && npm run lint && npm test`); CI (`.github/workflows/ci.yml`) runs lint + test on push/PR across Node 22 & 24. The toolchain (ESLint 10 + the node:test glob) needs Node 22.13+, which is why `engines.node` is `>=22.13.0` (Node 18 & 20 are both EOL as of 2026-06).
 
 ### Version and release policy
 
 - Project versions use `<upstream-semver>-rev.<positive integer>`, for example `0.37.23-rev.1`. The first three components identify the compatible upstream version; `rev.N` distinguishes this project's successive updates for that upstream version. Do not use a fourth core component such as `0.37.23.1`, and do not put `fork` in the version or product name.
-- Root and Worker package metadata must stay aligned. `npm run verify:release-version` validates the project version format and all package/lock-file copies.
+- Root package and lock metadata must stay aligned. `npm run verify:release-version` validates the project version format and the root package/lock copies.
 - A normal request to “发布 release” means a GitHub prerelease. The release workflow defaults to `prerelease` for both pushed tags and manual dispatch. Only an explicit request to “发布正式版 release” may select the `release` workflow input. The Docker `latest` tag is updated only for a formal release; version-specific image tags are always published.
 - Release tags are `v<project-version>`, and release jobs must check out and validate the exact tag. Android receives the same version through `-PtokenMonitorVersion`; its `versionCode` includes `rev.N`.
 
@@ -27,12 +27,13 @@ To dry-run the agent without posting: `node src/agent/agent.js --once --dry-run`
 
 ## Architecture
 
-Three runtime entry points share a single `src/shared/` library:
+The Electron widget, Docker Compose Hub, and headless agent share a single `src/shared/` library:
 
-- **`src/electron/main.js`** — widget process. Owns the BrowserWindow, IPC, and chooses between *local* and *sync* mode based on whether `settings.hubUrl` is set.
-- **`src/hub/server.js`** — Node HTTP hub. Stores device records (MySQL), exposes `/api/ingest`, `/api/stats`, `/api/stats/stream` (SSE), and serves the same-port web dashboard / PWA from `src/hub/web/` via `src/hub/static.js`.
-- **`src/agent/agent.js`** — headless collector for machines without a widget. Same data path as the widget's sync-mode collector.
-- **`worker/src/index.js`** — Cloudflare Worker hub that speaks the same protocol; the aggregation rules must stay portable (no Node built-ins in `usage.js`). The "Deploy to Cloudflare" button isolates `worker/` into a fresh repo, so the Worker may **not** import files above its own dir — its shared closure (`limits.js` / `usage.js` / `history.js` / `projectKey.js`) is vendored into `worker/src/shared/` by `npm run sync:worker` (`scripts/sync-worker-shared.js`). `src/shared/` stays the single source of truth; those copies are `@generated` (a CommonJS `package.json` marker scopes them back to CJS inside the ESM worker) and CI fails on drift. Edit `src/shared/`, never the copies, then re-run the sync.
+- **`src/electron/main.js`** — widget process. Owns the BrowserWindow, IPC, and exposes exactly two sync choices: *local* and *client*.
+- **`src/hub/server.js`** — Node/MySQL HTTP Hub, used only by the root `docker-compose.yml`. It exposes `/api/ingest`, `/api/stats`, `/api/stats/stream` (SSE), and serves the same-port web dashboard / PWA from `src/hub/web/` via `src/hub/static.js`. The Hub source is intentionally excluded from Electron packages.
+- **`src/agent/agent.js`** — headless collector for machines without a widget. It is a sync client and posts to the Docker Compose Hub.
+
+The product boundary is recorded in `product-scope.json`: no embedded widget Hub, no standalone `npm run hub` entry point, and no secondary Worker deployment. Run `npm run verify:product-scope` before changing any deployment or sync code.
 
 ### Collector pipeline (shared by widget and agent)
 
@@ -47,22 +48,22 @@ Three runtime entry points share a single `src/shared/` library:
 
 Usage and limits have independent lifecycles under `src/shared/deviceRuntime.js`: `UsageRuntime` owns the tokscale collector, while `LimitsRuntime` owns its refresh timer, bounded cross-provider concurrency, per-provider latest-wins serial lanes, scoped account refreshes, finite probe deadlines, retry/backoff, and `lastGood` / `lastAttempt` retention. Credential changes refresh or clear only the affected limits lane and never restart usage; Cursor additionally forces one targeted usage sync because its tokscale cache is self-synced.
 
-`DeviceState` composes both outputs into the unchanged device wire record, buffering limits until usage exists and cold-start previews until a complete usage baseline exists; limits-only updates preserve the usage `updatedAt`. Provider dispatch starts in `src/shared/limitCollector.js`, with provider-specific implementations split between that file and `src/shared/*Limits.js`; shared normalization remains in `src/shared/limits.js`. The hub and Worker receive the composed record and never need provider credentials.
+`DeviceState` composes both outputs into the unchanged device wire record, buffering limits until usage exists and cold-start previews until a complete usage baseline exists; limits-only updates preserve the usage `updatedAt`. Provider dispatch starts in `src/shared/limitCollector.js`, with provider-specific implementations split between that file and `src/shared/*Limits.js`; shared normalization remains in `src/shared/limits.js`. The Docker Compose Hub receives the composed record and never needs provider credentials.
 
 ### Widget mode switching
 
-`main.js` chooses the data path from `settings.hubMode` (`local` / `client` / `host`, set in the GUI's Multi-device Sync section). In `client` mode (a `hubUrl` is set) it: stops the local collector, opens an SSE stream to `/api/stats/stream`, and *also* runs a sync-collector to post this device's own usage. In `host` mode it additionally runs an embedded hub (`startEmbeddedHub()`) so other devices can connect. In `local` mode it runs only the local collector and emits stats over IPC to the renderer.
+`main.js` chooses between `local` and `client` from `settings.hubMode` in the GUI's Multi-device Sync section. In `client` mode (a `hubUrl` is set) it stops the local-only collector, opens an SSE stream to `/api/stats/stream`, and also runs a sync collector to post this device's own usage. In `local` mode it runs only the local collector and emits stats over IPC to the renderer. A legacy `host` value is migrated to `local` and its embedded-Hub settings are discarded; it is not a supported runtime mode.
 
-When both a widget and the headless agent run on the same machine, the widget's sync-collector backs off — it checks `data/agent.pid` (`pidFilePath()`) and skips posting if that PID is alive. This is the only coordination between them.
+The only supported Hub deployment is the root Docker Compose stack. `src/hub/` remains part of the Docker image and release Compose archive, but never part of the Electron package. When both a widget and the headless agent run on the same machine, the widget's sync collector backs off — it checks `data/agent.pid` (`pidFilePath()`) and skips posting if that PID is alive.
 
 ### Settings and credentials: env first, GUI overrides for widget
 
 Configuration has two sources, and the widget splits its persisted GUI state by sensitivity:
 
 1. **`.env` at project root** — read by `loadDotEnv()` in `src/shared/config.js` at the top of every entry file. Only assigns keys that aren't already in `process.env`, so real env vars (systemd / launchd / Docker) still win. `.env.example` documents the operator-facing settings intended for direct configuration, including connection/device settings, feature toggles, and provider credentials. Lower-level runtime knobs may still be accepted without being listed there; treat additions or removals from the documented env surface as compatibility changes and keep `.env.example` aligned with the code.
-2. **Widget GUI** — Electron `userData/settings.json` stores preferences and account metadata; plaintext `userData/credentials.json` stores GUI-managed raw credentials with restrictive filesystem permissions (POSIX `0600`; Windows relies on the containing `userData` ACL). `readSettings()` merges both over `defaultSettings()` (which is seeded from env), while the main process sends a default-deny redacted view to the renderer. The only explicit renderer exceptions are the two Hub secrets required by the existing sync UI. The headless agent and standalone hub never read `credentials.json`; their credential flow remains CLI/env-based.
+2. **Widget GUI** — Electron `userData/settings.json` stores preferences and account metadata; plaintext `userData/credentials.json` stores GUI-managed raw credentials with restrictive filesystem permissions (POSIX `0600`; Windows relies on the containing `userData` ACL). `readSettings()` merges both over `defaultSettings()` (which is seeded from env), while the main process sends a default-deny redacted view to the renderer. The single Hub secret is the only raw credential exposed by the sync UI. The headless agent and Docker Compose Hub never read `credentials.json`; their credential flow remains CLI/env-based.
 
-`CREDENTIAL_SETTING_PATHS` in `src/shared/credentialStore.js` maps fixed GUI credential settings. Add new fixed credentials there instead of creating provider-specific stores; dynamic account credentials such as MiMo cookies belong under a dedicated nested path in the same unified store and must remain metadata-only in the renderer. Expose any raw credential to the renderer only through an explicit allowlist. Legacy migration must write and verify the new store before stripping/deleting the old source; corrupt, unknown-version, or symlinked stores must never be replaced with an empty document. This store is deliberately local plaintext protected by filesystem permissions, not OS-backed encryption: it avoids Keychain/credential-manager prompts but does not protect against processes already running as the same OS user.
+`CREDENTIAL_SETTING_PATHS` in `src/shared/credentialStore.js` maps fixed GUI credential settings. Add new fixed credentials there instead of creating provider-specific stores; dynamic account credentials such as MiMo cookies belong under a dedicated nested path in the same unified store and must remain metadata-only in the renderer. The single Hub secret is the only raw credential exposed by the sync UI. Expose any other raw credential to the renderer only through an explicit allowlist. Legacy migration must write and verify the new store before stripping/deleting the old source; corrupt, unknown-version, or symlinked stores must never be replaced with an empty document. This store is deliberately local plaintext protected by filesystem permissions, not OS-backed encryption: it avoids Keychain/credential-manager prompts but does not protect against processes already running as the same OS user.
 
 Per-setting precedence for the agent and hub: `CLI flag → env var (real or .env) → built-in default`. There is no JSON config file anymore — `config.local.json` was removed.
 
@@ -89,7 +90,11 @@ One caveat on top of the table:
 
 ### Data flow contract
 
-The hub stores normalized device records (`normalizeDeviceRecord` in `usage.js`) and aggregates on read (`aggregateDevices`). The wire shape between agent/widget and hub is whatever `collectUsageOnce()` returns — that function is the source of truth, and `docs/API.md` documents the full contract. The core is `{deviceId, hostname, platform, updatedAt, agentVersion, today, month, allTime}` (each period has `{totalTokens, costUsd, clients, clientCosts, models, modelCosts}`), plus attribution fields (`trackedClients`, `clientStatus`, `wslStatus`, `periodWindows`, `projectsEnabled`) and optional `osName` / `osVersion` / `agentRuntime` / `history` / `limits`. The Worker hub uses the exact same shapes.
+The Docker Compose Hub stores normalized device records (`normalizeDeviceRecord` in `usage.js`) and aggregates on read (`aggregateDevices`). The wire shape between agent/widget and Hub is whatever `collectUsageOnce()` returns — that function is the source of truth, and `docs/API.md` documents the full contract. The core is `{deviceId, hostname, platform, updatedAt, agentVersion, today, month, allTime}` (each period has `{totalTokens, costUsd, clients, clientCosts, models, modelCosts}`), plus attribution fields (`trackedClients`, `clientStatus`, `wslStatus`, `periodWindows`, `projectsEnabled`) and optional `osName` / `osVersion` / `agentRuntime` / `history` / `limits`.
+
+### Product boundary and upstream sync
+
+`product-scope.json` is the compatibility boundary for this fork: Electron may expose only `local` and `client`, and Hub deployment may use only the root Docker Compose stack. Do not re-add an embedded Hub, a standalone Hub command, a Worker deployment tree, or a second Compose/package entry point when syncing upstream. Keep the scope guard in CI, release verification, and `npm run verify`; if upstream changes the relevant settings, renderer, build, or deployment files, update the implementation and its guard together.
 
 ### Stale devices
 

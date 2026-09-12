@@ -9,7 +9,7 @@ function normalizedSecret(value) {
   return String(value || '').trim();
 }
 
-// Portable constant-time comparison for Node and Cloudflare Worker. Secrets are
+// Portable constant-time comparison for Hub runtimes. Secrets are
 // high-entropy operator-generated values; comparing the complete byte sequence
 // avoids the early-exit timing leak of ordinary string equality.
 function secretMatches(left, right) {
@@ -86,11 +86,13 @@ function requestCredential(request) {
 }
 
 function createHubAuthPolicy(options = {}) {
+  const unifiedSecret = normalizedSecret(options.unifiedSecret);
   const adminSecret = normalizedSecret(options.adminSecret);
   const viewerSecret = normalizedSecret(options.viewerSecret);
-  const legacySecret = normalizedSecret(options.legacySecret);
+  const legacySecret = unifiedSecret ? '' : normalizedSecret(options.legacySecret);
   const ingestCredentials = ingestCredentialEntries(options.ingestCredentials);
   const credentials = [
+    ['unified', unifiedSecret],
     ['admin', adminSecret],
     ['viewer', viewerSecret],
     ['legacy', legacySecret],
@@ -106,9 +108,12 @@ function createHubAuthPolicy(options = {}) {
   }
   const allowLegacyAdmin = parseBoolean(options.allowLegacyAdmin, false);
   const allowLegacyIngest = parseBoolean(options.allowLegacyIngest, false);
-  const configured = Boolean(adminSecret || viewerSecret || legacySecret || ingestCredentials.length);
+  const configured = Boolean(unifiedSecret || adminSecret || viewerSecret || legacySecret || ingestCredentials.length);
 
   function principalFor(secret) {
+    if (unifiedSecret && secretMatches(secret, unifiedSecret)) {
+      return { id: 'admin', role: 'admin', scopes: SCOPES };
+    }
     if (adminSecret && secretMatches(secret, adminSecret)) {
       return { id: 'admin', role: 'admin', scopes: SCOPES };
     }
@@ -163,8 +168,9 @@ function createHubAuthPolicy(options = {}) {
     configured,
     secretRequired: configured,
     summary: Object.freeze({
-      adminConfigured: Boolean(adminSecret),
-      viewerConfigured: Boolean(viewerSecret || legacySecret || adminSecret),
+      adminConfigured: Boolean(unifiedSecret || adminSecret),
+      unifiedSecretConfigured: Boolean(unifiedSecret),
+      viewerConfigured: Boolean(viewerSecret || legacySecret || adminSecret || unifiedSecret),
       ingestCredentialCount: ingestCredentials.length,
       legacyAdminEnabled: allowLegacyAdmin,
       legacyIngestEnabled: allowLegacyIngest

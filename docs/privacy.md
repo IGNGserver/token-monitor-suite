@@ -16,7 +16,7 @@ These requests are processed under the privacy policy of the service receiving t
 
 ## Multi-device sync
 
-Multi-device sync is optional and has no Token Monitor-operated default server. The operator chooses and controls the destination hub, whether it runs in the app, on a self-hosted Node server, or on Cloudflare Workers.
+Multi-device sync is optional and has no Token Monitor-operated default server. The operator chooses and controls a Docker Compose Hub deployment and its infrastructure.
 
 When enabled, sync can send device identifiers and metadata; aggregate token and cost totals; client, model, session, and project attribution; retained usage history; and normalized provider-limit status. Project attribution can include an opaque project identifier and workspace-folder label, but never an absolute workspace path. Provider limits can include a hashed account identifier, account email, and plan label so the authenticated hub can distinguish accounts.
 

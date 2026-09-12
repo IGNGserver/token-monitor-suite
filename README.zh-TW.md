@@ -144,8 +144,8 @@ Main SQLite 的對話內容同樣只提供估算用量，沒有供應商計費�
 
 - **多裝置即時同步**：透過 Server-Sent Events 推送，一台裝置的更新數秒內出現在其他裝置
 - **本地優先**：單裝置使用完全不需伺服器
-- **自架同步後端**：小工具內 hub、Node CLI hub 或 Cloudflare Worker，任你選
-- **iOS 小工具支援**：透過 Worker hub 搭配 Widgy、Scriptable
+- **自架同步後端**：Docker Compose Hub
+- **iOS 小工具支援**：Widgy 與 Scriptable 用戶端可使用自架 Hub API
 - **隱私優先**：提示詞、回應、原始碼與檔案內容都留在你的機器上
 
 ### 介面與呈現
@@ -177,46 +177,29 @@ Main SQLite 的對話內容同樣只提供估算用量，沒有供應商計費�
 
 ## 多裝置同步
 
-挑一個所有裝置（與任何無頭代理）都連得到的 hub 後端。在每台裝置上打開小工具，在 設定 → 多裝置同步 選一個模式。小工具會自動回報本機用量；只在沒有小工具的機器上跑 `npm run agent`。
+如果需要多裝置同步，請把所有裝置（以及沒有小工具的無頭代理）連線到同一個 Docker Compose Hub。在每台裝置上開啟小工具，前往 設定 → 多裝置同步並選擇 **連線到 Hub**；只有沒有小工具的機器才需要執行 `npm run agent`。
 
-Hub 憑證已分權：viewer 令牌唯讀，裝置令牌只能上報綁定的 Device ID，admin 令牌才能變更資料。遠端預設要求 HTTPS；Android 發行版不允許明文 HTTP。
+這個單人專案使用 `TOKEN_MONITOR_SECRET` 作為所有裝置共用的唯一 Hub 密鑰，涵蓋讀取、上報與管理操作，包括手動加入的額度帳號。舊版分離的 admin/viewer/裝置憑證僅保留作為相容模式。遠端連線預設必須使用 HTTPS；桌面端／agent 需明確啟用可信任 LAN HTTP，Android 發行版始終要求 HTTPS。
 
-升級舊設定時，若 Hub 是非本機的 `http://` 位址，不會靜默降低安全性：本機採集會繼續執行，但 Hub 讀取／回報／即時串流會維持 blocked，直到改用 HTTPS 或使用者明確開啟可信任 LAN 選項。同步設定會分別顯示這些通道，並在設定變更後於同一程序中恢復。
+升級舊設定時，如果 Hub 是非本機的 `http://` 位址，不會靜默降低安全性：本機採集會繼續執行，但 Hub 讀取／上報／即時串流會保持 blocked，直到改用 HTTPS 或使用者明確啟用可信任 LAN 選項。同步設定會分別顯示這些通道，並在設定變更後於同一個程序中恢復。
 
-#### 選項 A——直接在小工具內開 hub（最簡單，無需命令列）
+#### 選項 A——僅限本機（預設）
 
-在一台持續開機的機器上選 **在這台裝置架設 Hub**。為每個遠端 Device ID 建立綁定裝置令牌，再貼到對應客戶端。
+單一裝置使用小工具的本機模式。它直接讀取這台機器的本機資料，不需要 Hub 或 agent。
 
-只要 Token Monitor 還在跑，hub 就會運作——結束 App（僅關閉視窗不算）會停掉 hub，所有連入的裝置都會中斷。
+#### 選項 B——連線到 Docker Compose Hub
 
-#### 選項 B——自架 Node hub（持續開機的無頭機器）
+在一台長時間開機的機器上部署根目錄的 `docker-compose.yml`：
 
 ```bash
-# 在會持續開機的機器上
 cp .env.example .env
-# 在 .env 設定 ADMIN/VIEWER/INGEST 憑證與 TLS，然後：
-npm run hub
+# 在 .env 只需設定 TOKEN_MONITOR_SECRET 與 MySQL 密碼
+docker compose up -d
 ```
 
-#### 選項 C——Cloudflare Worker hub（跨網路，包括 iPhone）
+在每個小工具中，前往 設定 → 多裝置同步，選擇 **連線到 Hub**，再輸入 Hub URL 與同一個 Hub 密鑰。沒有小工具的機器使用相同的 URL 與密鑰執行 `npm run agent`。
 
-[![部署到 Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IGNGserver/token-monitor-suite/tree/main/worker)
-
-一鍵或手動部署後，設定三類分權憑證：
-
-```bash
-cd worker
-npm install
-npx wrangler login
-npx wrangler secret put TOKEN_MONITOR_ADMIN_SECRET
-npx wrangler secret put TOKEN_MONITOR_VIEWER_SECRET
-npx wrangler secret put TOKEN_MONITOR_INGEST_CREDENTIALS
-npx wrangler deploy
-```
-
-把部署 URL 貼到每台裝置的小工具 設定 → 多裝置同步。iOS 小工具設定步驟與端點參考請見 [worker/README.md](worker/README.md)，hub HTTP API 請見 [docs/API.md](docs/API.md)。
-
-Worker 涵蓋 ingest、統計、歷史與 SSE，並發佈版本化 Hub capabilities，明確標記不支援自訂區間與定價。桌面端、Web 與 Android 會據此隱藏或停用相關功能。
+根目錄 Docker Compose 堆疊是唯一支援的 Hub 部署方式，提供 HTTP API、儀表板、PWA、裝置上報與 SSE 即時串流。
 
 ## App 資料
 
@@ -255,7 +238,7 @@ npm run pack         # 未封裝的 app 目錄（無安裝檔），方便本機�
     裝置 C agent ──▶
 ```
 
-小工具會根據 設定 → 多裝置同步 決定走本地或同步模式。hub 本身可以是獨立的 `npm run hub` 程序、Cloudflare Worker，或直接跑在某一個小工具裡（Host 模式）。同步模式下，hub 透過 Server-Sent Events 把彙總後的統計推送給每個連線中的小工具，所以一台裝置上的更新會在數秒內出現在其他裝置上。
+小工具會根據 設定 → 多裝置同步 決定走本機或同步模式。Docker Compose Hub 會接收每台裝置的標準化摘要，並透過 Server-Sent Events 將彙總統計推送給已連線的用戶端，因此一台裝置的更新會在數秒內出現在其他裝置上。
 
 ## 會話資料保留期
 

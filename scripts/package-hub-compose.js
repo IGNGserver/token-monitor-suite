@@ -20,8 +20,8 @@ fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(stageDir, { recursive: true });
 
 const files = [
-  ['deploy/docker-compose.yml', 'docker-compose.yml'],
-  ['deploy/README.md', 'README.md'],
+  ['docker-compose.yml', 'docker-compose.yml'],
+  ['docs/hub-compose.md', 'README.md'],
   ['.env.example', '.env.example']
 ];
 

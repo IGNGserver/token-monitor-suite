@@ -1,6 +1,6 @@
 'use strict';
 
-// Limits shared by the Node Hub and the standalone Worker. These values describe
+// Limits for the device wire contract. These values describe
 // the existing HTTP/SQL contract; inputs are rejected rather than truncated so a
 // long identifier can never silently collide with a valid one.
 const MAX_JSON_BODY_BYTES = 1024 * 1024;

@@ -14,13 +14,13 @@ Hermes Agent 运行在 WSL 中，其会话数据存储在 `~/.hermes/state.db`�
 
 ## 解决方案
 
-采用 Token Monitor 的多设备架构：**WSL 内运行 headless agent → Windows 端 host hub 接收数据**。
+采用 Token Monitor 的多设备架构：**WSL 内运行 headless agent → Windows 端 Docker Compose Hub 接收数据**。
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    Windows                               │
 │  ┌──────────────────────────────────────────────────┐   │
-│  │  Token Monitor Widget (Hub 主机模式)              │   │
+│  │  Docker Compose Hub              │   │
 │  │  ├── 本地扫描 → Codex ✅                          │   │
 │  │  └── 接收 WSL agent → Hermes ✅                   │   │
 │  └──────────────────────────────────────────────────┘   │
@@ -47,13 +47,12 @@ Hermes Agent 运行在 WSL 中，其会话数据存储在 `~/.hermes/state.db`�
 
 ## 配置步骤
 
-### 第一步：Windows 端开启 Hub 主机模式
+### 第一步：在 Windows 部署 Docker Compose Hub
 
-1. 打开 Token Monitor
-2. 进入 **设置（Settings）** → **多设备同步（Multi-device Sync）**
-3. 选择 **「在这台设备托管 Hub」**
-4. 在 **设备令牌** 中输入 `hermes-wsl` 并创建与该设备 ID 绑定的令牌
-5. 记录下 **Hub URL**（如 `http://192.168.x.x:17321`）和刚创建的 **设备令牌**
+1. 在 Windows 长期开机的机器上准备仓库根目录的 `.env`
+2. 设置 `TOKEN_MONITOR_SECRET`、MySQL 密码和 `MYSQL_ROOT_PASSWORD`
+3. 运行 `docker compose up -d`，并用 `curl http://127.0.0.1:17321/api/health` 检查 Hub
+4. 记录 **Hub URL**（如 `http://192.168.x.x:17321`）和统一 Hub 密钥
 
 ### 第二步：在 WSL 安装 Token Monitor
 
@@ -75,8 +74,8 @@ npm install
 # Hub 地址（Windows 端的 IP 和端口）
 TOKEN_MONITOR_HUB_URL=http://192.168.x.x:17321
 
-# 与 hermes-wsl 设备 ID 绑定的上报令牌（不要复用 admin/viewer 令牌）
-TOKEN_MONITOR_SECRET=与_hermes-wsl_绑定的设备令牌
+# 与 Windows Hub 相同的统一密钥
+TOKEN_MONITOR_SECRET=与_Hub_相同的密钥
 
 # 仅限可信 LAN/VPN 中暂时使用明文 HTTP；能用 HTTPS 时应删除
 TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1
@@ -88,8 +87,7 @@ TOKEN_MONITOR_DEVICE_ID=hermes-wsl
 
 > **💡 提示：** Windows 端和 WSL 端的设备 ID 不能相同。
 > Windows widget 通常使用主机名（如 `DESKTOP-XXX`），WSL agent 建议设为 `hermes-wsl` 或 `wsl-agent` 以避免冲突。
-> Hub 必须在 `TOKEN_MONITOR_INGEST_CREDENTIALS` 中为这个设备 ID 保存对应令牌。
-> Hub 必须在 `TOKEN_MONITOR_INGEST_CREDENTIALS` 中为这个设备 ID 配置对应令牌。
+> 单密钥模式下，Hub 不需要为每个设备单独创建令牌；所有设备使用同一个 Hub 密钥。
 
 ### 第四步：运行 Agent 验证
 

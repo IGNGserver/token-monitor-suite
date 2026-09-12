@@ -1,6 +1,6 @@
-# Token Monitor Hub — Docker deploy
+# Token Monitor Hub — canonical Docker Compose deployment
 
-Pull the published Hub image from GitHub Container Registry and run it with MySQL.
+This is the only supported Hub deployment. Pull the published Hub image from GitHub Container Registry and run it with MySQL.
 
 ## Requirements
 

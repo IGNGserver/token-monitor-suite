@@ -1,12 +1,11 @@
 {
   "name": "token-monitor",
   "productName": "Token Monitor",
-  "version": "0.45.0-rev.22",
+  "version": "0.45.0-rev.23",
   "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
   "main": "src/electron/main.js",
   "scripts": {
     "start": "electron .",
-    "hub": "node src/hub/server.js",
     "agent": "node src/agent/agent.js",
     "agent:once": "node src/agent/agent.js --once",
     "evidence:qodercn": "node scripts/collect-qoder-cn-evidence.js",
@@ -15,8 +14,7 @@
     "widget": "electron .",
     "dev": "electron .",
     "test": "node --test \"tests/**/*.test.js\"",
-    "sync:worker": "node scripts/sync-worker-shared.js",
-    "update:hub-build": "node scripts/update-hub-build.js && npm run sync:worker",
+    "update:hub-build": "node scripts/update-hub-build.js",
     "pack": "electron-builder --config scripts/electron-builder.config.js --dir",
     "pack:mac:widget": "TOKEN_MONITOR_WIDGET_ENABLED=1 TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING=1 npm run build:mac-widget && TOKEN_MONITOR_WIDGET_ENABLED=1 TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING=1 node scripts/macos-packaging.js && TOKEN_MONITOR_WIDGET_ENABLED=1 TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING=1 electron-builder --config scripts/electron-builder.config.js --dir",
     "pack:mac:widget:x64": "TOKEN_MONITOR_WIDGET_ENABLED=1 TOKEN_MONITOR_WIDGET_ARCH=x64 TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING=1 npm run build:mac-widget && TOKEN_MONITOR_WIDGET_ENABLED=1 TOKEN_MONITOR_WIDGET_ARCH=x64 TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING=1 node scripts/macos-packaging.js && TOKEN_MONITOR_WIDGET_ENABLED=1 TOKEN_MONITOR_WIDGET_ARCH=x64 TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING=1 electron-builder --config scripts/electron-builder.config.js --mac --x64 --dir --config.directories.output=dist/mac-x64",
@@ -32,9 +30,10 @@
     "verify:release-version": "node scripts/verify-release-version.js",
     "package:hub-compose": "node scripts/package-hub-compose.js",
     "lint": "eslint .",
-    "verify": "npm run lint && npm test",
+    "verify": "npm run verify:product-scope && npm run lint && npm test",
     "dist:win:dir": "electron-builder --config scripts/electron-builder.config.js --win dir --x64 --publish never",
-    "dist:win:prepackaged": "electron-builder --config scripts/electron-builder.config.js --prepackaged dist/win-unpacked --win nsis portable --x64 --publish never"
+    "dist:win:prepackaged": "electron-builder --config scripts/electron-builder.config.js --prepackaged dist/win-unpacked --win nsis portable --x64 --publish never",
+    "verify:product-scope": "node scripts/verify-product-scope.js"
   },
   "build": {
     "appId": "com.javis.tokenmonitor",
@@ -45,7 +44,6 @@
     "files": [
       "src/electron/**/*",
       "src/shared/**/*",
-      "src/hub/**/*",
       "assets/icon.png",
       "assets/icons/**/*",
       "package.json"

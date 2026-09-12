@@ -20,10 +20,9 @@ explicit insecure-HTTP opt-in. Android release builds disable cleartext traffic.
 Authentication failures and ingest bursts are rate-limited, and successful
 administrative changes emit structured audit records without secret material.
 
-The embedded desktop Hub creates a private admin token, a read-only viewer
-token, and individually provisioned device tokens in the unified credential
-store. Raw admin/device credentials cross into the renderer only after a direct
-user action to create or copy one.
+The supported deployment is the root Docker Compose Hub. The widget stores only
+the client-side Hub credentials it needs in the unified credential store;
+embedded-Hub provisioning is not part of the product boundary.
 
 ## P1-05: version-split product chains
 
@@ -42,24 +41,18 @@ user action to create or copy one.
 Node/MySQL deletion is now a soft removal: the current record disappears from
 stats but its baseline and immutable ledger identity remain. Re-ingesting the
 same ID therefore produces only a real delta. Device rename is an atomic admin
-operation that moves the record, baseline, usage events, and session rollups;
-the Worker exposes the same rename contract for its current-record store.
-Conflicting target identities return `409` instead of being merged.
-The embedded Electron Host also migrates its device-bound credential before
-re-listening and refreshes the live authorization policy after the identity
-move, so the old ID cannot be recreated with a stale token. Standalone Node and
-Worker deployments cannot mutate environment/secret configuration through a
-database operation; their dashboard and API documentation therefore require a
-new-ID credential to be provisioned and the client updated before the old
-binding is removed.
+operation that moves the record, baseline, usage events, and session rollups
+inside the Docker Compose Hub. Conflicting target identities return `409`
+instead of being merged. Hub credential changes remain an explicit deployment
+and administration operation; they are not inferred from a database mutation.
 
-## P1-08: Node/Worker feature contract
+## P1-08: Node Hub feature contract
 
 `/api/health`, `/api/capabilities`, and authenticated stats publish a versioned
-capability map. Node advertises custom range and pricing; Worker explicitly
-advertises both as unsupported. Web, Electron, and Android gate those features
-from the returned contract. Android connection testing verifies both a protected
-stats request and the authenticated capability/role response.
+capability map. The Docker Compose Node Hub advertises custom range and pricing,
+and Web, Electron, and Android gate those features from the returned contract.
+Android connection testing verifies both a protected stats request and the
+authenticated capability/role response.
 
 ## P2-03: qodercn Discord asset boundary
 

@@ -279,7 +279,9 @@ function createHub({
   const ownedPool = !repository && !pool;
   const activePool = pool || (repository ? null : createMySqlPool());
   const store = repository || createRepository(activePool);
+  const unifiedSecret = !String(adminSecret || '').trim() ? secret : '';
   let auth = authPolicy || createHubAuthPolicy({
+    unifiedSecret,
     adminSecret,
     viewerSecret,
     legacySecret: secret,
@@ -288,7 +290,11 @@ function createHub({
     allowLegacyIngest
   });
   const resolvedAccountCredentialKey = String(
-    accountCredentialKey || process.env.TOKEN_MONITOR_HUB_CREDENTIAL_KEY || ''
+    accountCredentialKey
+      || process.env.TOKEN_MONITOR_HUB_CREDENTIAL_KEY
+      || secret
+      || adminSecret
+      || ''
   ).trim();
   const accountService = accountsEnabled !== false
     && resolvedAccountCredentialKey
@@ -697,7 +703,7 @@ function createHub({
   function accountUnavailable(res) {
     return sendJson(res, 503, {
       error: 'hub_accounts_not_configured',
-      message: 'Set TOKEN_MONITOR_HUB_CREDENTIAL_KEY and run the hub account migration first.'
+      message: 'Set TOKEN_MONITOR_SECRET and run the Hub account migration first.'
     });
   }
 

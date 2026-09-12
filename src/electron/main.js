@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, Notification, powerMonitor, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
-const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir, normalizeHubUrl } = require('../shared/config');
+const { defaultDeviceId, loadDotEnv, pidFilePath, sharedDataDir, normalizeHubUrl } = require('../shared/config');
 const {
   CredentialStore,
   credentialSettingsForRenderer,
@@ -37,9 +37,6 @@ const { collectCustomRangeOnce, lookupModelPricing, normalizeHistoryIntervalMs }
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
-const { createHub } = require('../hub/server');
-const { createHubAuthPolicy } = require('../shared/hubAuth');
-const { validateDeviceRecordPayload } = require('../shared/wireValidation');
 const { requireSafeHubTransport } = require('../shared/hubTransport');
 const { parseBoolean, parseLimitProviders } = require('../shared/limitCollector');
 const { isAllowedCodexLoginUrl } = require('../shared/codexLogin');
@@ -100,7 +97,7 @@ const {
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
 const { aggregateDevices, aggregateHistory, applyProjectRollups } = require('../shared/usage');
 const { fetchBufferedWithTimeout, fetchWithTimeout } = require('../shared/http');
-const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
+const { postSyncPayload } = require('../shared/syncPayload');
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const { historyPreview, historyRevision } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
@@ -210,14 +207,13 @@ const CSP_HEADER = [
   "frame-ancestors 'none'"
 ].join('; ');
 const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
-const HUB_MODE_VALUES = new Set(['local', 'client', 'host']);
+const HUB_MODE_VALUES = new Set(['local', 'client']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
 const COLLECTION_MODE_VALUES = new Set(['live', 'interval']);
 const COLLECTION_INTERVAL_OPTIONS = [5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000];
 const DEFAULT_COLLECTION_INTERVAL_MS = 5 * 60 * 1000;
-const HUB_DEFAULT_PORT = 17321;
 const HUB_REQUEST_TIMEOUT_MS = 15 * 1000;
-// The Node/Worker hubs emit a heartbeat every 30 seconds by default. Allow two
+// The Docker Hub emits a heartbeat every 30 seconds by default. Allow two
 // missed beats before treating a half-open stream as disconnected.
 const SSE_IDLE_TIMEOUT_MS = 90 * 1000;
 const SSE_RETRY_BASE_MS = 1000;
@@ -309,13 +305,6 @@ function defaultSettings() {
   return {
     hubMode: envHubUrl ? 'client' : 'local',
     hubUrl: envHubUrl,
-    hubHostPort: Math.max(1, Math.min(65535, Number(process.env.TOKEN_MONITOR_PORT) || HUB_DEFAULT_PORT)),
-    // Default to TOKEN_MONITOR_SECRET so agents that already trust this env
-    // value (matching what the CLI hub uses) can connect to the widget's
-    // embedded hub without a fresh round of credential sharing. Falls back
-    // to a random secret generated in startEmbeddedHub() if env is empty.
-    hubHostSecret: process.env.TOKEN_MONITOR_SECRET || '',
-    hubHostAdminSecret: process.env.TOKEN_MONITOR_ADMIN_SECRET || '',
     secret: process.env.TOKEN_MONITOR_SECRET || '',
     allowInsecureHubHttp: parseBoolean(process.env.TOKEN_MONITOR_ALLOW_INSECURE_HTTP, false),
     windowBehavior,
@@ -398,8 +387,6 @@ function defaultSettings() {
     startAtLogin: false,
     automaticAppUpdates: false,
     language: 'auto',
-    hubAdminSecret: process.env.TOKEN_MONITOR_ADMIN_SECRET || '',
-    hubAccountCredentialKey: process.env.TOKEN_MONITOR_HUB_CREDENTIAL_KEY || '',
     appUpdate: {
       lastCheckedAt: null,
       lastKnownLatest: null,
@@ -474,14 +461,6 @@ function defaultLimitProviderOrder() {
   return parseLimitProviders().join(',');
 }
 
-function normalizeSecretSetting(value) {
-  let raw = String(value || '').trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
-
 function migrateLimitProviders(value) {
   // Saved provider selections are user intent. Normalize ids, but do not expand
   // older defaults into today's full provider list because the saved shape is
@@ -541,8 +520,9 @@ function normalizeTrayContent(value, fallback = 'tokens') {
 }
 
 function normalizeHubMode(value, fallback = 'local') {
-  const v = String(value || '').trim();
-  return HUB_MODE_VALUES.has(v) ? v : fallback;
+  const next = String(value || '').trim();
+  const safeFallback = HUB_MODE_VALUES.has(fallback) ? fallback : 'local';
+  return HUB_MODE_VALUES.has(next) ? next : safeFallback;
 }
 
 function normalizeLanguageSetting(value, fallback = 'auto') {
@@ -553,12 +533,6 @@ function normalizeLanguageSetting(value, fallback = 'auto') {
   if (lower === 'zh-tw' || lower.startsWith('zh-hant') || /-(tw|hk|mo)\b/i.test(raw)) return 'zh-TW';
   if (lower === 'zh-cn' || lower.startsWith('zh-hans') || /-(cn|sg|my)\b/i.test(raw)) return 'zh-CN';
   return LANGUAGE_VALUES.has(raw) ? raw : fallback;
-}
-
-function normalizeHubPort(value, fallback = HUB_DEFAULT_PORT) {
-  const n = Math.floor(Number(value));
-  if (!Number.isFinite(n) || n < 1 || n > 65535) return fallback;
-  return n;
 }
 
 function clampZoom(value) {
@@ -933,6 +907,7 @@ function loadCredentialSettings(saved) {
   try {
     const store = ensureCredentialStore();
     store.migrateLegacySettings(saved);
+    store.clearRemovedHubCredentials();
     store.clearLegacyLocalLimitCredentials();
     const stored = store.settingsCredentials();
     // Cleanup is intentionally independent from the migration marker. If the
@@ -1009,10 +984,17 @@ function readSettings() {
     const storedCredentials = loadCredentialSettings(saved);
     if (!saved.secret && defaults.secret) delete saved.secret;
     const merged = { ...defaults, ...saved, ...storedCredentials };
-    // Migrate older configs that predate hubMode: infer from hubUrl.
+    // Migrate older configs that predate hubMode: infer from hubUrl. Legacy
+    // Host mode is intentionally mapped to local because the widget no longer
+    // embeds or exposes a Hub server.
     if (saved.hubMode === undefined) {
       merged.hubMode = (saved.hubUrl && String(saved.hubUrl).trim()) ? 'client' : 'local';
     }
+    if (String(merged.hubMode || '').trim() === 'host') merged.hubMode = 'local';
+    delete merged.hubHostPort;
+    delete merged.hubHostSecret;
+    delete merged.hubHostAdminSecret;
+    delete merged.hubAccountCredentialKey;
     if (saved.limitProviders !== undefined) {
       merged.limitProviders = migrateLimitProviders(saved.limitProviders);
     }
@@ -1087,13 +1069,7 @@ function readSettings() {
     merged.language = normalizeLanguageSetting(merged.language);
     merged.currency = normalizeCurrency(merged.currency);
     merged.currencyRates = normalizeCurrencyOverrides(merged.currencyRates);
-    merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
-    merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
-    merged.hubHostAdminSecret = typeof merged.hubHostAdminSecret === 'string' ? merged.hubHostAdminSecret : '';
-    merged.hubAdminSecret = typeof merged.hubAdminSecret === 'string' ? merged.hubAdminSecret : '';
-    merged.hubAccountCredentialKey = typeof merged.hubAccountCredentialKey === 'string'
-      ? merged.hubAccountCredentialKey
-      : '';
+    delete merged.hubAdminSecret;
     merged.allowInsecureHubHttp = parseBoolean(merged.allowInsecureHubHttp, false);
     merged.floatingBubbleEnabled = parseBoolean(merged.floatingBubbleEnabled ?? merged.edgeDrawerEnabled, false);
     merged.archivedClientUsage = normalizeArchivedClientUsage(merged.archivedClientUsage);
@@ -1447,9 +1423,6 @@ function getDefaultTrayIcon() {
   return defaultTrayIcon;
 }
 const AGENT_PID_PATH = pidFilePath();
-let embeddedHub = null;
-let embeddedHubError = null;
-let embeddedHubUnsub = null;
 let modeQueue = Promise.resolve();
 let modeGeneration = 0;
 
@@ -1504,99 +1477,19 @@ function updateSyncHealth(channel, patch = {}) {
   publishSyncHealth();
 }
 
-function hostIngestCredentials() {
-  return ensureCredentialStore().readHubIngestCredentials();
-}
-
-function embeddedHubAuthPolicy() {
-  return createHubAuthPolicy({
-    adminSecret: settings.hubHostAdminSecret,
-    viewerSecret: settings.hubHostSecret,
-    ingestCredentials: hostIngestCredentials()
-  });
-}
-
-function refreshEmbeddedHubAuth() {
-  if (!embeddedHub?.hub) return;
-  embeddedHub.hub.replaceAuthPolicy(embeddedHubAuthPolicy());
-}
-
-function ensureEmbeddedHubCredentials() {
-  let settingsChanged = false;
-  if (!settings.hubHostSecret) {
-    settings.hubHostSecret = generateHubSecret();
-    settingsChanged = true;
-  }
-  if (!settings.hubHostAdminSecret) {
-    settings.hubHostAdminSecret = generateHubSecret();
-    settingsChanged = true;
-  }
-  if (!settings.hubAccountCredentialKey) {
-    settings.hubAccountCredentialKey = generateHubSecret();
-    settingsChanged = true;
-  }
-  const deviceId = String(settings.deviceId || defaultDeviceId()).trim();
-  let credentials = hostIngestCredentials();
-  const previousDeviceId = String(settings.lastPostedDeviceId || '').trim();
-  if (previousDeviceId && previousDeviceId !== deviceId && credentials[previousDeviceId]) {
-    // Revoke the old identity before the restarted Host begins listening. The
-    // collector moves the database baseline on its first tick; keeping the old
-    // token live until then would let an outdated client recreate that ID.
-    if (!ensureCredentialStore().renameHubIngestCredential(previousDeviceId, deviceId)) {
-      throw new Error(`Could not migrate Hub device credential from ${previousDeviceId} to ${deviceId}`);
-    }
-    credentials = hostIngestCredentials();
-  }
-  if (!credentials[deviceId]) {
-    if (!ensureCredentialStore().writeHubIngestCredential(deviceId, generateHubSecret())) {
-      throw new Error(`Could not persist Hub device credential for ${deviceId}`);
-    }
-  }
-  if (settingsChanged) saveSettings({ throwOnError: true });
-  return hostIngestCredentials();
-}
-
 function effectiveHubConfig() {
-  if (settings?.hubMode === 'host') {
-    const credentials = ensureEmbeddedHubCredentials();
-    return {
-      url: `http://127.0.0.1:${normalizeHubPort(settings.hubHostPort)}`,
-      secret: credentials[settings.deviceId] || ''
-    };
-  }
-  if (settings?.hubMode === 'client') {
-    const url = normalizeHubUrl(settings.hubUrl);
-    return {
-      url: url ? requireSafeHubTransport(url, { allowInsecureHttp: settings.allowInsecureHubHttp === true }) : null,
-      secret: settings.secret || ''
-    };
-  }
-  return { url: null, secret: '' };
-}
-
-function effectiveHubAdminConfig() {
-  if (settings?.hubMode === 'host') {
-    ensureEmbeddedHubCredentials();
-    return {
-      url: `http://127.0.0.1:${normalizeHubPort(settings.hubHostPort)}`,
-      secret: settings.hubHostAdminSecret || ''
-    };
-  }
-  if (settings?.hubMode === 'client') {
-    const url = normalizeHubUrl(settings.hubUrl);
-    return {
-      url: url ? requireSafeHubTransport(url, { allowInsecureHttp: settings.allowInsecureHubHttp === true }) : null,
-      secret: settings.hubAdminSecret || ''
-    };
-  }
-  return { url: null, secret: '' };
+  if (settings?.hubMode !== 'client') return { url: null, secret: '' };
+  const url = normalizeHubUrl(settings.hubUrl);
+  return {
+    url: url ? requireSafeHubTransport(url, { allowInsecureHttp: settings.allowInsecureHubHttp === true }) : null,
+    secret: settings.secret || ''
+  };
 }
 
 async function requestHubAccount(pathname, options = {}) {
-  if (settings?.hubMode === 'host' && !embeddedHub) await startEmbeddedHub();
-  const config = effectiveHubAdminConfig();
+  const config = effectiveHubConfig();
   if (!config.url) throw Object.assign(new Error('Hub is not configured'), { code: 'hub_not_configured' });
-  if (!config.secret) throw Object.assign(new Error('Hub administrator secret is not configured'), { code: 'hub_admin_not_configured' });
+  if (!config.secret) throw Object.assign(new Error('Hub secret is not configured'), { code: 'hub_secret_not_configured' });
   const headers = {
     authorization: `Bearer ${config.secret}`,
     ...(options.body !== undefined ? { 'content-type': 'application/json' } : {}),
@@ -1644,71 +1537,6 @@ function safeEffectiveHubConfig() {
   }
 }
 
-function hubDataFile() {
-  return path.join(app.getPath('userData'), 'hub-devices.json');
-}
-
-function sendHubPush(payload) {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    try { mainWindow.webContents.send('hub:push', payload); } catch (_) {}
-  }
-}
-
-function getHubInfo() {
-  const port = normalizeHubPort(settings?.hubHostPort);
-  return {
-    mode: settings?.hubMode || 'local',
-    port,
-    secret: settings?.hubHostSecret || '',
-    credentialDeviceIds: Object.keys(hostIngestCredentials()).sort(),
-    listening: Boolean(embeddedHub),
-    listeningPort: embeddedHub ? embeddedHub.port : null,
-    error: embeddedHubError,
-    lanAddresses: lanIpv4Addresses()
-  };
-}
-
-async function startEmbeddedHub() {
-  if (embeddedHub) return embeddedHub;
-  embeddedHubError = null;
-  const ingestCredentials = ensureEmbeddedHubCredentials();
-  const port = normalizeHubPort(settings.hubHostPort);
-  try {
-    const hub = createHub({
-      port,
-      host: '0.0.0.0',
-      adminSecret: settings.hubHostAdminSecret,
-      viewerSecret: settings.hubHostSecret,
-      accountCredentialKey: settings.hubAccountCredentialKey,
-      ingestCredentials,
-      allowInsecureHttp: true,
-      dataFile: hubDataFile(),
-      logger: {
-        error: (err) => console.log(`[hub] ${err?.message || err}`),
-        info: (message) => console.log(`[hub] ${message}`)
-      }
-    });
-    await hub.start();
-    embeddedHub = { hub, port };
-    console.log(`[hub] listening on 0.0.0.0:${port}`);
-    sendHubPush({ type: 'listening', info: getHubInfo() });
-    return embeddedHub;
-  } catch (error) {
-    embeddedHubError = { code: error.code || 'error', message: error.message, port };
-    console.log(`[hub] failed to start on port ${port}: ${error.message}`);
-    sendHubPush({ type: 'error', info: getHubInfo() });
-    return null;
-  }
-}
-
-async function stopEmbeddedHub() {
-  if (!embeddedHub) return;
-  const handle = embeddedHub;
-  embeddedHub = null;
-  try { await handle.hub.stop(); } catch (_) {}
-  sendHubPush({ type: 'stopped', info: getHubInfo() });
-}
-
 function isExternalAgentActive() {
   try {
     const raw = fs.readFileSync(AGENT_PID_PATH, 'utf8').trim();
@@ -1720,20 +1548,6 @@ function isExternalAgentActive() {
 }
 
 async function renameDeviceOnHub(previousDeviceId, nextDeviceId, options = {}) {
-  if (settings?.hubMode === 'host' && embeddedHub?.hub) {
-    const result = await embeddedHub.hub.renameDevice(previousDeviceId, nextDeviceId);
-    if (result?.reason === 'not_found' || result?.reason === 'baseline_missing') return false;
-    if (!result?.renamed) throw new Error(`Hub device rename failed: ${result?.reason || 'unknown error'}`);
-    const credentials = hostIngestCredentials();
-    const currentSecret = credentials[previousDeviceId];
-    if (currentSecret) {
-      if (!ensureCredentialStore().renameHubIngestCredential(previousDeviceId, nextDeviceId)) {
-        throw new Error('Hub device was renamed, but its local credential could not be migrated');
-      }
-      refreshEmbeddedHubAuth();
-    }
-    return true;
-  }
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return false;
   const base = hubUrl.replace(/\/$/, '');
@@ -1893,114 +1707,10 @@ function startSyncCollector() {
   publishSyncHealth();
 }
 
-// Host mode: this device's own usage goes straight into the embedded hub's store
-// in-process. No loopback HTTP, so a local firewall / proxy that blocks Token
-// Monitor's own outbound connections can't zero out the widget's own usage (#17).
-function startHostCollector() {
-  stopSyncCollector();
-  updateSyncHealth('local', { state: 'collecting', failureCode: null });
-  const sink = {
-    async enqueue(summary) {
-      if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
-      const visibleSummary = summary;
-      lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
-      updateSyncHealth('local', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null });
-      if (!embeddedHub) {
-        updateSyncHealth('upload', {
-          state: 'error',
-          lastFailureAt: new Date().toISOString(),
-          failureCode: 'hub_not_running'
-        });
-        return;
-      }
-      updateSyncHealth('upload', {
-        state: 'uploading',
-        lastAttemptAt: new Date().toISOString(),
-        failureCode: null,
-        status: null
-      });
-      try {
-        const stale = settings.lastPostedDeviceId;
-        if (stale && stale !== visibleSummary.deviceId) {
-          const renamed = await embeddedHub.hub.renameDevice(stale, visibleSummary.deviceId);
-          if (!renamed.renamed && renamed.reason !== 'not_found') {
-            throw new Error(`device rename failed: ${renamed.reason || 'unknown'}`);
-          }
-          const credentials = hostIngestCredentials();
-          if (credentials[stale]) {
-            if (!ensureCredentialStore().renameHubIngestCredential(stale, visibleSummary.deviceId)) {
-              throw new Error('device was renamed, but its local credential could not be migrated');
-            }
-            refreshEmbeddedHubAuth();
-          }
-        }
-        const payload = syncPayload(visibleSummary);
-        if (payload.allTimeProjectsOmitted === true) {
-          console.log('[host-ingest] all-time project breakdown omitted to reduce the sync snapshot size');
-        }
-        await embeddedHub.hub.ingest(payload);
-        if (settings.lastPostedDeviceId !== visibleSummary.deviceId) {
-          settings.lastPostedDeviceId = visibleSummary.deviceId;
-          saveSettings();
-        }
-        updateSyncHealth('upload', {
-          state: 'ok',
-          lastSuccessAt: new Date().toISOString(),
-          failureCode: null,
-          status: null,
-          consecutiveFailures: 0,
-          nextRetryAt: null,
-          pendingRevision: null,
-          inFlightAgeMs: 0
-        });
-      } catch (error) {
-        updateSyncHealth('upload', {
-          state: 'error',
-          lastFailureAt: new Date().toISOString(),
-          failureCode: stableSyncFailureCode(error, 'hub_ingest_failed'),
-          status: Number.isInteger(Number(error?.status)) ? Number(error.status) : null
-        });
-        console.log(`[host-ingest] failed: ${error.message}`);
-      }
-    }
-  };
-  deviceRuntimeHandle = createDeviceRuntime({
-    envelope: electronDeviceEnvelope(),
-    transformUsage: summaryWithArchivedClientUsage,
-    usageOptions: electronUsageConfig('host-collector'),
-    sink,
-    onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
-  });
-}
-
-function stopHostStats() {
-  if (embeddedHubUnsub) { try { embeddedHubUnsub(); } catch (_) {} }
-  embeddedHubUnsub = null;
-}
-
-async function startHostStats() {
-  stopHostStats();
-  if (!embeddedHub) return;
-  // Host mode presents the same multi-device hub aggregate as connecting to a
-  // remote hub, so it reuses the renderer's 'sync' status path (Live / synced
-  // data). The in-process vs loopback distinction is internal to fetchStats.
-  mode = 'sync';
-  sendStatus(true);
-  const emit = (stats, reason = 'hub') => {
-    updateDiscordRpc(stats, settings.currency);
-    sendPush({ event: 'stats', data: { type: 'stats', reason, stats, at: new Date().toISOString() } });
-  };
-  embeddedHubUnsub = embeddedHub.hub.onStats((stats, reason) => emit(stats, reason || 'hub'));
-  // Prime the renderer with the current snapshot so it isn't blank until the
-  // first collector tick lands.
-  emit(await embeddedHub.hub.getStats(), 'snapshot');
-}
-
 // Detection status is about this machine's local files, so stamp the freshly
 // collected local clientStatus AND wslStatus onto the local device in whatever
 // stats we hand the renderer. This keeps the 采集 tags + WSL panel correct in
-// sync/host mode without depending on the hub (or a remote Worker) being
-// redeployed to preserve these fields.
+// sync mode without depending on the Hub being redeployed to preserve these fields.
 function injectLocalDeviceStatus(stats) {
   if (!stats || !Array.isArray(stats.devices)) return stats;
   if (lastCollectedDevice) {
@@ -2018,7 +1728,7 @@ function injectLocalDeviceStatus(stats) {
   // it as a display-only sibling instead of mutating periods.allTime.sessions: the exporter
   // writes periods verbatim under a lossless contract, so the export must keep the true
   // aggregate. The renderer overlays this onto periods.allTime for the session view.
-  // Only sync/host mode needs this: in local mode periods.allTime.sessions already holds the
+  // Only sync mode needs this: in local mode periods.allTime.sessions already holds the
   // full native list, so building the sibling there would just ship the unbounded map twice.
   if (mode !== 'local' && stats.periods?.allTime) {
     stats.allTimeSessionsView = mergedLocalAllTimeSessions(stats.periods, lastCollectedDevice);
@@ -2322,13 +2032,6 @@ function parseSseChunk(chunk) {
 
 async function fetchHubStatsSnapshot(options = {}) {
   const isCurrent = typeof options.isCurrent === 'function' ? options.isCurrent : () => true;
-  if (settings.hubMode === 'host' && embeddedHub) {
-    const stats = injectLocalDeviceStatus(await embeddedHub.hub.getStats());
-    if (isCurrent()) {
-      updateSyncHealth('rest', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null, status: null });
-    }
-    return stats;
-  }
   const config = safeEffectiveHubConfig();
   if (!config.ok) {
     const error = new Error('Hub transport configuration is unavailable');
@@ -2613,7 +2316,7 @@ function currentWindowToggleShortcutStatus() {
 function settingsForRenderer() {
   const safeSettings = stripLegacyLocalLimitSettings(settings);
   const redactedCredentials = credentialSettingsForRenderer(settings, {
-    expose: ['hubHostSecret', 'secret']
+    expose: ['secret']
   });
   return {
     ...safeSettings,
@@ -2623,7 +2326,7 @@ function settingsForRenderer() {
       systemGlass: settings?.systemGlass !== false
     }).kind,
     ...redactedCredentials,
-    hubAdminConfigured: Boolean(settings?.hubAdminSecret || (settings?.hubMode === 'host' && settings?.hubHostAdminSecret)),
+    hubAdminConfigured: Boolean(settings?.secret),
     limitsAuthority: 'hub',
     centralQuotaSync: true,
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
@@ -2870,41 +2573,14 @@ function startMode() {
   stopLocalCollector();
   stopStatsStream();
   stopRestBootstrap();
-  stopHostStats();
   stopSyncCollector();
   const requestedGeneration = ++modeGeneration;
-  // Serialize the hub-side work so rapid UI events (mode change immediately
-  // followed by a port edit or secret regenerate) reconcile in order rather
-  // than racing — otherwise an in-flight start could finish with the old
-  // port/secret after the UI already advertises the new ones.
+  // Serialize the Hub-side work so rapid UI events reconcile in order rather
+  // than allowing an in-flight startup to finish against stale settings.
   modeQueue = modeQueue.then(async () => {
     if (requestedGeneration !== modeGeneration) {
       return { ok: false, superseded: true, generation: requestedGeneration };
     }
-    if (settings.hubMode === 'host') {
-      await stopEmbeddedHub();
-      const handle = await startEmbeddedHub();
-      if (settings.hubMode !== 'host') {
-        await stopEmbeddedHub();
-        return { ok: false, superseded: true, generation: requestedGeneration };
-      }
-      if (!handle) {
-        // Bind failed (e.g. EADDRINUSE). The error is already surfaced via
-        // hub:push; fall back to the local collector so the widget still
-        // shows data while the user fixes the port.
-        startLocalCollector();
-        return {
-          ok: false,
-          mode: 'local-fallback',
-          code: embeddedHubError?.code || 'hub_start_failed',
-          generation: requestedGeneration
-        };
-      }
-      await startHostStats();
-      startHostCollector();
-      return { ok: true, mode: 'host', generation: requestedGeneration };
-    }
-    await stopEmbeddedHub();
     if (settings.hubMode === 'client') {
       startSyncCollector();
       // The first REST snapshot and the long-lived SSE supervisor are both
@@ -2937,10 +2613,6 @@ function restartDeviceRuntimeForMode() {
     startLocalCollector();
     return;
   }
-  if (settings.hubMode === 'host' && embeddedHub) {
-    startHostCollector();
-    return;
-  }
   if (settings.hubMode === 'client') startSyncCollector();
   else startLocalCollector();
 }
@@ -2953,9 +2625,7 @@ function stopAll() {
   stopLocalCollector({ skipCloseWatchers: true });
   stopStatsStream();
   stopRestBootstrap();
-  stopHostStats();
   stopSyncCollector({ skipCloseWatchers: true });
-  void stopEmbeddedHub();
   stopDiscordRpc();
   if (tray && !tray.isDestroyed()) tray.destroy();
   tray = null;
@@ -3064,9 +2734,6 @@ async function fetchStats(options = {}) {
     if (localStats) return localStats;
     return withHistoryPreview(aggregateDevices(localDevice ? [localDevice] : [], 0), localDevice ? [localDevice] : []);
   }
-  if (settings.hubMode === 'host' && embeddedHub) {
-    return injectLocalDeviceStatus(await embeddedHub.hub.getStats());
-  }
   try {
     return await fetchHubStatsSnapshot();
   } catch (error) {
@@ -3150,7 +2817,7 @@ async function recoverNow(options = {}) {
       } catch (error) {
         result.upload = { ok: false, code: stableSyncFailureCode(error, 'upload_failed'), status: error?.status || null };
       }
-    } else if (mode === 'local' || settings?.hubMode === 'host') {
+    } else if (mode === 'local') {
       result.upload = { ok: true, code: 'not_applicable' };
     } else {
       result.upload = { ok: false, code: 'upload_scheduler_unavailable' };
@@ -3957,11 +3624,6 @@ async function getDashboardHistory() {
     // renderer and was dropped, stranding the dashboard on its empty state.
     return aggregateHistory(localDevice ? [localDevice] : []);
   }
-  if (settings.hubMode === 'host' && embeddedHub) {
-    // Host mode reads its own hub store in-process, so the dashboard history
-    // doesn't depend on a loopback fetch the local firewall/proxy might block.
-    return embeddedHub.hub.getHistory();
-  }
   const config = safeEffectiveHubConfig();
   if (!config.ok) {
     const error = new Error('Hub history transport is unavailable');
@@ -4111,6 +3773,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.customModelPricing;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
     if (patch.hubUrl !== undefined) normalizedPatch.hubUrl = normalizeHubUrl(patch.hubUrl);
+    delete normalizedPatch.hubAdminSecret;
     if (patch.allowInsecureHubHttp !== undefined) {
       normalizedPatch.allowInsecureHubHttp = parseBoolean(patch.allowInsecureHubHttp, false);
     }
@@ -4122,9 +3785,9 @@ app.whenReady().then(() => {
     if (requestedHubMode === 'client' && requestedHubUrl) {
       requireSafeHubTransport(requestedHubUrl, { allowInsecureHttp: allowInsecureHubHttp === true });
     }
-    if (patch.hubAdminSecret !== undefined) normalizedPatch.hubAdminSecret = normalizeSecretSetting(patch.hubAdminSecret);
-    if (patch.hubHostAdminSecret !== undefined) normalizedPatch.hubHostAdminSecret = normalizeSecretSetting(patch.hubHostAdminSecret);
-    if (patch.hubHostSecret !== undefined) normalizedPatch.hubHostSecret = normalizeSecretSetting(patch.hubHostSecret);
+    delete normalizedPatch.hubHostPort;
+    delete normalizedPatch.hubHostSecret;
+    delete normalizedPatch.hubHostAdminSecret;
     delete normalizedPatch.hubAccountCredentialKey;
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
@@ -4135,10 +3798,6 @@ app.whenReady().then(() => {
       ...settings,
       ...normalizedPatch,
       hubMode: patch.hubMode !== undefined ? normalizeHubMode(patch.hubMode, settings.hubMode) : settings.hubMode,
-      hubHostPort: patch.hubHostPort !== undefined ? normalizeHubPort(patch.hubHostPort, settings.hubHostPort) : settings.hubHostPort,
-      hubHostSecret: patch.hubHostSecret !== undefined ? normalizeSecretSetting(patch.hubHostSecret) : (settings.hubHostSecret || ''),
-      hubHostAdminSecret: patch.hubHostAdminSecret !== undefined ? normalizeSecretSetting(patch.hubHostAdminSecret) : (settings.hubHostAdminSecret || ''),
-      hubAdminSecret: patch.hubAdminSecret !== undefined ? normalizeSecretSetting(patch.hubAdminSecret) : (settings.hubAdminSecret || ''),
       deviceId: (patch.deviceId !== undefined ? String(patch.deviceId).trim() : settings.deviceId) || defaultDeviceId(),
       clients: patch.clients !== undefined ? clientsCsvForSetting(patch.clients, '') : clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS),
       refreshMs: Math.max(5000, Number(patch.refreshMs ?? settings.refreshMs ?? 15000)),
@@ -4459,43 +4118,33 @@ app.whenReady().then(() => {
     if (mode !== 'local') {
       let hubError = null;
       try {
-        let body;
-        if (settings.hubMode === 'host' && embeddedHub?.hub?.getUsageRange) {
-          body = await embeddedHub.hub.getUsageRange({
-            startDate: range.startDate,
-            endDate: range.endDate,
-            startHour: range.startHour,
-            endHour: range.endHour
-          });
-        } else {
-          const config = safeEffectiveHubConfig();
-          if (!config.ok) {
-            const error = new Error('Hub usage-range transport is unavailable');
-            error.code = config.error?.code || 'hub_range_transport_unavailable';
-            throw error;
-          }
-          const { url: hubUrl, secret } = config;
-          if (!hubUrl) {
-            const error = new Error('Hub usage-range is not configured');
-            error.code = 'hub_not_configured';
-            throw error;
-          }
-          const params = new URLSearchParams({
-            startDate: range.startDate,
-            endDate: range.endDate,
-            startHour: String(range.startHour),
-            endHour: String(range.endHour)
-          });
-          const url = `${hubUrl.replace(/\/$/, '')}/api/usage/range?${params}`;
-          const response = await fetchBufferedWithTimeout(fetch, url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} }, HUB_REQUEST_TIMEOUT_MS);
-          if (!response.ok) {
-            const error = new Error('Hub usage-range request failed');
-            error.status = response.status;
-            error.code = stableSyncFailureCode(error, 'hub_range_failed');
-            throw error;
-          }
-          body = await response.json();
+        const config = safeEffectiveHubConfig();
+        if (!config.ok) {
+          const error = new Error('Hub usage-range transport is unavailable');
+          error.code = config.error?.code || 'hub_range_transport_unavailable';
+          throw error;
         }
+        const { url: hubUrl, secret } = config;
+        if (!hubUrl) {
+          const error = new Error('Hub usage-range is not configured');
+          error.code = 'hub_not_configured';
+          throw error;
+        }
+        const params = new URLSearchParams({
+          startDate: range.startDate,
+          endDate: range.endDate,
+          startHour: String(range.startHour),
+          endHour: String(range.endHour)
+        });
+        const url = `${hubUrl.replace(/\/$/, '')}/api/usage/range?${params}`;
+        const response = await fetchBufferedWithTimeout(fetch, url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} }, HUB_REQUEST_TIMEOUT_MS);
+        if (!response.ok) {
+          const error = new Error('Hub usage-range request failed');
+          error.status = response.status;
+          error.code = stableSyncFailureCode(error, 'hub_range_failed');
+          throw error;
+        }
+        const body = await response.json();
         updateSyncHealth('rest', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null, status: null });
         const hubPeriod = {
           totalTokens: Math.round(Number(body.totalTokens) || 0),
@@ -4626,35 +4275,6 @@ app.whenReady().then(() => {
     force: Boolean(options?.force),
     providerIds: Array.isArray(options?.providerIds) ? options.providerIds : null
   }));
-  ipcMain.handle('hub:getInfo', () => getHubInfo());
-  ipcMain.handle('hub:regenerateSecret', () => {
-    settings.hubHostSecret = generateHubSecret();
-    saveSettings({ throwOnError: true });
-    if (settings.hubMode === 'host') startMode();
-    return getHubInfo();
-  });
-  ipcMain.handle('hub:provisionDeviceCredential', (_event, rawDeviceId) => {
-    const deviceId = String(rawDeviceId || '').trim();
-    validateDeviceRecordPayload({ deviceId });
-    const token = generateHubSecret();
-    if (!ensureCredentialStore().writeHubIngestCredential(deviceId, token)) {
-      throw new Error('Could not persist the device credential');
-    }
-    if (settings.hubMode === 'host') startMode();
-    return { ok: true, deviceId, token, info: getHubInfo() };
-  });
-  ipcMain.handle('hub:revokeDeviceCredential', (_event, rawDeviceId) => {
-    const deviceId = String(rawDeviceId || '').trim();
-    validateDeviceRecordPayload({ deviceId });
-    if (deviceId === settings.deviceId) throw new Error('The host device credential cannot be revoked while it is active');
-    const removed = ensureCredentialStore().removeHubIngestCredential(deviceId);
-    if (removed && settings.hubMode === 'host') startMode();
-    return { ok: removed, deviceId, info: getHubInfo() };
-  });
-  ipcMain.handle('hub:revealAdminCredential', () => {
-    ensureEmbeddedHubCredentials();
-    return { token: settings.hubHostAdminSecret };
-  });
   ipcMain.handle('app:getInfo', () => ({
     version: app.getVersion(),
     platform: process.platform,

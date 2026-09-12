@@ -25,7 +25,7 @@ Android 正式包必须使用长期保存的签名密钥。不要把 keystore �
 
 ## 发布新版本
 
-1. 在根项目、Worker 和锁文件中同步版本号，例如 `0.37.23-rev.1`，然后运行：
+1. 在根项目和锁文件中同步版本号，例如 `0.37.23-rev.1`，然后运行：
 
    ```bash
    npm run verify:release-version

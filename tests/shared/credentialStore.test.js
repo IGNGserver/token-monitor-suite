@@ -22,93 +22,78 @@ function tempDataDir(t) {
   return dir;
 }
 
-test('stores only Hub and device credentials in a versioned document', (t) => {
+test('stores only client Hub credentials in a versioned document', (t) => {
   const dataDir = tempDataDir(t);
   const store = new CredentialStore(dataDir);
   store.replaceSettingsCredentials({
-    hubHostSecret: 'host-secret',
-    hubHostAdminSecret: 'admin-secret',
     secret: 'client-secret',
     hubAdminSecret: 'remote-admin-secret',
-    hubAccountCredentialKey: 'account-key',
+    hubHostSecret: 'removed-host-secret',
     deepseekApiKey: 'legacy-provider-key'
   });
 
   const document = JSON.parse(fs.readFileSync(path.join(dataDir, 'credentials.json'), 'utf8'));
   assert.equal(document.version, 1);
-  assert.equal(document.credentials.hub.hostSecret, 'host-secret');
-  assert.equal(document.credentials.hub.adminSecret, 'admin-secret');
   assert.equal(document.credentials.hub.clientSecret, 'client-secret');
-  assert.equal(document.credentials.hub.remoteAdminSecret, 'remote-admin-secret');
-  assert.equal(document.credentials.hub.accountCredentialKey, 'account-key');
+  assert.equal(document.credentials.hub.remoteAdminSecret, undefined);
+  assert.equal(document.credentials.hub.hostSecret, undefined);
   assert.equal(document.credentials.providers, undefined);
   assert.equal(document.migrations.settings, 1);
 
-  assert.deepEqual(store.settingsCredentials(), {
-    hubHostSecret: 'host-secret',
-    hubHostAdminSecret: 'admin-secret',
-    secret: 'client-secret',
-    hubAdminSecret: 'remote-admin-secret',
-    hubAccountCredentialKey: 'account-key'
-  });
+  assert.deepEqual(store.settingsCredentials(), { secret: 'client-secret' });
 });
 
 test('removes credential fields from settings without mutating runtime state', () => {
   const settings = {
     language: 'auto',
-    hubHostSecret: 'secret',
+    secret: 'secret',
     hubAdminSecret: 'admin-secret',
     localProviderCredential: 'legacy-secret'
   };
   const clean = stripCredentialSettings(settings);
   assert.deepEqual(clean, { language: 'auto', localProviderCredential: 'legacy-secret' });
-  assert.equal(settings.hubHostSecret, 'secret');
+  assert.equal(settings.secret, 'secret');
   assert.equal(settings.hubAdminSecret, 'admin-secret');
   assert.equal(hasCredentialSettings(settings), true);
   assert.equal(hasCredentialSettings(clean), false);
 });
 
-test('renderer redaction defaults new credential fields to hidden with explicit exceptions', () => {
+test('renderer redaction exposes only explicitly allowed client credentials', () => {
   const settings = {
-    hubHostSecret: 'host-secret',
     secret: 'client-secret',
     hubAdminSecret: 'admin-secret',
-    hubAccountCredentialKey: 'account-key',
+    hubHostSecret: 'removed-host-secret',
     deepseekApiKey: 'provider-secret'
   };
-  const redacted = credentialSettingsForRenderer(settings, { expose: ['hubHostSecret', 'secret'] });
-  assert.equal(redacted.hubHostSecret, 'host-secret');
-  assert.equal(redacted.secret, 'client-secret');
-  assert.equal(redacted.hubAdminSecret, '');
-  assert.equal(redacted.hubAccountCredentialKey, '');
-  assert.equal(redacted.deepseekApiKey, undefined);
+  const redacted = credentialSettingsForRenderer(settings, { expose: ['secret'] });
+  assert.deepEqual(redacted, { secret: 'client-secret' });
 });
 
 test('migrates legacy settings once and keeps an existing credential authoritative', (t) => {
   const store = new CredentialStore(tempDataDir(t));
   store.writeDocument({
     version: 1,
-    credentials: { hub: { hostSecret: 'current-key' } },
+    credentials: { hub: { clientSecret: 'current-key' } },
     migrations: {}
   });
 
-  const first = store.migrateLegacySettings({ hubHostSecret: 'legacy-key', hubAdminSecret: 'legacy-admin' });
+  const first = store.migrateLegacySettings({ secret: 'legacy-key', hubAdminSecret: 'legacy-admin' });
   assert.equal(first.migrated, true);
-  assert.equal(store.settingsCredentials().hubHostSecret, 'current-key');
-  assert.equal(store.settingsCredentials().hubAdminSecret, 'legacy-admin');
+  assert.equal(store.settingsCredentials().secret, 'current-key');
+  assert.equal(store.settingsCredentials().hubAdminSecret, undefined);
 
   const second = store.migrateLegacySettings({ hubAdminSecret: 'stale-admin' });
   assert.equal(second.migrated, false);
-  assert.equal(store.settingsCredentials().hubAdminSecret, 'legacy-admin');
+  assert.equal(store.settingsCredentials().hubAdminSecret, undefined);
 });
 
 test('clearing a Hub credential removes it without resurrecting legacy data', (t) => {
   const store = new CredentialStore(tempDataDir(t));
-  store.migrateLegacySettings({ hubAdminSecret: 'legacy-admin' });
-  store.replaceSettingsCredentials({ hubAdminSecret: '' });
-  assert.equal(store.settingsCredentials().hubAdminSecret, undefined);
-  assert.equal(store.migrateLegacySettings({ hubAdminSecret: 'legacy-admin' }).migrated, false);
-  assert.equal(store.settingsCredentials().hubAdminSecret, undefined);
+  store.migrateLegacySettings({ secret: 'legacy-key' });
+  store.replaceSettingsCredentials({ secret: '' });
+  assert.equal(store.settingsCredentials().secret, undefined);
+  assert.equal(store.migrateLegacySettings({ secret: 'legacy-key' }).migrated, false);
+  assert.equal(store.settingsCredentials().secret, undefined);
 });
 
 test('clears all legacy local provider credentials and invalidates the migration once', (t) => {
@@ -116,7 +101,7 @@ test('clears all legacy local provider credentials and invalidates the migration
   store.writeDocument({
     version: 1,
     credentials: {
-      hub: { hostSecret: 'keep-me' },
+      hub: { clientSecret: 'keep-me' },
       providers: {
         deepseek: { apiKey: 'old-key' },
         qoder: { cookie: 'old-cookie', autoCache: [{ cookie: 'old-cache' }] },
@@ -128,10 +113,37 @@ test('clears all legacy local provider credentials and invalidates the migration
 
   const first = store.clearLegacyLocalLimitCredentials();
   assert.equal(first.cleared, true);
-  assert.equal(store.settingsCredentials().hubHostSecret, 'keep-me');
+  assert.equal(store.settingsCredentials().secret, 'keep-me');
   assert.equal(store.readDocument().credentials.providers, undefined);
   assert.equal(store.readDocument().migrations.localLimitCredentials, 1);
   assert.equal(store.clearLegacyLocalLimitCredentials().cleared, false);
+});
+
+test('clears removed embedded Hub credentials while preserving client credentials', (t) => {
+  const store = new CredentialStore(tempDataDir(t));
+  store.writeDocument({
+    version: 1,
+    credentials: {
+      hub: {
+        hostSecret: 'removed-host-secret',
+        adminSecret: 'removed-admin-secret',
+        accountCredentialKey: 'removed-account-key',
+        ingestCredentials: { device: 'removed-device-secret' },
+        clientSecret: 'keep-client-secret',
+        remoteAdminSecret: 'keep-remote-admin-secret'
+      }
+    },
+    migrations: {}
+  });
+
+  const first = store.clearRemovedHubCredentials();
+  assert.equal(first.cleared, true);
+  const document = store.readDocument();
+  assert.deepEqual(document.credentials.hub, {
+    clientSecret: 'keep-client-secret'
+  });
+  assert.equal(document.migrations.removedHubCredentials, 1);
+  assert.equal(store.clearRemovedHubCredentials().cleared, false);
 });
 
 test('writes private JSON atomically with owner-only permissions', (t) => {
@@ -190,7 +202,7 @@ test('rolls back a credential clear when the settings write fails after commit',
   const dataDir = tempDataDir(t);
   const settingsPath = path.join(dataDir, 'settings.json');
   const store = new CredentialStore(dataDir);
-  const previousSettings = { language: 'en', hubAdminSecret: 'old-key' };
+  const previousSettings = { language: 'en', secret: 'old-key' };
   store.replaceSettingsCredentials(previousSettings);
   writePrivateJsonAtomic(settingsPath, stripCredentialSettings(previousSettings));
 
@@ -208,33 +220,10 @@ test('rolls back a credential clear when the settings write fails after commit',
   assert.throws(() => persistSettingsAndCredentials({
     store,
     settingsPath,
-    settings: { language: 'zh-TW', hubAdminSecret: '' },
+    settings: { language: 'zh-TW', secret: '' },
     previousSettings,
     writeSettings
   }), /settings write failed after rename/);
-  assert.equal(store.settingsCredentials().hubAdminSecret, 'old-key');
+  assert.equal(store.settingsCredentials().secret, 'old-key');
   assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), { language: 'en' });
-});
-
-test('stores device-bound Hub credentials without exposing them as settings', (t) => {
-  const store = new CredentialStore(tempDataDir(t));
-  assert.equal(store.writeHubIngestCredential('device-a', 'token-a'), true);
-  assert.equal(store.writeHubIngestCredential('device-b', 'token-b'), true);
-  assert.deepEqual(store.readHubIngestCredentials(), { 'device-a': 'token-a', 'device-b': 'token-b' });
-  assert.equal(store.settingsCredentials().hubHostIngestCredentials, undefined);
-  assert.equal(store.removeHubIngestCredential('device-a'), true);
-  assert.deepEqual(store.readHubIngestCredentials(), { 'device-b': 'token-b' });
-  assert.equal(store.writeHubIngestCredential('__proto__', 'unsafe'), false);
-});
-
-test('renames a device-bound Hub credential in one document update', (t) => {
-  const store = new CredentialStore(tempDataDir(t));
-  assert.equal(store.writeHubIngestCredential('before', 'bound-token'), true);
-
-  assert.equal(store.renameHubIngestCredential('before', 'after'), true);
-  assert.deepEqual(store.readHubIngestCredentials(), { after: 'bound-token' });
-
-  store.writeHubIngestCredential('existing', 'existing-token');
-  assert.equal(store.renameHubIngestCredential('after', 'existing'), true);
-  assert.deepEqual(store.readHubIngestCredentials(), { existing: 'existing-token' });
 });

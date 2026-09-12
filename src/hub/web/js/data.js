@@ -258,7 +258,7 @@ export function agentRuntimeLabel(runtime) {
   const value = raw.toLowerCase();
   if (value === 'widget' || value.includes('electron') || value.includes('widget')) return 'widget';
   if (value.includes('headless') || value === 'agent') return 'headless-agent';
-  if (value.includes('embedded')) return 'embedded-hub';
+  if (value.includes('embedded')) return 'legacy';
   return raw;
 }
 

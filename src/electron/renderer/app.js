@@ -281,8 +281,6 @@ Object.assign(els, {
   trayOptions: document.getElementById('trayOptions'),
   hubModeOptions: document.getElementById('hubModeOptions'),
   hubClientFields: document.getElementById('hubClientFields'),
-  hubHostFields: document.getElementById('hubHostFields'),
-  hubAdminSecretInput: document.getElementById('hubAdminSecretInput'),
   hubAccountsSettingsToggle: document.getElementById('hubAccountsSettingsToggle'),
   hubAccountsSettingsDetails: document.getElementById('hubAccountsSettingsDetails'),
   hubAccountsStatus: document.getElementById('hubAccountsStatus'),
@@ -294,21 +292,9 @@ Object.assign(els, {
   hubAccountsRefreshButton: document.getElementById('hubAccountsRefreshButton'),
   hubAccountError: document.getElementById('hubAccountError'),
   hubAccountsList: document.getElementById('hubAccountsList'),
-  hubPortInput: document.getElementById('hubPortInput'),
-  hubSecretInput: document.getElementById('hubSecretInput'),
-  hubSecretCopyButton: document.getElementById('hubSecretCopyButton'),
-  hubSecretRegenButton: document.getElementById('hubSecretRegenButton'),
-  hubAdminSecretCopyButton: document.getElementById('hubAdminSecretCopyButton'),
-  hubDeviceCredentialId: document.getElementById('hubDeviceCredentialId'),
-  hubDeviceCredentialCreate: document.getElementById('hubDeviceCredentialCreate'),
-  hubDeviceCredentialResult: document.getElementById('hubDeviceCredentialResult'),
-  hubDeviceCredentialToken: document.getElementById('hubDeviceCredentialToken'),
-  hubDeviceCredentialCopy: document.getElementById('hubDeviceCredentialCopy'),
   secretPasteButton: document.getElementById('secretPasteButton'),
   allowInsecureHubHttpInput: document.getElementById('allowInsecureHubHttpInput'),
-  hubStatusRow: document.getElementById('hubStatusRow'),
   syncClientStatus: document.getElementById('syncClientStatus'), syncHealthStatus: document.getElementById('syncHealthStatus'),
-  hubAddressList: document.getElementById('hubAddressList'),
   syncUploadIntervalInput: document.getElementById('syncUploadIntervalInput'),
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
   collectionCadenceNote: document.getElementById('collectionCadenceNote'),
@@ -590,7 +576,6 @@ function viewsSummary() {
 function settingsSectionSummary(section) {
   if (!state.settings) return '';
   if (section === 'sync') {
-    if (state.settings.hubMode === 'host') return t('settings.sync.hostHub');
     if (state.settings.hubMode === 'client') return t('settings.sync.connectHub');
     return t('settings.sync.localOnly');
   }
@@ -5886,42 +5871,8 @@ function syncHubModeUi() {
     input.checked = input.value === mode;
   }
   els.hubClientFields.classList.toggle('hidden', mode !== 'client');
-  els.hubHostFields.classList.toggle('hidden', mode !== 'host');
   if (els.allowInsecureHubHttpInput) els.allowInsecureHubHttpInput.checked = state.settings.allowInsecureHubHttp === true;
-  if (mode === 'host') {
-    els.hubPortInput.value = String(state.settings.hubHostPort || 17321);
-    els.hubSecretInput.value = state.settings.hubHostSecret || '';
-    renderHubStatus();
-  }
   renderSyncClientStatus();
-}
-
-function renderHubStatus() {
-  if (!els.hubStatusRow || !els.hubAddressList) return;
-  const info = state.hubInfo;
-  const port = Number(state.settings.hubHostPort || 17321);
-  if (!info) {
-    els.hubStatusRow.textContent = t('settings.sync.starting');
-    els.hubStatusRow.className = 'hub-status';
-    els.hubAddressList.replaceChildren();
-    return;
-  }
-  if (info.error) {
-    const code = info.error.code === 'EADDRINUSE' ? t('settings.sync.portInUse', { port }) : info.error.code || t('settings.common.error');
-    els.hubStatusRow.textContent = `${code} — ${info.error.message}`;
-    els.hubStatusRow.className = 'hub-status error';
-    els.hubAddressList.replaceChildren();
-    return;
-  }
-  if (!info.listening) {
-    els.hubStatusRow.textContent = t('settings.sync.hubStopped');
-    els.hubStatusRow.className = 'hub-status';
-    els.hubAddressList.replaceChildren();
-    return;
-  }
-  els.hubStatusRow.textContent = t('settings.sync.listening', { port: info.listeningPort });
-  els.hubStatusRow.className = 'hub-status ok';
-  renderHubAddresses(info.lanAddresses || [], info.listeningPort);
 }
 
 function renderSyncClientStatus() {
@@ -5939,39 +5890,6 @@ function renderSyncClientStatus() {
   renderSyncHealthStatus();
 }
 
-function renderHubAddresses(addresses, port) {
-  els.hubAddressList.replaceChildren();
-  if (addresses.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'hub-address-empty';
-    empty.textContent = t('settings.sync.noLanAddress', { port });
-    els.hubAddressList.appendChild(empty);
-    return;
-  }
-  const header = document.createElement('div');
-  header.className = 'hub-address-header';
-  header.textContent = t('settings.sync.connectWith');
-  els.hubAddressList.appendChild(header);
-  for (const addr of addresses) {
-    const url = `http://${addr.address}:${port}`;
-    const row = document.createElement('div');
-    row.className = 'hub-address-row';
-    const code = document.createElement('code');
-    code.textContent = url;
-    const ifaceLabel = document.createElement('span');
-    ifaceLabel.className = 'hub-address-iface';
-    ifaceLabel.textContent = addr.interface;
-    const copy = document.createElement('button');
-    copy.type = 'button';
-    copy.className = 'icon-button';
-    copy.title = t('settings.sync.copyUrl', { url });
-    copy.textContent = '⧉';
-    copy.addEventListener('click', () => copyToClipboard(url, copy));
-    row.append(code, ifaceLabel, copy);
-    els.hubAddressList.appendChild(row);
-  }
-}
-
 async function copyToClipboard(text, button) {
   try {
     if (window.tokenMonitor.copyText) await window.tokenMonitor.copyText(text);
@@ -5985,14 +5903,6 @@ async function copyToClipboard(text, button) {
   } catch (_) {
     return false;
   }
-}
-
-async function refreshHubInfo() {
-  if (!window.tokenMonitor.getHubInfo) return;
-  try {
-    state.hubInfo = await window.tokenMonitor.getHubInfo();
-    renderHubStatus();
-  } catch (_) { /* ignore */ }
 }
 
 function syncPeriodTabs() {
@@ -6051,7 +5961,6 @@ function syncSettingsForm() {
   els.hubUrlInput.value = state.settings.hubUrl || '';
   els.secretInput.value = state.settings.secret || '';
   els.deviceIdInput.value = state.settings.deviceId || '';
-  if (els.hubAdminSecretInput && state.settings.hubAdminSecret) els.hubAdminSecretInput.value = state.settings.hubAdminSecret;
   els.showLimitSourceInput.checked = Boolean(state.settings.showLimitSource);
   els.maskLimitAccountEmailsInput.checked = Boolean(state.settings.maskLimitAccountEmails);
   els.showLimitUsedInput.value = state.settings.showLimitUsed ? 'used' : 'remaining';
@@ -7517,7 +7426,6 @@ async function init() {
   syncSettingsForm();
   await refreshHubAccounts();
   publishViewState();
-  await refreshHubInfo();
   await refreshTokscaleStatus();
   restartTimer();
   try {
@@ -7599,13 +7507,8 @@ els.saveSettingsButton.addEventListener('click', async () => {
     allowInsecureHubHttp: Boolean(els.allowInsecureHubHttpInput?.checked),
     deviceId: els.deviceIdInput.value.trim()
   };
-  if (els.hubAdminSecretInput?.value.trim()) patch.hubAdminSecret = els.hubAdminSecretInput.value.trim();
-  if (state.settings.hubMode === 'host') {
-    patch.hubHostPort = Number(els.hubPortInput.value) || 17321;
-  }
   try {
     await saveSettings(patch);
-    await refreshHubInfo();
     await refreshHubAccounts();
     await refreshStats();
   } catch (error) {
@@ -7621,7 +7524,6 @@ els.hubModeOptions.addEventListener('change', async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement) || target.name !== 'hubMode') return;
   await saveSettings({ hubMode: target.value });
-  await refreshHubInfo();
   await refreshHubAccounts();
   await refreshStats();
 });
@@ -7663,43 +7565,6 @@ els.currencyRateOverrideInput?.addEventListener('change', async () => {
   await saveSettings({ currencyRates: next });
 });
 
-els.hubSecretCopyButton?.addEventListener('click', () => {
-  copyToClipboard(els.hubSecretInput.value, els.hubSecretCopyButton);
-});
-
-els.hubSecretRegenButton?.addEventListener('click', async () => {
-  if (!window.tokenMonitor.regenerateHubSecret) return;
-  const info = await window.tokenMonitor.regenerateHubSecret();
-  state.hubInfo = info;
-  state.settings = { ...state.settings, hubHostSecret: info.secret };
-  els.hubSecretInput.value = info.secret;
-  renderHubStatus();
-});
-els.hubAdminSecretCopyButton?.addEventListener('click', async () => {
-  if (!window.tokenMonitor.revealHubAdminCredential) return;
-  const result = await window.tokenMonitor.revealHubAdminCredential();
-  copyToClipboard(result.token, els.hubAdminSecretCopyButton);
-});
-els.hubDeviceCredentialCreate?.addEventListener('click', async () => {
-  const deviceId = String(els.hubDeviceCredentialId?.value || '').trim();
-  if (!deviceId || !window.tokenMonitor.provisionHubDeviceCredential) return;
-  els.hubDeviceCredentialCreate.disabled = true;
-  try {
-    const result = await window.tokenMonitor.provisionHubDeviceCredential(deviceId);
-    state.hubInfo = result.info;
-    els.hubDeviceCredentialToken.value = result.token;
-    els.hubDeviceCredentialResult.classList.remove('hidden');
-    renderHubStatus();
-  } catch (error) {
-    els.hubDeviceCredentialToken.value = error?.message || String(error);
-    els.hubDeviceCredentialResult.classList.remove('hidden');
-  } finally {
-    els.hubDeviceCredentialCreate.disabled = false;
-  }
-});
-els.hubDeviceCredentialCopy?.addEventListener('click', () => {
-  copyToClipboard(els.hubDeviceCredentialToken.value, els.hubDeviceCredentialCopy);
-});
 els.secretPasteButton?.addEventListener('click', async () => {
   try {
     const text = await navigator.clipboard.readText();
@@ -8051,22 +7916,6 @@ window.tokenMonitor.onOpenView?.(openViewFromTray);
 
 window.tokenMonitor.onFloatingBubbleState?.((payload) => {
   applyFloatingBubbleState(payload);
-});
-
-window.tokenMonitor.onHubPush?.((payload) => {
-  if (!payload?.info) return;
-  state.hubInfo = payload.info;
-  // The first switch to Host mode generates the shared secret asynchronously
-  // after settings:update has already returned, so mirror the freshly minted
-  // value back into state + input — otherwise the Shared Secret field stays
-  // blank and other devices can't pair until the user clicks Regenerate.
-  if (payload.info.secret && payload.info.secret !== state.settings?.hubHostSecret) {
-    state.settings = { ...state.settings, hubHostSecret: payload.info.secret };
-    if (els.hubSecretInput && state.settings.hubMode === 'host') {
-      els.hubSecretInput.value = payload.info.secret;
-    }
-  }
-  renderHubStatus();
 });
 
 window.tokenMonitor.onTokscalePush?.((payload) => {
@@ -9142,7 +8991,7 @@ function hubAccountStatusText(account) {
 function renderHubAccountList() {
   if (!els.hubAccountsList) return;
   const accounts = Array.isArray(state.hubAccounts) ? state.hubAccounts : [];
-  const isHubMode = state.settings?.hubMode === 'host' || state.settings?.hubMode === 'client';
+  const isHubMode = state.settings?.hubMode === 'client';
   if (els.hubAccountsStatus) {
     els.hubAccountsStatus.textContent = !isHubMode
       ? t('settings.hubAccounts.notConfigured')
@@ -9207,7 +9056,7 @@ function renderHubAccountList() {
 
 async function refreshHubAccounts() {
   if (!window.tokenMonitor.hubAccounts) return;
-  if (state.settings?.hubMode !== 'host' && state.settings?.hubMode !== 'client') {
+  if (state.settings?.hubMode !== 'client') {
     state.hubAccounts = [];
     setHubAccountError('');
     renderHubAccountList();

@@ -4,18 +4,18 @@
 
 <!-- app-update-notes:en:start -->
 ### Changed
-- **Desktop shell:** The Electron widget and dashboard are restored to the `0.37.23-rev.3` desktop tree. Hub, agent, Worker, and shared collection stay on the 0.45 line.
-- **Windows 10 glass:** Native backdrop still requires Windows 11 22H2 or newer. Older Windows keeps the CSS-blur window instead of an opaque white slab.
-- **Hub-managed accounts:** Device-side automatic account discovery and reporting are removed. Add accounts manually in the hub; credentials stay in the hub and existing local credentials must be added again after upgrading.
+- **Sync modes:** Reduced the Electron widget to local-only and Connect to Hub; legacy Host settings migrate to local and obsolete embedded Hub credentials are removed safely.
+- **Hub deployment:** Docker Compose is now the only supported Hub deployment; standalone Hub, embedded Hub, and Cloudflare Worker distribution paths were removed.
+- **Upstream protection:** Added a product-scope contract and CI/release guard so removed modes and deployment paths cannot silently return.
 <!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.22-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.22-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.45.0-rev.22.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-Setup-0.45.0-rev.22.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.45.0-rev.22.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.45.0-rev.22.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.23-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.23-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-Setup-0.45.0-rev.23.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.45.0-rev.23.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -53,18 +53,18 @@ open-source: https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh:start -->
 ### 变更
-- **桌面端：** Electron 小部件和仪表盘已完整回退到 `0.37.23-rev.3` 桌面树。中枢、采集端、Worker 和共享采集仍走 0.45。
-- **Windows 10 玻璃：** 原生材质仍需要 Windows 11 22H2 或更新。更旧的 Windows 继续使用 CSS blur，而不是不透明白板。
-- **中枢账号：** 设备端不再自动探测或上报本地开发软件账号。账号必须手动添加到中枢，凭证由中枢保存并统一获取额度；升级后原本机凭证失效，需要重新登录添加。
+- **同步模式：** Electron 小部件收缩为仅限本机和连接中枢两种模式；旧 Host 配置会迁移为本机模式，废弃的内嵌中枢凭证会安全清理。
+- **中枢部署：** Docker Compose 成为唯一支持的中枢部署方式；已移除独立中枢、内嵌中枢和 Cloudflare Worker 发布路径。
+- **上游同步防护：** 新增产品范围契约以及 CI/发布检查，防止已移除的模式和部署路径被上游同步悄悄带回。
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.22-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.22-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.45.0-rev.22.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-Setup-0.45.0-rev.22.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.45.0-rev.22.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.45.0-rev.22.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.23-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.23-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-Setup-0.45.0-rev.23.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.45.0-rev.23.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -97,7 +97,7 @@ https://github.com/junhoyeo/tokscale
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v0.45.0-rev.21...v0.45.0-rev.22">v0.45.0-rev.21...v0.45.0-rev.22</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v0.45.0-rev.22...v0.45.0-rev.23">v0.45.0-rev.22...v0.45.0-rev.23</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -115,18 +115,18 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh-TW:start -->
 ### 變更
-- **桌面端：** Electron 小工具與儀表板已完整回退到 `0.37.23-rev.3` 桌面樹。中樞、採集端、Worker 與共享採集仍走 0.45。
-- **Windows 10 玻璃：** 原生材質仍需要 Windows 11 22H2 或更新。更舊的 Windows 繼續使用 CSS blur，而不是不透明白板。
-- **中樞帳號：** 裝置端不再自動探測或上報本機開發軟體帳號。帳號必須手動加入中樞，由中樞保存憑證並統一取得額度；升級後原本機憑證失效，需要重新登入加入。
+- **同步模式：** Electron 小工具收斂為僅限本機與連接中樞兩種模式；舊 Host 設定會遷移為本機模式，廢棄的內嵌中樞憑證會安全清理。
+- **中樞部署：** Docker Compose 成為唯一支援的中樞部署方式；已移除獨立中樞、內嵌中樞與 Cloudflare Worker 發布路徑。
+- **上游同步防護：** 新增產品範圍契約以及 CI/發布檢查，防止已移除的模式與部署路徑被上游同步悄悄帶回。
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.22-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.22-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.45.0-rev.22.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-Setup-0.45.0-rev.22.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.45.0-rev.22.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.45.0-rev.22.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.23-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.23-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-Setup-0.45.0-rev.23.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.45.0-rev.23.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.AppImage)
 
 </details>
 
@@ -139,18 +139,18 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ko:start -->
 ### 변경
-- **데스크톱:** Electron 위젯과 대시보드를 `0.37.23-rev.3` 데스크톱 트리로 되돌렸습니다. 허브, 에이전트, Worker, 공유 수집은 0.45를 유지합니다.
-- **Windows 10 유리 효과:** 네이티브 배경은 여전히 Windows 11 22H2 이상이 필요합니다. 더 오래된 Windows는 불투명한 흰 창 대신 CSS blur를 사용합니다.
-- **허브 계정:** 장치가 로컬 개발 도구 계정을 자동 검색하거나 보고하지 않습니다. 허브에서 계정을 수동으로 추가해야 하며, 자격 증명은 허브에 저장됩니다. 업그레이드 후 기존 로컬 자격 증명은 무효화되므로 다시 로그인해야 합니다.
+- **동기화 모드:** Electron 위젯을 로컬 전용과 허브 연결의 두 모드로 축소했습니다. 기존 Host 설정은 로컬 모드로 마이그레이션되며, 사용하지 않는 임베디드 허브 자격 증명은 안전하게 정리됩니다.
+- **허브 배포:** Docker Compose만 지원되는 허브 배포 방식으로 남겼습니다. 독립 허브, 임베디드 허브 및 Cloudflare Worker 배포 경로를 제거했습니다.
+- **업스트림 보호:** 제거된 모드와 배포 경로가 업스트림 동기화로 다시 들어오지 않도록 제품 범위 계약과 CI/릴리스 검사를 추가했습니다.
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.22-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.22-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.45.0-rev.22.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-Setup-0.45.0-rev.22.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.45.0-rev.22.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.45.0-rev.22.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.23-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.23-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-Setup-0.45.0-rev.23.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.45.0-rev.23.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.AppImage)
 
 </details>
 
@@ -163,18 +163,18 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ja:start -->
 ### 変更
-- **デスクトップ:** Electron ウィジェットとダッシュボードを `0.37.23-rev.3` のデスクトップツリーに戻しました。ハブ、エージェント、Worker、共有収集は 0.45 のままです。
-- **Windows 10 のガラス:** ネイティブ背景は引き続き Windows 11 22H2 以降が必要です。それより前の Windows では不透明な白い窓ではなく CSS blur を使います。
-- **ハブアカウント:** デバイスはローカル開発ツールのアカウントを自動検出・報告しません。ハブで手動追加し、資格情報はハブに保存します。アップグレード後は既存のローカル資格情報が無効になるため、再ログインが必要です。
+- **同期モード:** Electron ウィジェットをローカルのみとハブ接続の2モードに縮小しました。旧 Host 設定はローカルモードへ移行され、不要な組み込みハブ資格情報は安全に削除されます。
+- **ハブのデプロイ:** サポートするハブのデプロイ方式を Docker Compose のみにしました。単独ハブ、組み込みハブ、Cloudflare Worker の配布経路を削除しました。
+- **アップストリーム保護:** 削除したモードとデプロイ経路がアップストリーム同期で戻らないよう、製品範囲契約と CI/リリース検査を追加しました。
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.22-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.22-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.45.0-rev.22.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-Setup-0.45.0-rev.22.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.45.0-rev.22.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.45.0-rev.22.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.22/Token-Monitor-0.45.0-rev.22.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.23-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.23-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-Setup-0.45.0-rev.23.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.45.0-rev.23.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.AppImage)
 
 </details>
 

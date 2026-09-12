@@ -143,9 +143,9 @@ test('normalizeHistory does not zero the current streak west of UTC', (t) => {
   });
 });
 
-// A Cloudflare Worker isolate always reads UTC, so the Hub's own clock can never
-// stand in for the producer's calendar day however it is formatted. These pin the
-// Hub side in UTC on purpose: that is the deployment the wall clock cannot fix.
+// A Hub process may run in a different timezone from the producer, so the Hub's
+// own clock can never stand in for the producer's calendar day. These pin the
+// Hub-side behavior to explicit producer windows instead.
 test('aggregateHistory keys the window on the producer day, not the Hub clock', (t) => {
   inZone(t, 'UTC', EAST_DIVERGES, () => {
     const merged = aggregateHistory([deviceOf({
@@ -311,7 +311,7 @@ test('aggregateHistory rejects a producer day no zone has reached yet', (t) => {
 // A closed window is not silence: it says the device has rolled over to at least the
 // day after the one it reported. Dropping the key instead of advancing it lets the
 // clock fallback re-select the day the window just declared finished — here a laptop
-// at UTC+14 asleep one minute past its own midnight, read by a UTC Worker that is
+// at UTC+14 asleep one minute past its own midnight, read by a Hub that is
 // still on the 17th. The device's own widget would key on the 18th and show 0; before
 // this the Hub kept serving the 17th's live streak for the next fourteen hours.
 test('aggregateHistory advances past a producer day its window has closed', (t) => {
@@ -388,26 +388,6 @@ test('aggregateHistory falls back to the local clock for records without a windo
       days: [{ date: '2026-08-16', tokens: 5 }, { date: '2026-08-17', tokens: 10 }]
     })]);
     assert.deepEqual(merged.daily.map((d) => d.date), ['2026-08-16', '2026-08-17']);
-  });
-});
-
-// The Worker serves the same reads from a vendored copy, and it is the deployment
-// whose runtime clock can never be right. Drift is already a CI failure; this pins
-// the behaviour itself rather than the bytes.
-test('the vendored Worker aggregate derives the same boundary', (t) => {
-  inZone(t, 'UTC', EAST_DIVERGES, () => {
-    const workerUsage = require('../../worker/src/shared/usage');
-    const devices = [deviceOf({
-      deviceId: 'tokyo',
-      todayKey: '2026-08-17',
-      endsAt: TOKYO_MIDNIGHT,
-      days: [{ date: '2026-08-16', tokens: 5 }, { date: '2026-08-17', tokens: 10 }]
-    })];
-    assert.deepEqual(workerUsage.aggregateHistory(devices), aggregateHistory(devices));
-    assert.deepEqual(
-      workerUsage.aggregateHistory(devices).daily.map((d) => d.date),
-      ['2026-08-16', '2026-08-17']
-    );
   });
 });
 

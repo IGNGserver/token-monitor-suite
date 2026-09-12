@@ -12,12 +12,12 @@ const agent = fs.readFileSync(path.join(ROOT, 'src/agent/agent.js'), 'utf8');
 test('every Electron collector mode follows the retained-session setting for daily history', () => {
   assert.match(main, /function electronUsageConfig/);
   assert.match(main, /usageConfigFromSettings\(settings, \{/);
-  assert.equal((main.match(/usageOptions:\s*electronUsageConfig\(/g) || []).length, 3);
+  assert.equal((main.match(/usageOptions:\s*electronUsageConfig\(/g) || []).length, 2);
 });
 
 test('every Electron collector mode yields daily-history writes to an external agent', () => {
   assert.match(main, /dailyHistoryArchiveWriteEnabled:\s*\(\) => !isExternalAgentActive\(\)/);
-  assert.equal((main.match(/usageOptions:\s*electronUsageConfig\(/g) || []).length, 3);
+  assert.equal((main.match(/usageOptions:\s*electronUsageConfig\(/g) || []).length, 2);
 });
 
 test('clearing retained session usage also clears retained daily history', () => {

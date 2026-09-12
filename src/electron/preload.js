@@ -27,16 +27,6 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     minimize: () => ipcRenderer.send('dashboard:minimize'),
     close: () => ipcRenderer.send('dashboard:close')
   },
-  getHubInfo: () => ipcRenderer.invoke('hub:getInfo'),
-  regenerateHubSecret: () => ipcRenderer.invoke('hub:regenerateSecret'),
-  provisionHubDeviceCredential: (deviceId) => ipcRenderer.invoke('hub:provisionDeviceCredential', deviceId),
-  revokeHubDeviceCredential: (deviceId) => ipcRenderer.invoke('hub:revokeDeviceCredential', deviceId),
-  revealHubAdminCredential: () => ipcRenderer.invoke('hub:revealAdminCredential'),
-  onHubPush: (callback) => {
-    const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
-    ipcRenderer.on('hub:push', listener);
-    return () => ipcRenderer.removeListener('hub:push', listener);
-  },
   onStatsPush: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
     ipcRenderer.on('stats:push', listener);

@@ -14,7 +14,7 @@ test('runtime config keeps usage and envelope separate from Hub credentials', ()
     deviceId: 'device-1',
     clients: 'claude,cursor',
     collectionIntervalMs: 300000,
-    hubAccountCredentialKey: 'hub-only-secret',
+    hubHostSecret: 'legacy-host-secret',
     kimiApiKey: 'legacy-local-secret'
   };
   const usage = usageConfigFromSettings(settings, {
@@ -26,7 +26,7 @@ test('runtime config keeps usage and envelope separate from Hub credentials', ()
   const envelope = envelopeFromSettings(settings, { agentVersion: '1.2.3' });
 
   assert.equal(usage.intervalMs, 120000);
-  assert.equal(Object.hasOwn(usage, 'hubAccountCredentialKey'), false);
+  assert.equal(Object.hasOwn(usage, 'hubHostSecret'), false);
   assert.equal(Object.hasOwn(usage, 'kimiApiKey'), false);
   assert.deepEqual(envelope, {
     deviceId: 'device-1',

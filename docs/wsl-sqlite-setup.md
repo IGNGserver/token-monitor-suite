@@ -13,16 +13,24 @@ Do not copy a live `.db` file as a workaround. Recent transactions may still be 
 The reliable setup is:
 
 ```text
-WSL headless agent → Windows host hub → Token Monitor widget
+WSL headless agent → Windows Docker Compose Hub → Token Monitor widget
 ```
 
 The agent runs the Linux tokscale binary next to the database, then sends only the normalized usage summary to the hub.
 
-## 1. Start the hub on Windows
+## 1. Start the Docker Compose Hub on Windows
 
-In Token Monitor, open **Settings → Multi-device Sync** and select **Host hub on this device**. Enter `wsl-agent` under **Device token**, create it, and record the Hub URL and generated device token.
+On the Windows machine that will stay online, deploy the repository's root Compose stack:
 
-Keep the hub on a trusted network and retain the generated token. If WSL cannot reach the displayed hostname, use the Windows host IP while keeping the same port, which defaults to `17321`.
+```bash
+cp .env.example .env
+# set TOKEN_MONITOR_SECRET, MYSQL_PASSWORD, and MYSQL_ROOT_PASSWORD
+
+docker compose up -d
+curl http://127.0.0.1:17321/api/health
+```
+
+Use the same `TOKEN_MONITOR_SECRET` on the Hub and the WSL agent. Keep the Hub on a trusted network and retain the key. If WSL cannot reach the Windows hostname, use the Windows host IP while keeping the same port, which defaults to `17321`.
 
 ## 2. Install the headless agent in WSL
 
@@ -40,7 +48,7 @@ Create `token-monitor/.env`:
 
 ```env
 TOKEN_MONITOR_HUB_URL=http://WINDOWS_HOST_IP:17321
-TOKEN_MONITOR_SECRET=YOUR_WSL_DEVICE_TOKEN
+TOKEN_MONITOR_SECRET=YOUR_HUB_SECRET
 TOKEN_MONITOR_DEVICE_ID=wsl-agent
 TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode
 TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1
@@ -48,8 +56,7 @@ TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1
 
 `TOKEN_MONITOR_DEVICE_ID` must differ from the Windows widget device ID. The hub treats matching IDs as the same device, so a duplicate ID would make the latest post replace the previous record.
 
-`YOUR_WSL_DEVICE_TOKEN` must be the token bound to `wsl-agent` in the Hub's
-`TOKEN_MONITOR_INGEST_CREDENTIALS`; do not reuse the admin or viewer token. The
+`YOUR_HUB_SECRET` must be the same single key configured on the Hub. The
 insecure-HTTP opt-in is only for a trusted LAN/VPN. Prefer an HTTPS Hub when
 available.
 

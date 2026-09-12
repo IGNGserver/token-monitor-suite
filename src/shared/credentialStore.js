@@ -7,14 +7,15 @@ const path = require('node:path');
 const CREDENTIALS_VERSION = 1;
 const SETTINGS_MIGRATION_VERSION = 1;
 const LEGACY_LOCAL_LIMIT_CREDENTIALS_MIGRATION_VERSION = 1;
+const REMOVED_HUB_CREDENTIALS_MIGRATION_VERSION = 1;
 
 const CREDENTIAL_SETTING_PATHS = Object.freeze({
-  hubHostSecret: ['hub', 'hostSecret'],
-  hubHostAdminSecret: ['hub', 'adminSecret'],
-  secret: ['hub', 'clientSecret'],
-  hubAdminSecret: ['hub', 'remoteAdminSecret'],
-  hubAccountCredentialKey: ['hub', 'accountCredentialKey']
+  secret: ['hub', 'clientSecret']
 });
+
+const REMOVED_HUB_CREDENTIAL_SETTING_KEYS = Object.freeze([
+  'hubAdminSecret'
+]);
 
 const LEGACY_LOCAL_LIMIT_CREDENTIAL_PATHS = Object.freeze([
   ['providers', 'claude', 'webCookie'],
@@ -40,6 +41,14 @@ const LEGACY_LOCAL_LIMIT_CREDENTIAL_PATHS = Object.freeze([
   ['providers', 'qoder', 'autoCache']
 ]);
 
+const REMOVED_HUB_CREDENTIAL_PATHS = Object.freeze([
+  ['hub', 'hostSecret'],
+  ['hub', 'adminSecret'],
+  ['hub', 'accountCredentialKey'],
+  ['hub', 'ingestCredentials'],
+  ['hub', 'remoteAdminSecret']
+]);
+
 function emptyDocument() {
   return { version: CREDENTIALS_VERSION, credentials: {}, migrations: {} };
 }
@@ -57,12 +66,6 @@ function credentialValuePresent(value) {
   if (typeof value === 'string') return value.length > 0;
   if (Array.isArray(value)) return value.length > 0;
   return isObject(value) && Object.keys(value).length > 0;
-}
-
-function safeDynamicKey(value) {
-  const key = String(value || '').trim();
-  if (!key || key === '__proto__' || key === 'prototype' || key === 'constructor') return '';
-  return key;
 }
 
 function valueAt(root, segments) {
@@ -189,12 +192,15 @@ function writePrivateJsonAtomic(filePath, value, options = {}) {
 
 function stripCredentialSettings(settings) {
   const clean = { ...(settings || {}) };
-  for (const key of Object.keys(CREDENTIAL_SETTING_PATHS)) delete clean[key];
+  for (const key of [...Object.keys(CREDENTIAL_SETTING_PATHS), ...REMOVED_HUB_CREDENTIAL_SETTING_KEYS]) {
+    delete clean[key];
+  }
   return clean;
 }
 
 function hasCredentialSettings(settings) {
-  return Object.keys(CREDENTIAL_SETTING_PATHS).some((key) => Object.hasOwn(settings || {}, key));
+  return [...Object.keys(CREDENTIAL_SETTING_PATHS), ...REMOVED_HUB_CREDENTIAL_SETTING_KEYS]
+    .some((key) => Object.hasOwn(settings || {}, key));
 }
 
 function credentialSettingsForRenderer(settings, options = {}) {
@@ -317,62 +323,6 @@ class CredentialStore {
     return this.writeDocument(document);
   }
 
-  readHubIngestCredentials(document = this.readDocument()) {
-    const stored = valueAt(document.credentials, ['hub', 'ingestCredentials']);
-    if (!isObject(stored)) return {};
-    const result = {};
-    for (const [rawDeviceId, rawSecret] of Object.entries(stored)) {
-      const deviceId = safeDynamicKey(rawDeviceId);
-      const secret = typeof rawSecret === 'string' ? rawSecret.trim() : '';
-      if (deviceId && secret) result[deviceId] = secret;
-    }
-    return result;
-  }
-
-  writeHubIngestCredential(id, secret) {
-    const deviceId = safeDynamicKey(id);
-    const normalized = String(secret || '').trim();
-    if (!deviceId || !normalized) return false;
-    const document = this.readDocument();
-    setValueAt(document.credentials, ['hub', 'ingestCredentials', deviceId], normalized);
-    this.writeDocument(document);
-    return this.readHubIngestCredentials()[deviceId] === normalized;
-  }
-
-  removeHubIngestCredential(id) {
-    const deviceId = safeDynamicKey(id);
-    if (!deviceId) return false;
-    const document = this.readDocument();
-    deleteValueAt(document.credentials, ['hub', 'ingestCredentials', deviceId]);
-    this.writeDocument(document);
-    return !Object.hasOwn(this.readHubIngestCredentials(), deviceId);
-  }
-
-  renameHubIngestCredential(previousId, nextId) {
-    const previousDeviceId = safeDynamicKey(previousId);
-    const nextDeviceId = safeDynamicKey(nextId);
-    if (!previousDeviceId || !nextDeviceId) return false;
-    const document = this.readDocument();
-    const credentials = this.readHubIngestCredentials(document);
-    if (!Object.hasOwn(credentials, previousDeviceId)) {
-      return previousDeviceId === nextDeviceId && Object.hasOwn(credentials, nextDeviceId);
-    }
-    if (!Object.hasOwn(credentials, nextDeviceId)) {
-      setValueAt(
-        document.credentials,
-        ['hub', 'ingestCredentials', nextDeviceId],
-        credentials[previousDeviceId]
-      );
-    }
-    if (previousDeviceId !== nextDeviceId) {
-      deleteValueAt(document.credentials, ['hub', 'ingestCredentials', previousDeviceId]);
-    }
-    this.writeDocument(document);
-    const persisted = this.readHubIngestCredentials();
-    return Object.hasOwn(persisted, nextDeviceId)
-      && (previousDeviceId === nextDeviceId || !Object.hasOwn(persisted, previousDeviceId));
-  }
-
   clearLegacyLocalLimitCredentials() {
     const document = this.readDocument();
     if (
@@ -385,6 +335,21 @@ class CredentialStore {
       deleteValueAt(document.credentials, segments);
     }
     document.migrations.localLimitCredentials = LEGACY_LOCAL_LIMIT_CREDENTIALS_MIGRATION_VERSION;
+    return { cleared: true, document: this.writeDocument(document) };
+  }
+
+  clearRemovedHubCredentials() {
+    const document = this.readDocument();
+    if (
+      Number(document.migrations.removedHubCredentials || 0)
+      >= REMOVED_HUB_CREDENTIALS_MIGRATION_VERSION
+    ) {
+      return { cleared: false, document };
+    }
+    for (const segments of REMOVED_HUB_CREDENTIAL_PATHS) {
+      deleteValueAt(document.credentials, segments);
+    }
+    document.migrations.removedHubCredentials = REMOVED_HUB_CREDENTIALS_MIGRATION_VERSION;
     return { cleared: true, document: this.writeDocument(document) };
   }
 }

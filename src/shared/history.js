@@ -1,7 +1,6 @@
 'use strict';
 
-// Portable (Node-free) usage-history core. Mirrors usage.js conventions so the
-// Cloudflare Worker can import it. Pure functions only — no I/O.
+// Portable usage-history core. Pure functions only — no I/O.
 const { REASONIX_CLIENT } = require('./reasonixPaths');
 const RESERVED_DYNAMIC_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
@@ -516,8 +515,8 @@ function stableJson(value) {
 }
 
 // Compact, deterministic invalidation token for the full history payload. This
-// includes daily/monthly breakdowns (not just headline totals), stays portable
-// to the Worker runtime, and keeps /api/stats small.
+// includes daily/monthly breakdowns (not just headline totals) and keeps
+// /api/stats small.
 function stableRevision(value) {
   const source = stableJson(value);
   let first = 0x811c9dc5;

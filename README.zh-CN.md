@@ -140,8 +140,8 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 
 - **多设备实时同步**：通过 Server-Sent Events 推送，一台设备的更新数秒内出现在其他设备
 - **本地优先**：单设备使用完全无需服务器
-- **自托管同步后端**：小部件内 hub、Node CLI hub 或 Cloudflare Worker
-- **iOS 小部件支持**：通过 Worker hub 搭配 Widgy、Scriptable
+- **自托管同步后端**：Docker Compose Hub
+- **iOS 小部件支持**：Widgy 和 Scriptable 客户端可使用自托管 Hub API
 - **隐私优先**：提示词、回复、源代码和文件内容都留在你的设备上
 
 ### 界面与呈现
@@ -173,46 +173,29 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 
 ## 多设备同步
 
-挑一个所有设备（与任何无头代理）都能连上的 hub 后端。在每台设备上打开小部件，在 设置 → 多设备同步 选一个模式。小部件会自动上报本机用量；只在没有小部件的机器上跑 `npm run agent`。
+如果需要多设备同步，把所有设备（以及没有小部件的无头代理）连接到同一个 Docker Compose Hub。在每台设备上打开小部件，在 设置 → 多设备同步 中选择 **连接到 Hub**；只有没有小部件的机器才需要运行 `npm run agent`。
 
 Hub 凭据已分权：viewer 令牌只读，设备令牌可读取并仅上报绑定的 Device ID，admin 令牌才能执行变更。远程连接默认必须使用 HTTPS；桌面端/agent 需显式开启可信 LAN HTTP，Android 发行版始终要求 HTTPS。
 
 升级旧配置时，如果 Hub 是非本机的 `http://` 地址，不会静默降低安全性：本机采集会继续运行，但 Hub 读取／上报／实时流会保持 blocked，直到改用 HTTPS 或用户明确开启可信 LAN 选项。同步设置会分别显示这些通道，并在设置变更后于同一进程中恢复。
 
-#### 方案 A——直接在小部件内开 hub（最简单，无需命令行）
+#### 方案 A——仅限本机（默认）
 
-在一台长期开机的机器上选 **在这台设备托管 Hub**。为每个远端 Device ID 生成绑定设备令牌，并粘贴到对应客户端。主机还提供只读 viewer 令牌，以及只在用户主动点击时显示的 Web 管理员令牌。
+单设备使用小部件的本机模式。它直接读取这台机器的本地数据，不需要 Hub 或 agent。
 
-只要 Token Monitor 还在跑，hub 就会运行——退出 App（仅关闭窗口不算）会停掉 hub，所有连入的设备都会断开。
+#### 方案 B——连接 Docker Compose Hub
 
-#### 方案 B——自托管 Node hub（长期开机的无头机器）
+在一台长期开机的机器上部署根目录的 `docker-compose.yml`：
 
 ```bash
-# 在长期开机的机器上
 cp .env.example .env
-# 在 .env 配置 ADMIN/VIEWER/INGEST 凭据与 TLS，然后：
-npm run hub
+# 在 .env 只需配置 TOKEN_MONITOR_SECRET 和 MySQL 密码
+docker compose up -d
 ```
 
-#### 方案 C——Cloudflare Worker hub（跨网络，包含 iPhone）
+在每个小部件中，前往 设置 → 多设备同步，选择 **连接到 Hub**，然后输入 Hub URL 和同一个 Hub 密钥。没有小部件的机器使用相同的 URL 和密钥运行 `npm run agent`。这个密钥同时覆盖读取、上报和管理员操作。
 
-[![部署到 Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IGNGserver/token-monitor-suite/tree/main/worker)
-
-一键或手动部署后，配置三类分权 Worker 凭据：
-
-```bash
-cd worker
-npm install
-npx wrangler login
-npx wrangler secret put TOKEN_MONITOR_ADMIN_SECRET
-npx wrangler secret put TOKEN_MONITOR_VIEWER_SECRET
-npx wrangler secret put TOKEN_MONITOR_INGEST_CREDENTIALS
-npx wrangler deploy
-```
-
-把部署 URL 贴到每台设备的小部件 设置 → 多设备同步。iOS 小部件配方与端点参考见 [worker/README.md](worker/README.md)，hub HTTP API 见 [docs/API.md](docs/API.md)。
-
-Worker 覆盖 ingest、统计、历史和 SSE，并发布版本化 Hub capabilities，明确标记不支持自定义区间和定价。桌面端、Web 和 Android 会据此隐藏或禁用相关功能。
+根目录 Docker Compose 堆栈是唯一支持的 Hub 部署方式，提供 HTTP API、仪表盘、PWA、设备上报和 SSE 实时流。
 
 ## App 数据
 
@@ -251,7 +234,7 @@ npm run pack         # 未打包的 app 目录（无安装包），方便本机�
     设备 C agent ──▶
 ```
 
-小部件会根据 设置 → 多设备同步 决定走本地还是同步模式。hub 本身可以是单独的 `npm run hub` 进程、Cloudflare Worker，或直接跑在某一个小部件里（Host 模式）。同步模式下，hub 通过 Server-Sent Events 把聚合后的统计推送给每个连接中的小部件，所以一台设备上的更新会在数秒内出现在其他设备上。
+小部件会根据 设置 → 多设备同步 决定走本地还是同步模式。Docker Compose Hub 接收每台设备的标准化摘要，并通过 Server-Sent Events 将聚合统计推送给已连接的客户端，因此一台设备上的更新会在数秒内出现在其他设备上。
 
 ## 会话数据保留期
 

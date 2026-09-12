@@ -245,8 +245,8 @@
     return { version: 1, updatedAt: '', subscriptions: [] };
   }
 
-  // Both hubs build the stored document through here so the Node and Worker
-  // implementations cannot drift, and so a list is re-normalized on the way in
+  // The Hub's server and dashboard build the stored document through here,
+  // so the list is re-normalized on the way in
   // rather than trusted — it arrives from a device, over the network.
   function subscriptionDocument(subscriptions, options = {}) {
     const explicit = cleanText(options.updatedAt);

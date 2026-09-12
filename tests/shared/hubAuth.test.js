@@ -62,6 +62,15 @@ test('legacy elevation is explicit and an unconfigured local policy remains usab
   assert.equal(createHubAuthPolicy().authorize(request(''), ADMIN_SCOPE).ok, true);
 });
 
+test('a unified Hub secret grants read, ingest, and admin scopes', () => {
+  const policy = createHubAuthPolicy({ unifiedSecret: 'single-hub-secret' });
+  assert.equal(policy.authorize(request('single-hub-secret'), READ_SCOPE).ok, true);
+  assert.equal(policy.authorize(request('single-hub-secret'), INGEST_SCOPE, { deviceId: 'any' }).ok, true);
+  assert.equal(policy.authorize(request('single-hub-secret'), ADMIN_SCOPE).ok, true);
+  assert.equal(policy.summary.adminConfigured, true);
+  assert.equal(policy.summary.unifiedSecretConfigured, true);
+});
+
 test('ingest credential configuration rejects invalid or duplicate identities', () => {
   assert.deepEqual(ingestCredentialEntries('{"dev":"secret"}').map(({ deviceId }) => deviceId), ['dev']);
   assert.throws(() => ingestCredentialEntries('{bad'), /valid JSON/);

@@ -11,7 +11,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-for (const mode of ['local', 'client', 'host']) {
+for (const mode of ['local', 'client']) {
   test(`${mode} manual refresh awaits usage without a local limits refresh`, async () => {
     const usage = deferred();
     const calls = [];

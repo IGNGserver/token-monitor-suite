@@ -1,24 +1,27 @@
 # API
 
-The hub exposes a JSON HTTP API and serves a same-origin web dashboard (PWA) from the hub root (`/`). Static UI assets and `/api/health` are public; private API routes require a scoped credential. Remote connections use HTTPS by default. Node Hub/agent/desktop require `TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1` for an intentional non-loopback HTTP deployment; Android release builds do not permit cleartext traffic.
+The hub exposes a JSON HTTP API and serves a same-origin web dashboard (PWA) from the hub root (`/`). Static UI assets and `/api/health` are public; private API routes require a scoped credential. Remote connections use HTTPS by default. Docker Compose Hub/agent/desktop require `TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1` for an intentional non-loopback HTTP deployment; Android release builds do not permit cleartext traffic.
 
 
 For pricing refreshes, the Hub invokes `tokscale pricing <model> --json` first. If tokscale cannot complete its upstream catalog request, the Hub retries against the configured `TOKSCALE_PRICING_CATALOG_URL` (default `https://models.dev/api.json`), which is a public catalog tokscale also uses. The catalog is cached in the Hub process for six hours; the resulting `model_pricing` row remains durable.
 
 ## Authentication
 
-Configure independent credentials:
+For the single-user deployment, configure one key:
 
-- `TOKEN_MONITOR_ADMIN_SECRET`: read, ingest, and every administrative mutation.
+- `TOKEN_MONITOR_SECRET`: shared by the Hub and every widget/agent. It grants read, ingest, and every administrative mutation, including manually managed Hub accounts.
+
+The Hub still accepts the following optional split variables for older deployments:
+
+- `TOKEN_MONITOR_ADMIN_SECRET`: read, ingest, and every administrative mutation. When this is set, `TOKEN_MONITOR_SECRET` keeps its legacy scoped meaning.
 - `TOKEN_MONITOR_VIEWER_SECRET`: read-only dashboard/API access. This is the only credential accepted through `?secret=` for header-limited widgets.
 - `TOKEN_MONITOR_INGEST_CREDENTIALS`: JSON object mapping the exact `deviceId` to a device token, for example `{"workstation":"...","laptop":"..."}`. A device token can read shared stats and ingest only its bound identity.
-- `TOKEN_MONITOR_SECRET`: legacy read-only credential. Temporary ingest/admin elevation requires `TOKEN_MONITOR_ALLOW_LEGACY_INGEST=1` or `TOKEN_MONITOR_ALLOW_LEGACY_ADMIN=1`; remove those flags after migration.
-- `TOKEN_MONITOR_HUB_CREDENTIAL_KEY`: stable secret used to encrypt manually added Hub account credentials at rest. A standalone Hub must set it before enabling accounts; changing it makes existing account credentials unreadable and requires manual re-login.
+- `TOKEN_MONITOR_ALLOW_LEGACY_INGEST` and `TOKEN_MONITOR_ALLOW_LEGACY_ADMIN`: temporary elevation flags for the legacy `TOKEN_MONITOR_SECRET` path.
+- `TOKEN_MONITOR_HUB_CREDENTIAL_KEY`: optional legacy override for encrypting manually added Hub account credentials at rest. When empty, the Hub derives this key from `TOKEN_MONITOR_SECRET`; changing the effective key makes existing account credentials unreadable and requires manual re-login.
 
-Every configured admin, viewer, legacy, and device credential must be distinct;
-the Hub refuses to start when one token would resolve to more than one role.
+In split mode, every configured admin, viewer, legacy, and device credential must be distinct. In unified mode, `TOKEN_MONITOR_SECRET` intentionally resolves to the admin principal.
 
-An unconfigured Node Hub is restricted to loopback. An internet-facing Worker refuses all private routes until at least one scoped or legacy credential is configured.
+An unconfigured Docker Compose Hub is restricted to loopback. A remote Hub refuses all private routes until at least one unified or split credential is configured.
 
 Use either:
 
@@ -65,7 +68,7 @@ Example response:
 }
 ```
 
-`version` remains `1` for compatibility. `apiVersion` versions the capability/authentication contract. The Worker reports `usageRange: false` and `pricing: false`; clients must hide or explain unsupported features.
+`version` remains `1` for compatibility. `apiVersion` versions the capability/authentication contract. The Docker Compose Hub exposes the full capability set shown above.
 
 ## `GET /api/capabilities`
 
@@ -74,7 +77,7 @@ Requires read scope and returns the server feature set plus the authenticated cr
 ```json
 {
   "apiVersion": 2,
-  "capabilities": { "stats": true, "usageRange": false, "pricing": false },
+  "capabilities": { "stats": true, "usageRange": true, "pricing": true },
   "role": "device",
   "scopes": ["read", "ingest"]
 }
@@ -84,7 +87,7 @@ Requires read scope and returns the server feature set plus the authenticated cr
 
 Posts one device usage summary.
 
-Requires ingest scope. A device credential is accepted only when the payload `deviceId` exactly matches its configured identity. Reposting an unchanged cumulative snapshot is idempotent: Node derives zero ledger delta and Worker replaces the same current record.
+Requires ingest scope. A device credential is accepted only when the payload `deviceId` exactly matches its configured identity. Reposting an unchanged cumulative snapshot is idempotent: the Hub derives zero ledger delta and replaces the same current record.
 
 First-party agents send `Prefer: return=minimal` and receive only
 `{"ok":true,"deviceId":"..."}`. This avoids aggregating and returning the full
@@ -219,13 +222,13 @@ The MySQL Node hub stores each change between a device's cumulative all-time sna
 
 `projects` is a bounded rollup keyed by a canonicalized workspace-folder label. Each entry carries the deterministic display `label`, token/cost totals, and a per-client token breakdown. Agents upload `allTime.projects` because synchronized payloads intentionally omit the unbounded `allTime.sessions`; `today.projects` and `month.projects` are normally omitted on upload and rebuilt by the hub from their synchronized sessions. If adding the all-time rollup would exceed the safe ingest budget, the agent drops only that rollup, sets `allTimeProjectsOmitted: true`, and keeps core totals and session data uploadable. If monthly or daily session detail would still exceed the budget, the agent keeps the newest rows that fit, sends the complete project rollup for that period, and sets `sessionDetailsOmitted` to the number of omitted rows per affected period. If that project rollup cannot fit even after all session rows are removed, the agent omits it too and sets `periodProjectsOmitted`; token/cost and client/model totals remain complete while the affected project breakdown is marked incomplete. A normal later upload clears these diagnostics; limits-only updates preserve them. `projectsEnabled: false` tells the hub that project metadata collection is disabled for this device; sync payloads then remove project rollups plus session `projectId` / `projectLabel` fields.
 
-Authenticated stats expose `projectsIncomplete: true` when a device omitted its rollup, disabled project tracking while contributing usage, or could not preserve exact all-time attribution after its tracked-client list changed. Affected device entries expose `allTimeProjectsOmitted`, `allTimeProjectsIncomplete`, or `projectsEnabled: false` as the reason. The public Worker stats endpoint removes the entire `projects` map, including both display labels and canonical keys.
+Authenticated stats expose `projectsIncomplete: true` when a device omitted its rollup, disabled project tracking while contributing usage, or could not preserve exact all-time attribution after its tracked-client list changed. Affected device entries expose `allTimeProjectsOmitted`, `allTimeProjectsIncomplete`, or `projectsEnabled: false` as the reason.
 
 `trackedClients` is optional but recommended for agents and widgets. When it is present, the hub treats omitted clients as intentionally not collected in this payload and preserves their previous usage for that device. This keeps "tracking" as "collect future data" rather than "hide existing history".
 
 Current agents and widgets include `osName` and, when known, `osVersion` so device details can show a user-facing operating-system release. macOS uses the product version from Electron or `sw_vers`; Windows uses the product family and display version from the registry; Linux uses the distribution name and version from `os-release`. Detection failures fall back to an explicitly labelled Windows build or Linux kernel release. The hub continues to accept older payloads without these fields.
 
-`syncUploadIntervalMs` is optional. A remote-hub widget includes `0` for live uploads or the selected fixed interval in milliseconds (`600000`, `1200000`, or `1800000`). The hub uses a positive interval to keep the device and its limits fresh for at least twice the upload interval; omitted or `0` values retain the configured `staleAfterMs` behavior. Local collection and embedded-host ingest remain live.
+`syncUploadIntervalMs` is optional. A remote-hub widget includes `0` for live uploads or the selected fixed interval in milliseconds (`600000`, `1200000`, or `1800000`). The hub uses a positive interval to keep the device and its limits fresh for at least twice the upload interval; omitted or `0` values retain the configured `staleAfterMs` behavior. Local collection remains live.
 
 `periodWindows` is optional. Agents and widgets stamp each snapshot with the UTC instant its `today`/`month` windows end, computed in the device's own local time (`endsAt` = next local midnight / next local month start; `key` is the device-local day/month for reference). The hub uses it to expire a device's `today`/`month` from both the aggregate and the per-device view once `now >= endsAt`, so a device that goes offline before re-posting does not keep contributing or displaying a stale day/month snapshot (`allTime` never expires). Payloads without `periodWindows` fall back to a UTC day/month comparison against `updatedAt`.
 
@@ -262,9 +265,9 @@ Response includes:
 - `devices`, including each device's normalized `periods`, `receivedAt`, `osName` / `osVersion` when reported, optional `syncUploadIntervalMs`, and optional `periodWindows`; device-level `limits` are not stored or returned
 - stale status for devices that have not reported recently
 
-The top-level `limits` object is the Hub-owned account snapshot. Public Worker
-stats omit account identifiers. The Node Hub does not merge device-reported
-quota rows because the new device protocol does not accept them as authoritative.
+The top-level `limits` object is the Hub-owned account snapshot. Public
+stats omit account identifiers. The Hub does not merge device-reported quota
+rows because the device protocol does not accept them as authoritative.
 
 ## Hub account management
 
@@ -346,11 +349,11 @@ Requires admin scope. Removes the device from visible stats. The Node/MySQL Hub 
 
 Requires admin scope. Body: `{"deviceId":"new-id"}`. Atomically moves the current record and measurement identity to the new ID; the Node/MySQL Hub also moves its baseline, ledger, and session rows. Returns `409 target_exists` rather than merging two identities.
 
-For a standalone Node or Worker Hub, credential bindings are deployment configuration rather than database rows. Use this order: stop the old client's uploads; provision a distinct token bound to the new ID and reload the Hub configuration; call the rename endpoint; change the client's Device ID and token together; resume it and verify one successful upload; then remove the old binding. Uploading the new ID before the rename creates a conflicting target, while resuming the old binding afterwards recreates the old identity. The embedded Electron Host migrates its own local binding and refreshes the live authorization policy automatically.
+For the Docker Compose Hub, credential bindings are deployment configuration rather than database rows. Use this order: stop the old client's uploads; provision a distinct token bound to the new ID and reload the Hub configuration; call the rename endpoint; change the client's Device ID and token together; resume it and verify one successful upload; then remove the old binding. Uploading the new ID before the rename creates a conflicting target, while resuming the old binding afterwards recreates the old identity.
 
 ## `GET /api/usage/range`
 
-Query a client/model token & cost aggregate for a custom calendar range. Desktop (hub mode) and Android both call this endpoint so custom-range totals stay aligned. This endpoint is currently implemented by the Node/MySQL Hub; the Cloudflare Worker does not expose it yet, so clients must capability-gate the feature.
+Query a client/model token & cost aggregate for a custom calendar range. Desktop (hub mode) and Android both call this endpoint so custom-range totals stay aligned. This endpoint is implemented by the Docker Compose Node/MySQL Hub.
 
 Preferred query parameters (local calendar days, same family as day/month tabs and tokscale `--since`/`--until`):
 

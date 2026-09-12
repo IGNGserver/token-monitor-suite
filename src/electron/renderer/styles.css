@@ -1437,34 +1437,6 @@ span.settings-note.settings-item-desc {
 .hub-status.ok { color: var(--success); border-color: rgba(var(--success-rgb), 0.32); }
 .hub-status.error { color: var(--red); border-color: rgba(244, 119, 136, 0.42); }
 .hub-status[hidden] { display: none; }
-.hub-address-list { display: grid; min-width: 0; gap: 5px; }
-.hub-address-header { color: var(--muted); font-size: 10px; }
-.hub-address-empty { color: var(--muted); font-size: 10px; line-height: 1.4; }
-.hub-address-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-  padding: 5px 7px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: rgba(var(--overlay-rgb), var(--control-alpha));
-}
-.hub-address-row code {
-  flex: 1 1 0;
-  width: 0;
-  min-width: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: 10.5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.hub-address-iface { color: var(--muted); font-size: 9.5px; flex: 0 0 auto; }
-.hub-address-row .icon-button { width: 26px; height: 26px; flex: 0 0 auto; font-size: 12px; }
 .settings-note.hub-warning { color: var(--orange); }
 .currency-rate-row { display: grid; gap: 4px; min-width: 0; }
 .currency-rate-row.hidden, .currency-rate-manual-field.hidden { display: none; }

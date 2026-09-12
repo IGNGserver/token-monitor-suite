@@ -140,8 +140,8 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 - **Real-time multi-device sync** — Server-Sent Events push an update on one device to the others within seconds
 - **Local-first** — no servers needed for single-device use
-- **Self-hosted sync backend** — in-widget hub, Node CLI hub, or Cloudflare Worker
-- **iOS widget support** — Widgy and Scriptable through the Worker hub
+- **Self-hosted sync backend** — Docker Compose Hub
+- **iOS widget support** — Widgy and Scriptable clients can use the self-hosted Hub API
 - **Privacy-first** — prompts, responses, source code, and file contents stay on your machine
 
 ### Interface & surfaces
@@ -173,46 +173,29 @@ Local mode is the default: launch the app and it starts tracking this device. No
 
 ## Multi-device sync
 
-Pick ONE hub backend that all your devices (and any headless agents) connect to. On each device, open the widget and pick a mode under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget.
+When you want multi-device sync, connect all devices (and any headless agents) to the same Docker Compose Hub. On each device, open the widget and choose **Connect to a hub** under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget.
 
-Hub credentials are scoped: viewer tokens are read-only, device tokens can read and ingest only their bound Device ID, and admin tokens perform mutations. Remote connections require HTTPS by default; desktop/agent HTTP needs an explicit trusted-LAN opt-in, while Android release builds always require HTTPS.
+For this single-user project, `TOKEN_MONITOR_SECRET` is the one Hub key used by every device and it covers read, ingest, and administrative operations, including manually managed quota accounts. Older split admin/viewer/device credentials remain available only as a compatibility mode. Remote connections require HTTPS by default; desktop/agent HTTP needs an explicit trusted-LAN opt-in, while Android release builds always require HTTPS.
 
 An older profile that points to a non-loopback `http://` Hub is not silently weakened during upgrade: local collection continues, while Hub read/upload/stream remain blocked until HTTPS is configured or the user explicitly enables the trusted-LAN option. The sync settings panel reports those channels separately and can recover them in the same process after the setting changes.
 
-#### Option A — Host the hub from the widget (easiest, no CLI)
+#### Option A — Local only (default)
 
-In the widget on one always-on machine, open Settings → Multi-device Sync and pick **Host hub on this device**. For every remote Device ID, create a bound device token and paste that token into the matching client. The host also exposes a read-only viewer token and a deliberately revealed admin token for the web management UI.
+Use the widget's local mode for a single device. It reads this machine's local data directly and does not require a Hub or an agent.
 
-The hub runs while Token Monitor is running — quitting (not just closing the window) stops it for all connected devices.
+#### Option B — Connect to a Docker Compose Hub
 
-#### Option B — Self-hosted Node hub (always-on headless machine)
+Deploy the root `docker-compose.yml` on an always-on machine:
 
 ```bash
-# on the always-on machine
 cp .env.example .env
-# set ADMIN/VIEWER/INGEST credentials and TLS in .env, then:
-npm run hub
+# set TOKEN_MONITOR_SECRET and the MySQL passwords in .env
+docker compose up -d
 ```
 
-#### Option C — Cloudflare Worker hub (across networks, including iPhone)
+In every widget, choose **Connect to a hub** under Settings → Multi-device Sync, then enter the Hub URL and the same Hub key. On machines without a widget, configure the same URL and key and run `npm run agent`.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IGNGserver/token-monitor-suite/tree/main/worker)
-
-After a one-click or manual deploy, configure the three scoped Worker secrets:
-
-```bash
-cd worker
-npm install
-npx wrangler login
-npx wrangler secret put TOKEN_MONITOR_ADMIN_SECRET
-npx wrangler secret put TOKEN_MONITOR_VIEWER_SECRET
-npx wrangler secret put TOKEN_MONITOR_INGEST_CREDENTIALS
-npx wrangler deploy
-```
-
-Paste the deployed URL into each device's widget at Settings → Multi-device Sync. See [worker/README.md](worker/README.md) for the iOS widget recipe and endpoint reference, or [docs/API.md](docs/API.md) for the hub HTTP API.
-
-The Worker covers ingest, stats, history, and SSE. It publishes the versioned Hub capability contract with custom-range usage and pricing marked unsupported; desktop, web, and Android gate those features instead of assuming Node/MySQL parity.
+The root Docker Compose stack is the only supported Hub deployment. It provides the HTTP API, dashboard, PWA, device ingest, and SSE stream for every connected client.
 
 ## App data
 
@@ -251,7 +234,7 @@ Mode B — Sync (opt-in, multi-device)
     device C agent ──▶
 ```
 
-The widget chooses local vs sync mode based on Settings → Multi-device Sync. The hub itself can run as a separate `npm run hub` process, a Cloudflare Worker, or directly inside one of the widgets (Host mode). In sync mode the hub pushes aggregated stats to every connected widget over Server-Sent Events, so updates on one device appear on the others within a few seconds.
+The widget chooses local vs sync mode based on Settings → Multi-device Sync. The Docker Compose Hub receives each device's normalized summary and pushes aggregated stats to connected clients over Server-Sent Events, so updates on one device appear on the others within a few seconds.
 
 ## Session data retention
 
@@ -314,8 +297,8 @@ Issues and PRs are welcome. Project conventions, architecture notes, and the com
 This repository keeps the upstream desktop collector and adds the project-specific deployment surfaces:
 
 - **Claude Desktop Local Agent / Cowork** usage and session details.
-- **Android client** for viewing synced usage from a Worker or MySQL-backed Hub.
-- **MySQL Hub** with Docker Compose deployment, plus the Cloudflare Worker hub for common ingest, stats, history, and SSE surfaces.
+- **Android client** for viewing synced usage from the MySQL-backed Docker Compose Hub.
+- **MySQL Hub** with the Docker Compose deployment for ingest, stats, history, and SSE surfaces.
 - The project release stream and package metadata live at [IGNGserver/token-monitor-suite](https://github.com/IGNGserver/token-monitor-suite).
 
 ## License

@@ -230,7 +230,10 @@ test('Hub account API supports adding codex and antigravity accounts with explic
     assert.equal(oauthStart.response.status, 200);
     assert.equal(oauthStart.body.ok, true);
     assert.ok(oauthStart.body.sessionId);
-    assert.match(oauthStart.body.authUrl, /codeium\.com\/profile/);
+    const oauthUrl = new URL(oauthStart.body.authUrl);
+    assert.equal(oauthUrl.origin, 'https://accounts.google.com');
+    assert.equal(oauthUrl.searchParams.get('redirect_uri'), 'https://antigravity.google/oauth-callback');
+    assert.ok(oauthUrl.searchParams.get('state'));
 
     // Test OAuth exchange with direct token paste
     const oauthExchange = await requestJson(port, '/api/accounts/oauth/exchange', {
@@ -238,7 +241,7 @@ test('Hub account API supports adding codex and antigravity accounts with explic
       token: 'admin-token',
       body: {
         sessionId: oauthStart.body.sessionId,
-        redirectUrl: `http://localhost:8080/callback?api_key=exchanged-agy-token`,
+        redirectUrl: `https://antigravity.google/oauth-callback?state=${encodeURIComponent(oauthUrl.searchParams.get('state'))}&api_key=exchanged-agy-token`,
         name: 'agy-oauth-exchanged'
       }
     });

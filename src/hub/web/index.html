@@ -41,8 +41,8 @@
       <div class="main">
         <header class="topbar">
           <div class="topbar-left">
-            <button type="button" id="menuToggle" class="icon-btn mobile-only" aria-label="Menu" aria-controls="primaryNav" aria-expanded="false" data-i18n-aria="nav.menu">☰</button>
-            <button type="button" id="homeReturnBtn" class="icon-btn home-return hidden" title="Home" aria-label="Home">←</button>
+            <button type="button" id="menuToggle" class="icon-btn mobile-only" aria-label="Menu" aria-controls="primaryNav" aria-expanded="false" data-i18n-aria="nav.menu"><span class="ui-icon-slot" data-ui-icon="menu"></span></button>
+            <button type="button" id="homeReturnBtn" class="icon-btn home-return hidden" title="Home" aria-label="Home"><span class="ui-icon-slot" data-ui-icon="back"></span></button>
             <div>
               <h1 id="pageTitle" class="page-title">Home</h1>
               <p id="pageMeta" class="page-meta">—</p>
@@ -54,9 +54,9 @@
               <select id="deviceFilter" aria-label="Device filter"><option value="" data-i18n="filters.allDevices">All devices</option></select>
             </label>
             <div class="period-tabs" id="periodTabs" role="tablist" aria-label="Period"></div>
-            <button type="button" id="customRangeBtn" class="icon-btn" title="Custom range" aria-label="Custom range">▦</button>
-            <button type="button" id="refreshBtn" class="icon-btn" title="Refresh" aria-label="Refresh">↻</button>
-            <button type="button" id="settingsOpenTop" class="icon-btn mobile-only" title="Settings" aria-label="Settings" data-i18n-aria="nav.settings">⚙</button>
+            <button type="button" id="customRangeBtn" class="icon-btn" title="Custom range" aria-label="Custom range"><span class="ui-icon-slot" data-ui-icon="range"></span></button>
+            <button type="button" id="refreshBtn" class="icon-btn" title="Refresh" aria-label="Refresh"><span class="ui-icon-slot" data-ui-icon="refresh"></span></button>
+            <button type="button" id="settingsOpenTop" class="icon-btn mobile-only" title="Settings" aria-label="Settings" data-i18n-aria="nav.settings"><span class="ui-icon-slot" data-ui-icon="settings"></span></button>
           </div>
         </header>
 
@@ -106,7 +106,7 @@
       <aside class="drawer-panel" role="dialog" aria-labelledby="settingsTitle">
         <header class="drawer-head">
           <h2 id="settingsTitle" data-i18n="settings.title">Settings</h2>
-          <button type="button" class="icon-btn" data-close-settings aria-label="Close">×</button>
+          <button type="button" class="icon-btn" data-close-settings aria-label="Close"><span class="ui-icon-slot" data-ui-icon="close"></span></button>
         </header>
         <div class="drawer-body">
           <label class="field">
@@ -158,7 +158,7 @@
       <div class="popover-card">
         <header class="popover-head">
           <h3 id="rangeTitle" data-i18n="range.title">Custom range</h3>
-          <button type="button" class="icon-btn" id="rangeClose" aria-label="Close">×</button>
+          <button type="button" class="icon-btn" id="rangeClose" aria-label="Close"><span class="ui-icon-slot" data-ui-icon="close"></span></button>
         </header>
         <div class="popover-body">
           <label class="field">

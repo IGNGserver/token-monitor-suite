@@ -42,19 +42,53 @@ import {
   HUB_ACCOUNT_PROVIDERS
 } from './data.js';
 
+const UI_ICON_PATHS = Object.freeze({
+  home: '<path d="M3.5 10.5 12 3l8.5 7.5v8a1 1 0 0 1-1 1h-5v-5h-5v5h-5a1 1 0 0 1-1-1z"/><path d="M8 20.5h8"/>',
+  tool: '<path d="m14.7 6.3 3-3a4 4 0 0 0 1.1 4.9l-6.4 6.4-2-2 6.4-6.4a4 4 0 0 0-4.9-1.1z"/><path d="m11.4 13.6-6.7 6.7a1.4 1.4 0 0 1-2-2l6.7-6.7"/>',
+  device: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h3M16 15h.01"/>',
+  model: '<path d="m12 3 2.5 5.5L20 11l-5.5 2.5L12 19l-2.5-5.5L4 11l5.5-2.5z"/>',
+  project: '<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10l2 2h6.5A1.5 1.5 0 0 1 20 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 16.5z"/>',
+  session: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 12h5M8 15h7"/>',
+  limits: '<path d="M5 19V9M12 19V5M19 19v-8"/><path d="M3 19h18"/>',
+  accounts: '<circle cx="12" cy="8" r="3"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+  status: '<circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.2 2.2 4.8-5"/>',
+  trends: '<path d="M4 17 9 12l3 3 7-8"/><path d="M15 7h4v4"/>',
+  subscriptions: '<path d="M5 7h14M5 12h14M5 17h8"/><path d="M17 16v4M15 18h4"/>',
+  pricing: '<path d="M6 4h12M6 20h12M8 4c0 4 8 4 8 8s-8 4-8 8"/><path d="M16 4c0 4-8 4-8 8s8 4 8 8"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  back: '<path d="m15 5-7 7 7 7"/><path d="M8 12h12"/>',
+  range: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 9h16M8 13h3M13 13h3M8 16h3"/>',
+  refresh: '<path d="M20 11a8 8 0 0 0-14.7-4L3 10"/><path d="M3 5v5h5M4 13a8 8 0 0 0 14.7 4L21 14"/><path d="M21 19v-5h-5"/>',
+  settings: '<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/><path d="m19.4 15 .1.1a2 2 0 0 1-2.8 2.8l-.1-.1a2 2 0 0 0-3.4 1.4v.2a2 2 0 0 1-4 0v-.2a2 2 0 0 0-3.4-1.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A2 2 0 0 0 1.6 12a2 2 0 0 1 2-2h.2a2 2 0 0 0 1.4-3.4l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A2 2 0 0 0 11.4 2h.2a2 2 0 0 1 2 2v.2A2 2 0 0 0 17 5.6l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A2 2 0 0 0 21.2 12a2 2 0 0 1-2 2H19a2 2 0 0 0-1.4 3.4"/>',
+  close: '<path d="m6 6 12 12M18 6 6 18"/>',
+  warning: '<path d="m12 3 9 16H3z"/><path d="M12 9v4M12 16h.01"/>',
+  arrowUpRight: '<path d="M7 17 17 7M8 7h9v9"/>'
+});
+
+function uiIcon(name) {
+  const path = UI_ICON_PATHS[name] || UI_ICON_PATHS.status;
+  return `<svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${path}</svg>`;
+}
+
+function renderStaticUiIcons() {
+  document.querySelectorAll('[data-ui-icon]').forEach((element) => {
+    element.innerHTML = uiIcon(element.dataset.uiIcon);
+  });
+}
+
 const VIEWS = [
-  { id: 'home', icon: '⌂' },
-  { id: 'tool', icon: '⚒' },
-  { id: 'device', icon: '▣' },
-  { id: 'model', icon: '◈' },
-  { id: 'project', icon: '◫' },
-  { id: 'session', icon: '☰' },
-  { id: 'limits', icon: '◔' },
-  { id: 'accounts', icon: '👤' },
-  { id: 'status', icon: '◉' },
-  { id: 'trends', icon: '∿' },
-  { id: 'subscriptions', icon: '◌' },
-  { id: 'pricing', icon: '¤' }
+  { id: 'home', icon: 'home' },
+  { id: 'tool', icon: 'tool' },
+  { id: 'device', icon: 'device' },
+  { id: 'model', icon: 'model' },
+  { id: 'project', icon: 'project' },
+  { id: 'session', icon: 'session' },
+  { id: 'limits', icon: 'limits' },
+  { id: 'accounts', icon: 'accounts' },
+  { id: 'status', icon: 'status' },
+  { id: 'trends', icon: 'trends' },
+  { id: 'subscriptions', icon: 'subscriptions' },
+  { id: 'pricing', icon: 'pricing' }
 ];
 
 const PERIODS = ['today', 'month', 'allTime'];
@@ -148,6 +182,7 @@ const state = {
   accountsLoading: false,
   accountsError: null,
   accountsSaving: false,
+  accountFormError: '',
   accountEditId: '',
   accountFormMode: 'simple',
   accountSelectedProvider: 'deepseek',
@@ -349,7 +384,7 @@ function renderChrome() {
   if (!visibleViews.some((view) => view.id === state.prefs.view)) state.prefs.view = 'home';
   els.primaryNav.innerHTML = visibleViews.map((view) => `
     <button type="button" class="nav-btn ${state.prefs.view === view.id ? 'active' : ''}" data-view="${view.id}">
-      <span class="nav-ico" aria-hidden="true">${view.icon}</span>
+      <span class="nav-ico">${uiIcon(view.icon)}</span>
       <span class="nav-label">${tr(`nav.${view.id}`)}</span>
     </button>
   `).join('');
@@ -970,7 +1005,7 @@ function renderSubscriptions() {
         : Number(record.amountMinor || 0);
       return `<article class="management-row ${record.id === state.subscriptionEditId ? 'is-editing' : ''}">
         <div class="row-main">
-          <span class="management-icon">${topUp ? '↗' : '↻'}</span>
+          <span class="management-icon">${uiIcon(topUp ? 'arrowUpRight' : 'refresh')}</span>
           <div class="row-copy"><div class="row-name">${escapeHtml(record.provider || tr('subscriptions.untitled'))}</div><div class="row-sub">${escapeHtml(detail || tr('subscriptions.noDetails'))}</div></div>
         </div>
         <div class="row-metrics"><div class="row-value">${escapeHtml(formatSubscriptionMoney(recordAmount, record.currency))}</div><div class="row-cost">${escapeHtml(record.currency || 'USD')}</div></div>
@@ -1667,7 +1702,7 @@ function renderAccounts() {
           `}
         </div>
         ${session ? `
-          <div class="account-oauth-step" style="margin-top:14px;">
+          <div class="account-oauth-step account-oauth-step-secondary">
             <strong>${escapeHtml(tr('accounts.oauthStep2'))}</strong>
             <p class="muted tiny">${escapeHtml(tr('accounts.oauthStep2Desc'))}</p>
             <input name="redirectUrl" required placeholder="${escapeHtml(tr('accounts.oauthUrlPlaceholder'))}" class="account-oauth-redirect-input" spellcheck="false" autocomplete="off" />
@@ -1685,7 +1720,7 @@ function renderAccounts() {
       </label>`;
   }
 
-  const form = `<form class="management-form account-form" data-account-form>
+  const form = `<form class="management-form account-form" data-account-form data-account-mode="${escapeHtml(effectiveMode)}">
     <div class="form-section-head">
       <div>
         <h3>${formTitle}</h3>
@@ -1725,7 +1760,7 @@ function renderAccounts() {
     ${(currentProvider === 'codex' || currentProvider === 'antigravity') ? `
     <div class="account-disclaimer-box">
       <div class="account-disclaimer-head">
-        <span class="account-disclaimer-icon">⚠️</span>
+        <span class="account-disclaimer-icon">${uiIcon('warning')}</span>
         <strong>${escapeHtml(tr('accounts.disclaimerTitle'))}</strong>
       </div>
       <p class="account-disclaimer-text">${escapeHtml(tr('accounts.disclaimerText'))}</p>
@@ -1735,6 +1770,7 @@ function renderAccounts() {
         <span>${escapeHtml(tr('accounts.disclaimerAgree'))}</span>
       </label>` : ''}
     </div>` : ''}
+    ${state.accountFormError ? `<p class="form-error account-form-error" role="alert">${escapeHtml(state.accountFormError)}</p>` : ''}
     <div class="drawer-actions">
       <button type="submit" class="primary-btn" ${state.accountsSaving ? 'disabled' : ''}>
         ${state.accountsSaving ? tr('actions.saving') : tr('actions.save')}
@@ -1752,6 +1788,7 @@ function renderAccounts() {
 async function saveAccountFromForm(form) {
   const values = new FormData(form);
   const editing = state.accounts?.find((a) => a.id === state.accountEditId) || null;
+  const mode = String(form.dataset.accountMode || state.accountFormMode || 'simple');
   const provider = editing ? editing.provider : String(values.get('provider') || '').trim().toLowerCase();
   const name = String(values.get('name') || '').trim();
   const label = String(values.get('label') || '').trim();
@@ -1760,8 +1797,42 @@ async function saveAccountFromForm(form) {
   if (!name) throw new Error(tr('accounts.nameRequired'));
   if (!provider) throw new Error(tr('accounts.providerRequired'));
 
+  const oauthMode = !editing && mode === 'oauth' && (provider === 'codex' || provider === 'antigravity');
+  if (oauthMode) {
+    const agree = values.get('disclaimerAgree');
+    if (agree !== 'on') throw new Error(tr('accounts.disclaimerRequired'));
+    const sessionId = String(values.get('oauthSessionId') || '').trim();
+    const redirectUrl = String(values.get('redirectUrl') || '').trim();
+    if (!sessionId || !redirectUrl) throw new Error(tr('accounts.oauthStep2Desc'));
+
+    state.accountsSaving = true;
+    state.accountFormError = '';
+    render();
+    try {
+      await fetchJson('/api/accounts/oauth/exchange', {
+        secret: state.secret,
+        method: 'POST',
+        body: { sessionId, redirectUrl, name, label }
+      });
+      state.oauthSession = null;
+      state.accountFormMode = 'simple';
+      state.accountSelectedProvider = 'deepseek';
+      state.accountFormError = '';
+      showToast(tr('accounts.updated'));
+      await loadAccounts({ force: true });
+      await refreshStats();
+    } catch (error) {
+      state.accountFormError = error.message || tr('error.generic');
+      showToast(state.accountFormError);
+    } finally {
+      state.accountsSaving = false;
+      render();
+    }
+    return;
+  }
+
   let credential = null;
-  if (state.accountFormMode === 'json') {
+  if (mode === 'json') {
     const rawJson = String(values.get('credentialJson') || '').trim();
     if (rawJson) {
       try {
@@ -1830,35 +1901,8 @@ async function saveAccountFromForm(form) {
     }
   }
 
-  // Handle OAuth session exchange mode
-  if (!editing && state.accountFormMode === 'oauth' && (provider === 'codex' || provider === 'antigravity')) {
-    const sessionId = String(values.get('oauthSessionId') || '').trim();
-    const redirectUrl = String(values.get('redirectUrl') || '').trim();
-    if (!sessionId || !redirectUrl) {
-      throw new Error(tr('accounts.oauthStep2Desc'));
-    }
-    state.accountsSaving = true;
-    render();
-    try {
-      await fetchJson('/api/accounts/oauth/exchange', {
-        secret: state.secret,
-        method: 'POST',
-        body: { sessionId, redirectUrl, name, label }
-      });
-      state.oauthSession = null;
-      showToast(tr('accounts.updated'));
-      await loadAccounts({ force: true });
-      await refreshStats();
-    } catch (error) {
-      showToast(error.message || tr('error.generic'));
-    } finally {
-      state.accountsSaving = false;
-      render();
-    }
-    return;
-  }
-
   state.accountsSaving = true;
+  state.accountFormError = '';
   render();
   try {
     if (editing) {
@@ -1877,11 +1921,15 @@ async function saveAccountFromForm(form) {
         body: { provider, name, label, credential }
       });
     }
+    state.accountFormError = '';
+    state.accountFormMode = 'simple';
+    state.accountSelectedProvider = 'deepseek';
     showToast(tr('accounts.updated'));
     await loadAccounts({ force: true });
     await refreshStats();
   } catch (error) {
-    showToast(error.message || tr('error.generic'));
+    state.accountFormError = error.message || tr('error.generic');
+    showToast(state.accountFormError);
   } finally {
     state.accountsSaving = false;
     render();
@@ -2325,12 +2373,16 @@ function bindEvents() {
     const accountEdit = event.target.closest('[data-account-edit]');
     if (accountEdit) {
       state.accountEditId = accountEdit.dataset.accountEdit || '';
+      state.accountFormError = '';
+      state.accountFormMode = 'simple';
       render();
       return;
     }
     const accountReset = event.target.closest('[data-account-reset]');
     if (accountReset) {
       state.accountEditId = '';
+      state.accountFormError = '';
+      state.accountFormMode = 'simple';
       render();
       return;
     }
@@ -2342,6 +2394,7 @@ function bindEvents() {
     const accountMode = event.target.closest('[data-account-mode]');
     if (accountMode) {
       state.accountFormMode = accountMode.dataset.accountMode;
+      state.accountFormError = '';
       render();
       return;
     }
@@ -2372,14 +2425,21 @@ function bindEvents() {
     const accountOAuthOpen = event.target.closest('[data-account-oauth-open]');
     if (accountOAuthOpen) {
       const url = accountOAuthOpen.dataset.accountOauthOpen;
-      window.open(url, '_blank', 'noopener,noreferrer');
+      const opened = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!opened) showToast(tr('error.generic'));
       return;
     }
     const accountOAuthCopy = event.target.closest('[data-account-oauth-copy]');
     if (accountOAuthCopy) {
       const url = accountOAuthCopy.dataset.accountOauthCopy;
+      if (!navigator.clipboard?.writeText) {
+        showToast(tr('error.generic'));
+        return;
+      }
       void navigator.clipboard.writeText(url).then(() => {
         showToast(tr('accounts.oauthLinkCopied'));
+      }).catch(() => {
+        showToast(tr('error.generic'));
       });
       return;
     }
@@ -2499,6 +2559,7 @@ function bindEvents() {
       state.accountSelectedProvider = accountProvider.value || 'deepseek';
       if (prevProvider !== state.accountSelectedProvider) {
         state.oauthSession = null;
+        state.accountFormError = '';
         if (state.accountSelectedProvider === 'codex' || state.accountSelectedProvider === 'antigravity') {
           state.accountFormMode = 'oauth';
         } else {
@@ -2513,11 +2574,11 @@ function bindEvents() {
     const accountForm = event.target.closest('[data-account-form]');
     if (accountForm) {
       event.preventDefault();
-      try {
-        void saveAccountFromForm(accountForm);
-      } catch (error) {
-        showToast(error.message || tr('error.generic'));
-      }
+      void saveAccountFromForm(accountForm).catch((error) => {
+        state.accountFormError = error.message || tr('error.generic');
+        showToast(state.accountFormError);
+        render();
+      });
       return;
     }
     const subscriptionForm = event.target.closest('[data-subscription-form]');
@@ -2671,6 +2732,7 @@ function bindEvents() {
 }
 
 async function init() {
+  renderStaticUiIcons();
   applyTheme();
   applyLocale();
   bindEvents();

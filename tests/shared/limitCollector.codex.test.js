@@ -143,6 +143,53 @@ test('Codex provider preserves source detail for renderer labels', () => {
   assert.equal(provider.accountEmail, 'user@example.com');
 });
 
+test('fetchCodexLimits reads OAuth quota windows from the usage endpoint', async () => {
+  let request;
+  const providers = await fetchCodexLimits({
+    codexAccessToken: 'oauth-access-token',
+    codexAccountId: 'workspace-1',
+    codexAccountEmail: 'user@example.com',
+    codexAccountLabel: 'Pro'
+  }, {
+    now: () => Date.parse('2026-09-12T00:00:00Z'),
+    fetch: async (url, init) => {
+      request = { url, init };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          plan_type: 'pro',
+          rate_limit: {
+            primary_window: {
+              used_percent: 25,
+              limit_window_seconds: 604800,
+              reset_at: '2026-09-19T00:00:00Z'
+            },
+            secondary_window: {
+              used_percent: 10,
+              limit_window_seconds: 18000,
+              reset_at: '2026-09-12T05:00:00Z'
+            }
+          }
+        })
+      };
+    },
+    readCodexResetCredits: async () => ({ availableCount: 2, nextExpiresAt: '2026-10-01T00:00:00Z' })
+  });
+
+  assert.equal(request.url, 'https://chatgpt.com/backend-api/wham/usage');
+  assert.equal(request.init.method, 'GET');
+  assert.equal(request.init.headers.authorization, 'Bearer oauth-access-token');
+  assert.equal(request.init.headers['chatgpt-account-id'], 'workspace-1');
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0].status, 'ok');
+  assert.equal(providers[0].sourceDetail, 'managed');
+  assert.deepEqual(providers[0].windows.map((window) => window.kind), ['session', 'weekly']);
+  assert.equal(providers[0].windows[0].usedPercent, 10);
+  assert.equal(providers[0].windows[1].usedPercent, 25);
+  assert.equal(providers[0].resetCredits.availableCount, 2);
+});
+
 test('Codex provider reads quota windows from alternate rate limit ids', () => {
   const provider = mapCodexRateLimitsToProvider({
     account: { email: 'user@example.com', planType: 'plus' },

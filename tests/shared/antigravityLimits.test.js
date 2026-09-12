@@ -5,6 +5,49 @@ const test = require('node:test');
 
 const { fetchAntigravityLimits } = require('../../src/shared/limitCollector');
 
+test('fetchAntigravityLimits uses the OAuth cloud quota summary adapter', async () => {
+  let request;
+  const result = (await fetchAntigravityLimits({
+    antigravityAccessToken: 'agy-access-token',
+    antigravityProjectId: 'project-1'
+  }, {
+    now: () => Date.parse('2026-09-12T00:00:00Z'),
+    antigravityCloudBaseUrls: ['https://quota.example.test'],
+    fetch: async (url, init) => {
+      request = { url, init };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          email: 'cloud@example.com',
+          response: {
+            groups: [{
+              displayName: 'Gemini',
+              buckets: [
+                { bucketId: 'session', remainingFraction: 0.4, resetTime: '2026-09-12T05:00:00Z' },
+                { bucketId: 'weekly', remainingFraction: 0.8, resetTime: '2026-09-19T00:00:00Z' }
+              ]
+            }]
+          }
+        })
+      };
+    }
+  }))[0];
+
+  assert.equal(request.url, 'https://quota.example.test/v1internal:retrieveUserQuotaSummary');
+  assert.equal(request.init.method, 'POST');
+  assert.equal(request.init.headers.authorization, 'Bearer agy-access-token');
+  assert.deepEqual(JSON.parse(request.init.body), { project: 'project-1' });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.source, 'oauth');
+  assert.equal(result.sourceDetail, 'managed');
+  assert.equal(result.credentialOrigin, 'manual');
+  assert.equal(result.accountEmail, 'cloud@example.com');
+  assert.deepEqual(result.windows.map((window) => window.kind), ['session', 'weekly']);
+  assert.equal(result.windows[0].usedPercent, 60);
+  assert.equal(result.windows[1].remainingPercent, 80);
+});
+
 test('fetchAntigravityLimits returns notConfigured when probe says LS not running', async () => {
   const result = await fetchAntigravityLimits({}, {
     antigravityProbe: async () => {

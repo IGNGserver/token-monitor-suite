@@ -66,6 +66,21 @@ test('hub web app wires status, heatmap, and active-days controls', () => {
   assert.match(app, /data-pricing-form/);
 });
 
+test('hub account UI keeps the shared form system and reports OAuth failures', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/hub/web/js/app.js'), 'utf8');
+  const index = fs.readFileSync(path.join(__dirname, '../../src/hub/web/index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '../../src/hub/web/css/app.css'), 'utf8');
+
+  assert.match(app, /const UI_ICON_PATHS/);
+  assert.match(app, /data-account-mode="\$\{escapeHtml\(effectiveMode\)\}"/);
+  assert.match(app, /void saveAccountFromForm\(accountForm\)\.catch/);
+  assert.match(app, /account-form-error/);
+  assert.doesNotMatch(index, /[☰↻⚙←×]/u);
+  assert.match(css, /\.field input, \.field select, \.field textarea/);
+  assert.match(css, /\.account-oauth-redirect-input/);
+  assert.match(css, /@media \(max-width: 860px\)/);
+});
+
 test('devicePlatformLabel / countActiveDays / heatmapValue behavior', () => {
   const { devicePlatformLabel, countActiveDays, heatmapValue } = dataApi;
   assert.equal(devicePlatformLabel('win32', 'Windows', '11'), 'Windows 11');

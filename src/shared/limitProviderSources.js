@@ -14,7 +14,7 @@ const HUB_MANUAL_PROVIDER_IDS = Object.freeze(new Set([
 const MANUAL_PROVIDER_KEYS = Object.freeze({
   claude: ['claudeWebCookie'],
   codex: ['codexAuthJson', 'codexAccessToken', 'codexManagedAccounts'],
-  antigravity: ['antigravityEndpoint', 'antigravityCsrfToken'],
+  antigravity: ['antigravityAccessToken', 'antigravityRefreshToken', 'antigravityIdToken', 'antigravityProjectId', 'antigravityEndpoint', 'antigravityCsrfToken'],
   opencode: ['opencodeCookie', 'opencodeProfiles'],
   openrouter: ['openrouterProfiles'],
   deepseek: ['deepseekApiKey'],

@@ -90,6 +90,11 @@ const CODEX_RESET_CREDITS_PATH = '/wham/rate-limit-reset-credits';
 const CODEX_EMPTY_QUOTA_RETRY_DELAY_MS = 300;
 const CODEX_RPC_TIMEOUT_MS = 20_000;
 const TOKEN_MONITOR_USER_AGENT = `token-monitor/${appVersion()} (+https://github.com/Javis603/token-monitor)`;
+const ANTIGRAVITY_CLOUD_BASE_URLS = Object.freeze([
+  'https://daily-cloudcode-pa.sandbox.googleapis.com',
+  'https://cloudcode-pa.googleapis.com'
+]);
+const ANTIGRAVITY_QUOTA_PATH = '/v1internal:retrieveUserQuotaSummary';
 
 function nowIso(nowMs) {
   return new Date(nowMs).toISOString();
@@ -133,7 +138,7 @@ function hasExplicitLimitProviderConfig(provider, options = {}) {
       || normalizeCodexManagedAccounts(options.codexManagedAccounts || options.managedAccounts)
         .some((account) => account.enabled !== false);
     case 'cursor': return options.cursorManualAccountConfigured === true;
-    case 'antigravity': return Boolean(options.antigravityEndpoint || options.antigravityCsrfToken);
+    case 'antigravity': return Boolean(options.antigravityAccessToken || options.antigravityEndpoint || options.antigravityCsrfToken);
     case 'opencode': return Boolean(options.opencodeCookie)
       || hasEnabledProfileCredential(options.opencodeProfiles, (profile) => profile.cookie || profile.apiKey);
     case 'openrouter': return hasEnabledProfileCredential(options.openrouterProfiles, (profile) => profile.apiKey);
@@ -691,7 +696,14 @@ async function fetchJson(url, headers, deps = {}, options = {}) {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    const response = await fetchFn(url, { headers, ...(controller ? { signal: controller.signal } : {}) });
+    const response = await fetchFn(url, {
+      method: options.method || 'GET',
+      headers,
+      ...(options.body !== undefined
+        ? { body: typeof options.body === 'string' ? options.body : JSON.stringify(options.body) }
+        : {}),
+      ...(controller ? { signal: controller.signal } : {})
+    });
     if (typeof options.onResponse === 'function') await options.onResponse(response);
     if (!response.ok) {
       const sourceChallenge = response.status === 403
@@ -2222,6 +2234,76 @@ function parseCodexResetCreditsPayload(payload, nowMs = Date.now()) {
   };
 }
 
+const CODEX_USAGE_PATH = '/wham/usage';
+
+function codexUsageWindow(window) {
+  if (!window || typeof window !== 'object') return null;
+  const usedPercent = window.usedPercent ?? window.used_percent;
+  const windowMinutes = window.windowDurationMins
+    ?? window.window_duration_mins
+    ?? (Number.isFinite(Number(window.limit_window_seconds)) ? Number(window.limit_window_seconds) / 60 : null);
+  const resetsAt = window.resetsAt ?? window.resets_at ?? window.resetAt ?? window.reset_at;
+  if (usedPercent === undefined && windowMinutes === null && resetsAt === undefined) return null;
+  return {
+    ...(usedPercent !== undefined ? { usedPercent } : {}),
+    ...(windowMinutes !== null && windowMinutes !== undefined ? { windowDurationMins: windowMinutes } : {}),
+    ...(resetsAt !== undefined ? { resetsAt } : {})
+  };
+}
+
+function normalizeCodexUsagePayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    throw errorWithStatus('unavailable', 'Invalid Codex usage response');
+  }
+  const rateLimit = payload.rate_limit || payload.rateLimit || {};
+  const primary = codexUsageWindow(rateLimit.primary_window || rateLimit.primary);
+  const secondary = codexUsageWindow(rateLimit.secondary_window || rateLimit.secondary);
+  const rateLimits = {
+    ...(primary ? { primary } : {}),
+    ...(secondary ? { secondary } : {})
+  };
+  if (!primary && !secondary) {
+    throw errorWithStatus('unavailable', 'Codex usage response has no rate-limit windows');
+  }
+  return {
+    ...payload,
+    rateLimits,
+    planType: payload.planType || payload.plan_type || '',
+    rateLimitResetCredits: payload.rateLimitResetCredits
+      || payload.rate_limit_reset_credits
+      || null
+  };
+}
+
+async function fetchCodexUsage(deps = {}) {
+  const read = deps.readFileSync || fs.readFileSync;
+  const authPath = deps.codexAuthPath || codexAuthPath(deps.env || process.env);
+  let auth;
+  try {
+    auth = JSON.parse(read(authPath, 'utf8'));
+  } catch (_) {
+    throw errorWithStatus('notConfigured', 'Codex auth.json not found');
+  }
+  const accessToken = codexAccessTokenFromAuth(auth);
+  if (!accessToken) throw errorWithStatus('unauthorized', 'Codex access token not found');
+  const accountId = deps.codexAccountId || codexProviderAccountIdFromAuth(auth);
+  const headers = {
+    authorization: `Bearer ${accessToken}`,
+    accept: 'application/json',
+    'user-agent': TOKEN_MONITOR_USER_AGENT,
+    'openai-beta': 'codex-1',
+    originator: 'Codex Desktop'
+  };
+  if (accountId) headers['chatgpt-account-id'] = accountId;
+  const payload = await fetchJson(
+    `${codexChatGptBaseUrl(deps)}${CODEX_USAGE_PATH}`,
+    headers,
+    deps,
+    { forbiddenIsUnauthorized: true }
+  );
+  return normalizeCodexUsagePayload(payload);
+}
+
 async function fetchCodexResetCredits(deps = {}) {
   const read = deps.readFileSync || fs.readFileSync;
   const authPath = deps.codexAuthPath || codexAuthPath(deps.env || process.env);
@@ -2383,6 +2465,7 @@ function mapCodexRateLimitsToProvider(payload, meta = {}) {
   return normalizeLimitProvider({
     provider: 'codex',
     accountKey: meta.accountKey || '',
+    ...(meta.accountId ? { accountId: meta.accountId } : {}),
     accountLabel: meta.accountLabel || codexAccountLabel(payload),
     accountName: meta.accountName || '',
     accountEmail: meta.accountEmail || payload.account?.email || '',
@@ -3099,27 +3182,22 @@ async function fetchCodexLimits(options = {}, deps = {}) {
     };
 
     try {
-      const resetCredits = await fetchCodexResetCredits(accountDeps);
-      const windows = [];
-      if (resetCredits && Number.isFinite(resetCredits.availableCount)) {
-        windows.push({
-          kind: 'resetCredits',
-          label: 'Reset credits',
-          value: `${resetCredits.availableCount} available`,
-          resetsAt: resetCredits.nextExpiresAt || null,
-          showMeter: false
-        });
-      }
-      return [normalizeLimitProvider({
-        provider: 'codex',
+      // Keep the Hub path aligned with the official CLI contract: the usage
+      // endpoint supplies the rate-limit windows, while reset credits are a
+      // separate optional read. Previously only the latter was fetched, so a
+      // valid OAuth account was reported as healthy with no quota windows.
+      const payload = await withCodexOAuthResetCredits(
+        await fetchCodexUsage(accountDeps),
+        accountDeps
+      );
+      return [mapCodexRateLimitsToProvider(payload, {
         accountKey,
+        accountId,
         accountEmail: email,
         accountLabel,
         source: 'api',
-        sourceDetail: 'hub',
-        status: 'ok',
-        updatedAt: nowIso(nowMs),
-        windows
+        sourceDetail: 'managed',
+        updatedAt: nowIso(nowMs)
       })];
     } catch (error) {
       return [normalizeLimitProvider({
@@ -3128,7 +3206,7 @@ async function fetchCodexLimits(options = {}, deps = {}) {
         accountEmail: email,
         accountLabel,
         source: 'api',
-        sourceDetail: 'hub',
+        sourceDetail: 'managed',
         status: providerStatusFromError(error),
         updatedAt: nowIso(nowMs),
         windows: []
@@ -3197,9 +3275,120 @@ async function fetchCodexLimits(options = {}, deps = {}) {
   return providers;
 }
 
+function antigravityCloudWindows(payload) {
+  const rawWindows = antigravityProbe._quotaSummaryWindows(payload);
+  return (Array.isArray(rawWindows) ? rawWindows : []).map((window) => ({
+    kind: window.kind,
+    label: window.name,
+    usedPercent: typeof window.remainingFraction === 'number'
+      ? Math.max(0, Math.min(100, (1 - window.remainingFraction) * 100))
+      : null,
+    resetsAt: window.resetTime || null,
+    resetDescription: window.resetDescription || '',
+    windowMinutes: window.kind === 'session' ? 300 : window.kind === 'weekly' ? 10_080 : null,
+    showMeter: window.showMeter !== false
+  }));
+}
+
+async function fetchAntigravityCloudLimits(options = {}, deps = {}) {
+  const nowMs = (deps.now || Date.now)();
+  const updatedAt = nowIso(nowMs);
+  const accessToken = String(options.antigravityAccessToken || '').trim();
+  if (!accessToken) {
+    return [normalizeLimitProvider({
+      provider: 'antigravity',
+      source: 'oauth',
+      sourceDetail: 'managed',
+      status: 'notConfigured',
+      updatedAt,
+      windows: []
+    })];
+  }
+
+  const baseUrls = Array.isArray(deps.antigravityCloudBaseUrls) && deps.antigravityCloudBaseUrls.length > 0
+    ? deps.antigravityCloudBaseUrls
+    : ANTIGRAVITY_CLOUD_BASE_URLS;
+  const headers = {
+    authorization: `Bearer ${accessToken}`,
+    accept: 'application/json',
+    'content-type': 'application/json',
+    'user-agent': 'antigravity',
+    'x-goog-api-client': 'google-cloud-sdk vscode_cloudshelleditor/0.1',
+    'client-metadata': JSON.stringify({
+      ideType: 'IDE_UNSPECIFIED',
+      platform: 'PLATFORM_UNSPECIFIED',
+      pluginType: 'GEMINI'
+    })
+  };
+  const projectId = String(options.antigravityProjectId || '').trim();
+  const refreshToken = String(options.antigravityRefreshToken || '').trim();
+  const configuredAccountEmail = String(options.antigravityAccountEmail || '').trim().toLowerCase();
+  const fallbackAccountKey = hashKey('antigravity', configuredAccountEmail || refreshToken || projectId || accessToken);
+  let lastError = errorWithStatus('unavailable', 'Antigravity cloud quota unavailable');
+  for (const baseUrl of baseUrls) {
+    try {
+      const payload = await fetchJson(`${String(baseUrl).replace(/\/+$/, '')}${ANTIGRAVITY_QUOTA_PATH}`, headers, deps, {
+        method: 'POST',
+        body: projectId ? { project: projectId } : {},
+        forbiddenIsUnauthorized: true
+      });
+      const windows = antigravityCloudWindows(payload);
+      if (windows.length === 0) throw errorWithStatus('unavailable', 'Antigravity quota response has no usable windows');
+      const response = payload?.response || payload?.summary || payload;
+      const accountEmail = String(
+        configuredAccountEmail
+        || payload?.accountEmail
+        || payload?.email
+        || payload?.userStatus?.email
+        || response?.userStatus?.email
+        || ''
+      ).trim().toLowerCase();
+      const accountKey = accountEmail
+        ? hashKey('antigravity', accountEmail)
+        : fallbackAccountKey;
+      const plan = payload?.accountPlan
+        || payload?.plan
+        || payload?.userStatus?.userTier?.name
+        || response?.userStatus?.userTier?.name
+        || '';
+      return [normalizeLimitProvider({
+        provider: 'antigravity',
+        accountKey,
+        accountEmail,
+        accountLabel: antigravityPlanLabelFromParts(plan) || 'Antigravity',
+        source: 'oauth',
+        sourceDetail: 'managed',
+        credentialOrigin: 'manual',
+        status: 'ok',
+        updatedAt,
+        windows
+      })];
+    } catch (error) {
+      lastError = error;
+      if (error?.status === 'unauthorized') break;
+    }
+  }
+  return [normalizeLimitProvider({
+    provider: 'antigravity',
+    accountKey: fallbackAccountKey,
+    accountEmail: configuredAccountEmail,
+    accountLabel: 'Antigravity',
+    source: 'oauth',
+    sourceDetail: 'managed',
+    credentialOrigin: 'manual',
+    status: providerStatusFromError(lastError),
+    updatedAt,
+    windows: []
+  })];
+}
+
 async function fetchAntigravityLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const updatedAt = nowIso(nowMs);
+
+  if (options.antigravityAccessToken) {
+    return fetchAntigravityCloudLimits(options, deps);
+  }
 
   // If explicit Hub credentials (antigravityEndpoint / antigravityCsrfToken) are provided:
   if (options.antigravityEndpoint || options.antigravityCsrfToken) {
@@ -3243,7 +3432,7 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
         accountLabel: snapshot?.accountPlan || 'Antigravity Remote',
         accountEmail: snapshot?.accountEmail || '',
         source: 'rpc',
-        sourceDetail: 'hub',
+        sourceDetail: 'managed',
         status: 'ok',
         updatedAt,
         windows
@@ -3254,7 +3443,7 @@ async function fetchAntigravityLimits(options = {}, deps = {}) {
         accountKey: '',
         accountLabel: 'Antigravity Remote',
         source: 'rpc',
-        sourceDetail: 'hub',
+        sourceDetail: 'managed',
         status: providerStatusFromError(err),
         updatedAt,
         windows: []

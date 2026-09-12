@@ -100,6 +100,82 @@ test('Hub account service rejects duplicate provider identities and refreshes wi
   );
 });
 
+test('disabling a Hub account clears its published quota snapshot until re-enabled', async () => {
+  const repository = new MemoryRepository();
+  let probeCount = 0;
+  const service = createHubAccountService({
+    store: repository,
+    credentialKey: 'hub-key',
+    probe: async (provider) => {
+      probeCount += 1;
+      return {
+        ...probeRow(provider, 'toggle-account'),
+        windows: [{ kind: 'weekly', usedPercent: 10, resetsAt: '2026-09-19T00:00:00Z' }]
+      };
+    },
+    now: () => Date.parse('2026-09-12T00:00:00Z')
+  });
+
+  const account = await service.addAccount({ provider: 'codex', credential: { accessToken: 'oauth-token' } });
+  assert.equal((await service.getLimitsSummary()).providers[0].windows.length, 1);
+
+  const disabled = await service.updateAccount(account.id, { enabled: false });
+  assert.equal(disabled.enabled, false);
+  assert.equal(disabled.status, 'disabled');
+  assert.equal(disabled.limits.status, 'disabled');
+  assert.deepEqual(disabled.limits.windows, []);
+  assert.equal((await service.getLimitsSummary()).providers[0].status, 'disabled');
+  assert.deepEqual((await service.getLimitsSummary()).providers[0].windows, []);
+
+  const enabled = await service.updateAccount(account.id, { enabled: true });
+  assert.equal(enabled.enabled, true);
+  assert.equal(enabled.status, 'ok');
+  assert.equal(enabled.limits.status, 'ok');
+  assert.equal(probeCount, 2);
+});
+
+test('Hub account service rotates an expired OAuth credential before probing', async () => {
+  const repository = new MemoryRepository();
+  const nowMs = Date.parse('2026-09-12T00:00:00Z');
+  const seenTokens = [];
+  const service = createHubAccountService({
+    store: repository,
+    credentialKey: 'hub-key',
+    now: () => nowMs,
+    oauthFetch: async (url, init) => {
+      assert.equal(url, 'https://auth.openai.com/oauth/token');
+      assert.match(String(init.body), /grant_type=refresh_token/);
+      return new Response(JSON.stringify({
+        access_token: 'rotated-access',
+        refresh_token: 'rotated-refresh',
+        expires_in: 3600
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+    probe: async (provider, options) => {
+      seenTokens.push(options.codexAccessToken);
+      return {
+        ...probeRow(provider, 'rotated-account'),
+        windows: [{ kind: 'weekly', usedPercent: 10 }]
+      };
+    }
+  });
+
+  const account = await service.addAccount({
+    provider: 'codex',
+    credential: {
+      accessToken: 'expired-access',
+      refreshToken: 'refresh-token',
+      expiresAt: nowMs - 1
+    }
+  });
+
+  assert.deepEqual(seenTokens, ['rotated-access']);
+  const stored = decryptCredential(repository.hubCredentials.get(account.id), 'hub-key');
+  assert.equal(stored.accessToken, 'rotated-access');
+  assert.equal(stored.refreshToken, 'rotated-refresh');
+  assert.equal(stored.authJson.tokens.access_token, 'rotated-access');
+});
+
 test('Hub provider options do not carry ambient environment or local account discovery', () => {
   const options = providerOptions(
     { id: 'account-1', provider: 'openrouter', name: 'work' },

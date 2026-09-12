@@ -7,6 +7,7 @@ const { LIMIT_PROVIDER_IDS } = require('../shared/limitProviders');
 const { normalizeLimitProvider, normalizeLimitsSummary } = require('../shared/limits');
 const { HUB_MANUAL_PROVIDER_IDS } = require('../shared/limitProviderSources');
 const { probeLimitProvider } = require('../shared/limitCollector');
+const { refreshOAuthCredential } = require('./oauthService');
 const { createMimoManagedAccount } = require('../shared/mimoLimits');
 const { normalizeThirdPartyBaseUrl } = require('../shared/thirdPartyLimits');
 
@@ -164,6 +165,17 @@ function providerOptions(account, credential) {
       };
     }
     case 'antigravity': {
+      const antigravityAccessToken = field(credential, 'accessToken', 'access_token');
+      if (antigravityAccessToken) {
+        return {
+          ...options,
+          antigravityAccessToken,
+          antigravityRefreshToken: field(credential, 'refreshToken', 'refresh_token'),
+          antigravityIdToken: field(credential, 'idToken', 'id_token'),
+          antigravityProjectId: field(credential, 'projectId', 'project'),
+          antigravityAccountEmail: field(credential, 'accountEmail', 'email')
+        };
+      }
       const antigravityEndpoint = field(credential, 'endpoint', 'url') || 'http://127.0.0.1:0';
       const antigravityCsrfToken = field(credential, 'csrfToken', 'token', 'csrf');
       return {
@@ -236,6 +248,30 @@ function providerOptions(account, credential) {
   }
 }
 
+function credentialRefreshToken(credential) {
+  const direct = field(credential, 'refreshToken', 'refresh_token');
+  if (direct) return String(direct).trim();
+  let authJson = credential?.authJson;
+  if (typeof authJson === 'string') {
+    try { authJson = JSON.parse(authJson); } catch (_) { authJson = null; }
+  }
+  return String(authJson?.tokens?.refresh_token || authJson?.tokens?.refreshToken || '').trim();
+}
+
+function credentialExpiresAtMs(credential) {
+  const raw = field(credential, 'expiresAt', 'expires_at');
+  const number = Number(raw);
+  if (Number.isFinite(number) && number > 0) return number < 20_000_000_000 ? number * 1000 : number;
+  const parsed = Date.parse(String(raw || ''));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function shouldRefreshOAuthCredential(provider, credential, nowMs) {
+  if (!['codex', 'antigravity'].includes(provider) || !credentialRefreshToken(credential)) return false;
+  const expiresAt = credentialExpiresAtMs(credential);
+  return expiresAt !== null && expiresAt - nowMs <= 2 * 60 * 1000;
+}
+
 function publicAccount(account, snapshot = null) {
   const current = snapshot?.provider || null;
   return {
@@ -283,6 +319,7 @@ function createHubAccountService({
   refreshMs = DEFAULT_REFRESH_MS,
   concurrency = DEFAULT_CONCURRENCY,
   probe = probeLimitProvider,
+  oauthFetch,
   logger = console,
   onUpdate = null,
   now = Date.now
@@ -342,21 +379,49 @@ function createHubAccountService({
 
   async function probeAccount(account, credential) {
     if (account.provider === 'thirdparty') validateHubThirdPartyCredential(credential);
-    const options = providerOptions(account, credential);
-    const result = await probe(account.provider, options, {}, {
+    const runtime = {
       env: Object.create(null),
       homeDir: '',
       platform: 'linux'
-    });
-    const rows = rowsFromProbe(result);
-    const usable = rows.find((row) => row.status === 'ok') || rows[0];
+    };
+    let activeCredential = credential;
+    if (shouldRefreshOAuthCredential(account.provider, activeCredential, now())) {
+      try {
+        activeCredential = (await refreshOAuthCredential(account.provider, activeCredential, {
+          fetch: oauthFetch,
+          now
+        })).credential;
+      } catch (error) {
+        logger.warn?.(`[hub-accounts] ${account.provider}/${account.id} proactive token refresh failed (${error.code || 'error'})`);
+      }
+    }
+
+    const probeWith = async (candidate) => {
+      const result = await probe(account.provider, providerOptions(account, candidate), {}, runtime);
+      return { candidate, rows: rowsFromProbe(result) };
+    };
+    let attempt = await probeWith(activeCredential);
+    let usable = attempt.rows.find((row) => row.status === 'ok') || attempt.rows[0];
+    if ((!usable || usable.status !== 'ok') && usable?.status === 'unauthorized' && credentialRefreshToken(activeCredential)) {
+      try {
+        const refreshed = await refreshOAuthCredential(account.provider, activeCredential, {
+          fetch: oauthFetch,
+          now
+        });
+        activeCredential = refreshed.credential;
+        attempt = await probeWith(activeCredential);
+        usable = attempt.rows.find((row) => row.status === 'ok') || attempt.rows[0];
+      } catch (error) {
+        logger.warn?.(`[hub-accounts] ${account.provider}/${account.id} token refresh failed (${error.code || 'error'})`);
+      }
+    }
     if (!usable || usable.status !== 'ok') {
       const error = new Error(`Provider validation failed: ${usable?.status || 'unavailable'}`);
       error.code = usable?.status || 'unavailable';
       error.providerRow = usable || null;
       throw error;
     }
-    return usable;
+    return { row: usable, credential: activeCredential };
   }
 
   async function refreshOne(id, reason = 'manual') {
@@ -395,8 +460,13 @@ function createHubAccountService({
     try {
       const credentialEnvelope = await store.getHubAccountCredential(account.id);
       const credential = decryptCredential(credentialEnvelope, credentialKey);
-      const row = await probeAccount(account, credential);
+      const probed = await probeAccount(account, credential);
+      const row = probed.row;
+      const storedCredential = probed.credential;
       await runTransaction(async (executor) => {
+        if (JSON.stringify(storedCredential) !== JSON.stringify(credential)) {
+          await store.replaceHubAccountCredential(account.id, encryptCredential(storedCredential, credentialKey), executor);
+        }
         await store.updateHubAccount(account.id, {
           accountKey: row.accountKey || account.accountKey || '',
           accountEmail: row.accountEmail || account.accountEmail || '',
@@ -490,7 +560,9 @@ function createHubAccountService({
       createdAt: new Date(now()).toISOString(),
       updatedAt: new Date(now()).toISOString()
     };
-    const row = await probeAccount(account, normalizedCredential);
+    const probed = await probeAccount(account, normalizedCredential);
+    const row = probed.row;
+    const storedCredential = probed.credential;
     const duplicate = typeof store.findHubAccount === 'function'
       ? await store.findHubAccount(normalizedProvider, row.accountKey || '', row.accountEmail || '')
       : null;
@@ -499,7 +571,7 @@ function createHubAccountService({
       error.code = 'account_duplicate';
       throw error;
     }
-    const envelope = encryptCredential(normalizedCredential, credentialKey);
+    const envelope = encryptCredential(storedCredential, credentialKey);
     account.accountKey = row.accountKey || '';
     account.accountEmail = row.accountEmail || '';
     account.accountLabel = row.accountLabel || '';
@@ -526,9 +598,15 @@ function createHubAccountService({
     if (patch.enabled !== undefined) next.enabled = Boolean(patch.enabled);
     if (patch.credential !== undefined) {
       const credential = credentialObject(patch.credential);
-      const row = await probeAccount({ ...entry.account, ...next }, credential);
-      const envelope = encryptCredential(credential, credentialKey);
+      const probed = await probeAccount({ ...entry.account, ...next }, credential);
+      const row = probed.row;
+      const storedCredential = probed.credential;
+      const envelope = encryptCredential(storedCredential, credentialKey);
       const updatedAt = new Date(now()).toISOString();
+      const disabled = next.enabled === false;
+      const publishedRow = disabled
+        ? normalizeLimitProvider({ ...row, status: 'disabled', updatedAt, windows: [] })
+        : row;
       await runTransaction(async (executor) => {
         await store.replaceHubAccountCredential(id, envelope, executor);
         await store.updateHubAccount(id, {
@@ -536,7 +614,7 @@ function createHubAccountService({
           accountKey: row.accountKey || entry.account.accountKey || '',
           accountEmail: row.accountEmail || entry.account.accountEmail || '',
           accountLabel: row.accountLabel || entry.account.accountLabel || '',
-          status: 'ok',
+          status: disabled ? 'disabled' : 'ok',
           lastAttemptAt: updatedAt,
           lastSuccessAt: updatedAt,
           lastErrorCode: '',
@@ -545,13 +623,52 @@ function createHubAccountService({
           updatedAt
         }, executor);
         await store.saveHubAccountSnapshot(id, {
-          provider: row,
+          provider: publishedRow,
           lastGood: row,
           updatedAt
         }, executor);
       });
     } else if (Object.keys(next).length) {
-      await store.updateHubAccount(id, { ...next, updatedAt: new Date(now()).toISOString() });
+      const updatedAt = new Date(now()).toISOString();
+      if (next.enabled === false) {
+        // Disabling an account must revoke its last-good snapshot immediately;
+        // otherwise the central limits aggregate keeps displaying quota until
+        // the next scheduled refresh.
+        const disabled = normalizeLimitProvider({
+          ...(entry.snapshot?.provider || {}),
+          provider: entry.account.provider,
+          status: 'disabled',
+          updatedAt,
+          windows: []
+        });
+        await runTransaction(async (executor) => {
+          await store.updateHubAccount(id, {
+            ...next,
+            status: 'disabled',
+            lastAttemptAt: updatedAt,
+            lastErrorCode: '',
+            lastErrorMessage: '',
+            nextRefreshAt: new Date(now() + intervalMs).toISOString(),
+            updatedAt
+          }, executor);
+          await store.saveHubAccountSnapshot(id, {
+            provider: disabled,
+            lastGood: entry.snapshot?.lastGood || null,
+            updatedAt
+          }, executor);
+        });
+      } else if (next.enabled === true && entry.account.enabled === false) {
+        await store.updateHubAccount(id, {
+          ...next,
+          status: 'pending',
+          lastErrorCode: '',
+          lastErrorMessage: '',
+          updatedAt
+        });
+        await refreshOne(id, 'enabled');
+      } else {
+        await store.updateHubAccount(id, { ...next, updatedAt });
+      }
     }
     const refreshed = await accountWithSnapshot(id);
     await onUpdate?.({ type: 'account-updated', accountId: id });

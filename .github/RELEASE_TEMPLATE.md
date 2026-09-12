@@ -3,19 +3,18 @@
 ## What's changed
 
 <!-- app-update-notes:en:start -->
-### Changed
-- **Sync modes:** Reduced the Electron widget to local-only and Connect to Hub; legacy Host settings migrate to local and obsolete embedded Hub credentials are removed safely.
-- **Hub deployment:** Docker Compose is now the only supported Hub deployment; standalone Hub, embedded Hub, and Cloudflare Worker distribution paths were removed.
-- **Upstream protection:** Added a product-scope contract and CI/release guard so removed modes and deployment paths cannot silently return.
+### Added
+- **Hub Account Configuration:** Added central provider accounts tab in Hub Web dashboard with quick form inputs and JSON credential support for 17 providers including DeepSeek, Claude, Codex, Antigravity (AGY), Copilot, OpenCode, and more.
+- **Codex and Antigravity (AGY) Support:** Added Hub-side quota fetching for Codex via auth.json/OAuth token and AGY via Language Server RPC endpoint, with comprehensive compliance and safety disclaimers.
 <!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.23-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.23-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-Setup-0.45.0-rev.23.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.45.0-rev.23.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.24-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.24-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.45.0-rev.24.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-Setup-0.45.0-rev.24.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.45.0-rev.24.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.45.0-rev.24.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -52,19 +51,18 @@ open-source: https://github.com/junhoyeo/tokscale
 ## 更新内容
 
 <!-- app-update-notes:zh:start -->
-### 变更
-- **同步模式：** Electron 小部件收缩为仅限本机和连接中枢两种模式；旧 Host 配置会迁移为本机模式，废弃的内嵌中枢凭证会安全清理。
-- **中枢部署：** Docker Compose 成为唯一支持的中枢部署方式；已移除独立中枢、内嵌中枢和 Cloudflare Worker 发布路径。
-- **上游同步防护：** 新增产品范围契约以及 CI/发布检查，防止已移除的模式和部署路径被上游同步悄悄带回。
+### 新增
+- **中枢账号配置：** 中枢网页端新增“账号管理”选项卡，支持包括 DeepSeek、Claude、Codex、Antigravity (AGY)、Copilot、OpenCode 等在内的服务商便捷表单与 JSON 凭据录入及集中刷新。
+- **Codex 与 Antigravity 支持：** 中枢端支持通过 auth.json/OAuth Token 直接获取 Codex 额度，以及通过 RPC 探测获取 AGY 额度，并在配置时强化安全与合规免责声明。
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.23-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.23-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-Setup-0.45.0-rev.23.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.45.0-rev.23.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.24-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.24-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.45.0-rev.24.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-Setup-0.45.0-rev.24.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.45.0-rev.24.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.45.0-rev.24.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -97,7 +95,7 @@ https://github.com/junhoyeo/tokscale
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v0.45.0-rev.22...v0.45.0-rev.23">v0.45.0-rev.22...v0.45.0-rev.23</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v0.45.0-rev.23...v0.45.0-rev.24">v0.45.0-rev.23...v0.45.0-rev.24</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -114,19 +112,18 @@ https://github.com/junhoyeo/tokscale
 ## 更新內容
 
 <!-- app-update-notes:zh-TW:start -->
-### 變更
-- **同步模式：** Electron 小工具收斂為僅限本機與連接中樞兩種模式；舊 Host 設定會遷移為本機模式，廢棄的內嵌中樞憑證會安全清理。
-- **中樞部署：** Docker Compose 成為唯一支援的中樞部署方式；已移除獨立中樞、內嵌中樞與 Cloudflare Worker 發布路徑。
-- **上游同步防護：** 新增產品範圍契約以及 CI/發布檢查，防止已移除的模式與部署路徑被上游同步悄悄帶回。
+### 新增
+- **中樞帳號設定：** 中樞網頁端新增「帳號管理」分頁，支援包括 DeepSeek、Claude、Codex、Antigravity (AGY)、Copilot、OpenCode 等服務商的便捷表單與 JSON 憑證錄入及集中更新。
+- **Codex 與 Antigravity 支援：** 中樞端支援透過 auth.json/OAuth Token 直接取得 Codex 額度，以及透過 RPC 探針取得 AGY 額度，並在設定時強化安全與合規免責聲明。
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.23-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.23-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-Setup-0.45.0-rev.23.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.45.0-rev.23.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.24-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.24-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.45.0-rev.24.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-Setup-0.45.0-rev.24.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.45.0-rev.24.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.45.0-rev.24.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24.AppImage)
 
 </details>
 
@@ -138,19 +135,18 @@ https://github.com/junhoyeo/tokscale
 ## 업데이트 내용
 
 <!-- app-update-notes:ko:start -->
-### 변경
-- **동기화 모드:** Electron 위젯을 로컬 전용과 허브 연결의 두 모드로 축소했습니다. 기존 Host 설정은 로컬 모드로 마이그레이션되며, 사용하지 않는 임베디드 허브 자격 증명은 안전하게 정리됩니다.
-- **허브 배포:** Docker Compose만 지원되는 허브 배포 방식으로 남겼습니다. 독립 허브, 임베디드 허브 및 Cloudflare Worker 배포 경로를 제거했습니다.
-- **업스트림 보호:** 제거된 모드와 배포 경로가 업스트림 동기화로 다시 들어오지 않도록 제품 범위 계약과 CI/릴리스 검사를 추가했습니다.
+### 추가
+- **Hub 계정 설정:** Hub Web 대시보드에 계정 관리 탭을 추가하여 DeepSeek, Claude, Codex, Antigravity (AGY), Copilot, OpenCode 등 제공자의 간편 입력 및 JSON 자격 증명을 중앙 집중식으로 지원합니다.
+- **Codex 및 Antigravity 지원:** auth.json/OAuth Token을 통한 Codex 한도 조회와 RPC 엔드포인트를 통한 AGY 한도 조회를 Hub에서 직접 지원하며, 면책 조항을 추가했습니다.
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.23-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.23-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-Setup-0.45.0-rev.23.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.45.0-rev.23.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.24-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.24-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.45.0-rev.24.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-Setup-0.45.0-rev.24.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.45.0-rev.24.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.45.0-rev.24.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24.AppImage)
 
 </details>
 
@@ -162,19 +158,18 @@ https://github.com/junhoyeo/tokscale
 ## 更新内容
 
 <!-- app-update-notes:ja:start -->
-### 変更
-- **同期モード:** Electron ウィジェットをローカルのみとハブ接続の2モードに縮小しました。旧 Host 設定はローカルモードへ移行され、不要な組み込みハブ資格情報は安全に削除されます。
-- **ハブのデプロイ:** サポートするハブのデプロイ方式を Docker Compose のみにしました。単独ハブ、組み込みハブ、Cloudflare Worker の配布経路を削除しました。
-- **アップストリーム保護:** 削除したモードとデプロイ経路がアップストリーム同期で戻らないよう、製品範囲契約と CI/リリース検査を追加しました。
+### 追加
+- **Hub アカウント設定:** Hub Web ダッシュボードにアカウント管理タブを追加し、DeepSeek、Claude、Codex、Antigravity (AGY)、Copilot、OpenCode などの簡易入力および JSON 認証情報の集中管理に対応しました。
+- **Codex および Antigravity 対応:** Hub 側で auth.json/OAuth Token を用いた Codex の上限取得および RPC 経由での AGY 上限取得に対応し、設定時の免責事項を追加しました。
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.23-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.23-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-Setup-0.45.0-rev.23.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.45.0-rev.23.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.45.0-rev.23.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.23/Token-Monitor-0.45.0-rev.23.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.24-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.24-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.45.0-rev.24.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-Setup-0.45.0-rev.24.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.45.0-rev.24.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.45.0-rev.24.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.24/Token-Monitor-0.45.0-rev.24.AppImage)
 
 </details>
 

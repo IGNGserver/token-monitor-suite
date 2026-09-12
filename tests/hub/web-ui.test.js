@@ -192,6 +192,11 @@ test('hub web management APIs expose subscription concurrency and pricing contra
     assert.equal(typeof stats.historyRevision, 'string');
     assert.equal(typeof stats.deviceHistoryRevision, 'string');
     assert.equal(typeof stats.subscriptionsUpdatedAt, 'string');
+
+    const accounts = await (await fetch(`${base}/api/accounts`, { headers })).json();
+    assert.equal(accounts.ok, true);
+    assert.equal(Array.isArray(accounts.accounts), true);
+    assert.equal(Array.isArray(accounts.providers), true);
   } finally {
     await hub.stop();
   }

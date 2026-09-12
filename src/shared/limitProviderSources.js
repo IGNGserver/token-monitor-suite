@@ -6,13 +6,15 @@ const { LIMIT_PROVIDER_IDS } = require('./limitProviders');
 // the source of truth for the central Hub account UI and for compatibility
 // with provider adapters that are also used by the Hub.
 const HUB_MANUAL_PROVIDER_IDS = Object.freeze(new Set([
-  'claude', 'opencode', 'openrouter', 'deepseek', 'minimax', 'mimo',
+  'claude', 'codex', 'antigravity', 'opencode', 'openrouter', 'deepseek', 'minimax', 'mimo',
   'copilot', 'zai', 'zaiteam', 'volcengine', 'qoder', 'commandcode',
   'ollama', 'kimi', 'thirdparty'
 ]));
 
 const MANUAL_PROVIDER_KEYS = Object.freeze({
   claude: ['claudeWebCookie'],
+  codex: ['codexAuthJson', 'codexAccessToken', 'codexManagedAccounts'],
+  antigravity: ['antigravityEndpoint', 'antigravityCsrfToken'],
   opencode: ['opencodeCookie', 'opencodeProfiles'],
   openrouter: ['openrouterProfiles'],
   deepseek: ['deepseekApiKey'],
@@ -31,7 +33,7 @@ const MANUAL_PROVIDER_KEYS = Object.freeze({
 
 const LIMIT_PROVIDER_SOURCE_CAPABILITIES = Object.freeze({
   claude: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.claude },
-  codex: { manual: false, automatic: false, authority: 'unsupported', manualKeys: [] },
+  codex: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.codex },
   cursor: { manual: false, automatic: false, authority: 'unsupported', manualKeys: [] },
   opencode: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.opencode },
   openrouter: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.openrouter },
@@ -47,7 +49,7 @@ const LIMIT_PROVIDER_SOURCE_CAPABILITIES = Object.freeze({
   ollama: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.ollama },
   kimi: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.kimi },
   thirdparty: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.thirdparty },
-  antigravity: { manual: false, automatic: false, authority: 'unsupported', manualKeys: [] },
+  antigravity: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.antigravity },
   grok: { manual: false, automatic: false, authority: 'unsupported', manualKeys: [] },
   kiro: { manual: false, automatic: false, authority: 'unsupported', manualKeys: [] }
 });

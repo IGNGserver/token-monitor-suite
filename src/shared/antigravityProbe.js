@@ -798,5 +798,6 @@ module.exports = {
   _poolForModel: poolForModel,
   _quotaSummaryWindows: quotaSummaryWindows,
   _quotaBucketKind: quotaBucketKind,
-  _endpointCandidates: endpointCandidates
+  _endpointCandidates: endpointCandidates,
+  _groupedQuotaFromCandidates: groupedQuotaFromCandidates
 };

@@ -129,9 +129,11 @@ function hasEnabledProfileCredential(profiles, predicate) {
 function hasExplicitLimitProviderConfig(provider, options = {}) {
   switch (provider) {
     case 'claude': return Boolean(options.claudeWebCookie);
-    case 'codex': return normalizeCodexManagedAccounts(options.codexManagedAccounts || options.managedAccounts)
-      .some((account) => account.enabled !== false);
+    case 'codex': return Boolean(options.codexAuthJson || options.codexAccessToken)
+      || normalizeCodexManagedAccounts(options.codexManagedAccounts || options.managedAccounts)
+        .some((account) => account.enabled !== false);
     case 'cursor': return options.cursorManualAccountConfigured === true;
+    case 'antigravity': return Boolean(options.antigravityEndpoint || options.antigravityCsrfToken);
     case 'opencode': return Boolean(options.opencodeCookie)
       || hasEnabledProfileCredential(options.opencodeProfiles, (profile) => profile.cookie || profile.apiKey);
     case 'openrouter': return hasEnabledProfileCredential(options.openrouterProfiles, (profile) => profile.apiKey);
@@ -3072,6 +3074,68 @@ async function fetchLiveCodexAccount(deps = {}, nowMs = Date.now(), managedAccou
 
 async function fetchCodexLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
+
+  // If explicit Hub credentials (codexAuthJson or codexAccessToken) are provided:
+  if (options.codexAuthJson || options.codexAccessToken) {
+    const auth = typeof options.codexAuthJson === 'string'
+      ? (() => { try { return JSON.parse(options.codexAuthJson); } catch (_) { return {}; } })()
+      : (options.codexAuthJson || {});
+    const authIdentity = codexAuthIdentity(auth);
+    const accessToken = options.codexAccessToken
+      || codexAccessTokenFromAuth(auth);
+    const accountId = options.codexAccountId
+      || authIdentity.workspaceAccountId
+      || authIdentity.providerAccountId;
+    const email = authIdentity.email || options.codexAccountEmail || '';
+    const accountKey = authIdentity.accountKey || (email ? codexAccountKey(email, accountId) : hashKey('codex', accessToken || 'hub'));
+    const accountLabel = authIdentity.accountLabel || options.codexAccountLabel || 'ChatGPT';
+
+    const accountDeps = {
+      ...deps,
+      fetch: deps.fetch || fetch,
+      codexAccountId: accountId,
+      codexAuthPath: '',
+      readFileSync: () => JSON.stringify(auth.tokens ? auth : { tokens: { access_token: accessToken, account_id: accountId } })
+    };
+
+    try {
+      const resetCredits = await fetchCodexResetCredits(accountDeps);
+      const windows = [];
+      if (resetCredits && Number.isFinite(resetCredits.availableCount)) {
+        windows.push({
+          kind: 'resetCredits',
+          label: 'Reset credits',
+          value: `${resetCredits.availableCount} available`,
+          resetsAt: resetCredits.nextExpiresAt || null,
+          showMeter: false
+        });
+      }
+      return [normalizeLimitProvider({
+        provider: 'codex',
+        accountKey,
+        accountEmail: email,
+        accountLabel,
+        source: 'api',
+        sourceDetail: 'hub',
+        status: 'ok',
+        updatedAt: nowIso(nowMs),
+        windows
+      })];
+    } catch (error) {
+      return [normalizeLimitProvider({
+        provider: 'codex',
+        accountKey,
+        accountEmail: email,
+        accountLabel,
+        source: 'api',
+        sourceDetail: 'hub',
+        status: providerStatusFromError(error),
+        updatedAt: nowIso(nowMs),
+        windows: []
+      })];
+    }
+  }
+
   const scope = options.limitRefreshScope?.provider === 'codex'
     ? options.limitRefreshScope
     : null;
@@ -3133,9 +3197,71 @@ async function fetchCodexLimits(options = {}, deps = {}) {
   return providers;
 }
 
-async function fetchAntigravityLimits(_options = {}, deps = {}) {
+async function fetchAntigravityLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const updatedAt = nowIso(nowMs);
+
+  // If explicit Hub credentials (antigravityEndpoint / antigravityCsrfToken) are provided:
+  if (options.antigravityEndpoint || options.antigravityCsrfToken) {
+    const endpointStr = String(options.antigravityEndpoint || 'http://127.0.0.1:0').trim();
+    let url;
+    try { url = new URL(endpointStr); } catch (_) { url = new URL('http://127.0.0.1:0'); }
+    const scheme = url.protocol.replace(':', '') || 'http';
+    const port = Number(url.port) || (scheme === 'https' ? 443 : 80);
+    const host = url.hostname || '127.0.0.1';
+    const csrfToken = String(options.antigravityCsrfToken || '').trim();
+
+    const probeDeps = {
+      ...deps,
+      callLs: (args) => antigravityProbe.callLs({ ...args, host, scheme, port, csrfToken })
+    };
+    try {
+      const candidates = [{ scheme, port, csrfToken }];
+      const timeoutMs = 5000;
+      const deadline = Date.now() + timeoutMs;
+      const { snapshot, lastError } = await antigravityProbe._groupedQuotaFromCandidates(
+        candidates,
+        probeDeps.callLs,
+        { summaryDeadlineMs: deadline, probeDeadlineMs: deadline }
+      );
+      if (lastError && !snapshot) throw lastError;
+      const windows = Array.isArray(snapshot?.windows) ? snapshot.windows.map((window) => ({
+        kind: window.kind,
+        label: window.name,
+        usedPercent: typeof window.remainingFraction === 'number'
+          ? Math.max(0, Math.min(100, (1 - window.remainingFraction) * 100))
+          : null,
+        resetsAt: window.resetTime || null,
+        resetDescription: window.resetDescription || '',
+        windowMinutes: window.kind === 'session' ? 300 : window.kind === 'weekly' ? 10_080 : null,
+        showMeter: window.showMeter !== false
+      })) : [];
+
+      return [normalizeLimitProvider({
+        provider: 'antigravity',
+        accountKey: hashKey('antigravity', snapshot?.accountEmail || host),
+        accountLabel: snapshot?.accountPlan || 'Antigravity Remote',
+        accountEmail: snapshot?.accountEmail || '',
+        source: 'rpc',
+        sourceDetail: 'hub',
+        status: 'ok',
+        updatedAt,
+        windows
+      })];
+    } catch (err) {
+      return [normalizeLimitProvider({
+        provider: 'antigravity',
+        accountKey: '',
+        accountLabel: 'Antigravity Remote',
+        source: 'rpc',
+        sourceDetail: 'hub',
+        status: providerStatusFromError(err),
+        updatedAt,
+        windows: []
+      })];
+    }
+  }
+
   const probeFn = deps.antigravityProbe || antigravityProbe.probe;
   try {
     const snapshot = await probeFn(deps);

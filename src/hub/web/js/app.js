@@ -38,7 +38,8 @@ import {
   statusRows,
   limitRemainingTone,
   clampHomeLimitAccountCount,
-  modelColor
+  modelColor,
+  HUB_ACCOUNT_PROVIDERS
 } from './data.js';
 
 const VIEWS = [
@@ -49,6 +50,7 @@ const VIEWS = [
   { id: 'project', icon: '◫' },
   { id: 'session', icon: '☰' },
   { id: 'limits', icon: '◔' },
+  { id: 'accounts', icon: '👤' },
   { id: 'status', icon: '◉' },
   { id: 'trends', icon: '∿' },
   { id: 'subscriptions', icon: '◌' },
@@ -142,6 +144,13 @@ const state = {
   pricingLoading: false,
   pricingError: null,
   pricingSaving: false,
+  accounts: null,
+  accountsLoading: false,
+  accountsError: null,
+  accountsSaving: false,
+  accountEditId: '',
+  accountFormMode: 'simple',
+  accountSelectedProvider: 'deepseek',
   limitProvider: '',
   loading: true,
   error: null,
@@ -330,7 +339,11 @@ function openRange(open) {
 function renderChrome() {
   const capabilities = state.authorization?.capabilities || state.health?.capabilities || {};
   const admin = state.authorization?.scopes?.includes('admin');
-  const visibleViews = VIEWS.filter((view) => view.id !== 'pricing' || (capabilities.pricing !== false && admin));
+  const visibleViews = VIEWS.filter((view) => {
+    if (view.id === 'pricing') return capabilities.pricing !== false && admin;
+    if (view.id === 'accounts') return capabilities.hubAccounts !== false;
+    return true;
+  });
   if (!visibleViews.some((view) => view.id === state.prefs.view)) state.prefs.view = 'home';
   els.primaryNav.innerHTML = visibleViews.map((view) => `
     <button type="button" class="nav-btn ${state.prefs.view === view.id ? 'active' : ''}" data-view="${view.id}">
@@ -1303,6 +1316,9 @@ function render() {
     case 'limits':
       html = renderLimits();
       break;
+    case 'accounts':
+      html = renderAccounts();
+      break;
     case 'status':
       html = renderStatus();
       break;
@@ -1426,6 +1442,446 @@ async function loadPricing({ force = false } = {}) {
   }
 }
 
+async function loadAccounts({ force = false } = {}) {
+  if (!force && state.accounts) return state.accounts;
+  if (state.accountsLoading) return state.accounts;
+  state.accountsLoading = true;
+  state.accountsError = null;
+  try {
+    const payload = await fetchJson('/api/accounts', { secret: state.secret });
+    state.accounts = Array.isArray(payload?.accounts) ? payload.accounts : [];
+    return state.accounts;
+  } catch (error) {
+    state.accountsError = error;
+    if (error.status === 401) showAuth(true);
+    return null;
+  } finally {
+    state.accountsLoading = false;
+    if (state.prefs.view === 'accounts') render();
+  }
+}
+
+function accountRecords() {
+  return Array.isArray(state.accounts) ? state.accounts : [];
+}
+
+function accountField(record, key, fallback = '') {
+  const value = record?.[key];
+  return escapeHtml(value === undefined || value === null ? fallback : value);
+}
+
+function renderAccounts() {
+  if (state.accountsLoading && !state.accounts) return loadingHtml();
+  if (state.accountsError && !state.accounts) {
+    return managementError(tr('accounts.title'), state.accountsError, 'accounts-retry');
+  }
+  const records = accountRecords();
+  const editing = records.find((record) => record.id === state.accountEditId) || null;
+  const currentProvider = editing?.provider || state.accountSelectedProvider || 'deepseek';
+
+  const healthyCount = records.filter((r) => r.enabled !== false && r.status === 'ok').length;
+  const errorCount = records.filter((r) => r.enabled !== false && r.status && r.status !== 'ok').length;
+  const disabledCount = records.filter((r) => r.enabled === false).length;
+
+  const summary = `
+    <div class="summary-chip"><span class="summary-label">${escapeHtml(tr('status.accounts'))}</span><strong>${records.length}</strong></div>
+    <div class="summary-chip"><span class="summary-label">${escapeHtml(tr('accounts.statusOk'))}</span><strong>${healthyCount}</strong></div>
+    ${errorCount ? `<div class="summary-chip"><span class="summary-label">${escapeHtml(tr('accounts.statusError'))}</span><strong style="color:var(--warn, #e06c75)">${errorCount}</strong></div>` : ''}
+    ${disabledCount ? `<div class="summary-chip"><span class="summary-label">${escapeHtml(tr('accounts.statusDisabled'))}</span><strong>${disabledCount}</strong></div>` : ''}
+  `;
+
+  const list = records.length
+    ? `<div class="management-list">${records.map((record) => {
+      const providerLabel = clientLabel(record.provider);
+      const isOk = record.status === 'ok';
+      const isRefreshing = record.status === 'refreshing' || record.status === 'pending';
+      const isDisabled = record.enabled === false;
+      let badgeTone = 'warn';
+      let badgeText = escapeHtml(record.status || 'unknown');
+      if (isDisabled) {
+        badgeTone = 'stale';
+        badgeText = tr('accounts.statusDisabled');
+      } else if (isRefreshing) {
+        badgeTone = 'warn';
+        badgeText = tr('accounts.statusRefreshing');
+      } else if (isOk) {
+        badgeTone = 'ok';
+        badgeText = tr('accounts.statusOk');
+      }
+
+      const metaParts = [
+        providerLabel,
+        record.label ? escapeHtml(record.label) : '',
+        record.accountEmail || record.accountKey ? escapeHtml(record.accountEmail || record.accountKey) : '',
+        record.lastSuccessAt ? tr('accounts.lastRefresh', { time: escapeHtml(formatRelative(record.lastSuccessAt, state.locale)) }) : ''
+      ].filter(Boolean);
+
+      const errorDetail = record.lastErrorMessage ? `<div class="row-sub row-error" style="color:var(--warn, #e06c75);margin-top:4px;">${escapeHtml(record.lastErrorMessage)}</div>` : '';
+
+      return `<article class="management-row account-management-row ${record.id === state.accountEditId ? 'is-editing' : ''}">
+        <div class="row-main">
+          <img class="client-icon" src="${clientIconPath(record.provider)}" alt="" onerror="this.style.display='none'" />
+          <div class="row-copy">
+            <div class="row-name">
+              ${escapeHtml(record.name || providerLabel)}
+              <span class="badge ${badgeTone}" style="margin-left:8px;font-size:11px;">${badgeText}</span>
+            </div>
+            <div class="row-sub">${metaParts.join(' · ')}</div>
+            ${errorDetail}
+          </div>
+        </div>
+        <div class="management-actions">
+          <button type="button" class="ghost-btn" data-account-refresh="${escapeHtml(record.id)}" ${state.accountsSaving ? 'disabled' : ''}>${tr('accounts.refresh')}</button>
+          <button type="button" class="ghost-btn" data-account-toggle="${escapeHtml(record.id)}" ${state.accountsSaving ? 'disabled' : ''}>${record.enabled === false ? tr('accounts.enabled') : tr('accounts.statusDisabled')}</button>
+          <button type="button" class="ghost-btn" data-account-edit="${escapeHtml(record.id)}">${tr('actions.edit')}</button>
+          <button type="button" class="danger-btn" data-account-delete="${escapeHtml(record.id)}">${tr('actions.delete')}</button>
+        </div>
+      </article>`;
+    }).join('')}</div>`
+    : emptyHtml('accounts.empty');
+
+  const providerOptionsHtml = HUB_ACCOUNT_PROVIDERS.map((p) => {
+    const selected = p.id === currentProvider ? ' selected' : '';
+    return `<option value="${escapeHtml(p.id)}"${selected}>${escapeHtml(p.label || clientLabel(p.id))}</option>`;
+  }).join('');
+
+  const isEditing = Boolean(editing);
+  const formTitle = isEditing ? tr('accounts.edit') : tr('accounts.add');
+  const simpleModeActive = state.accountFormMode === 'simple';
+
+  let simpleFieldsHtml;
+  switch (currentProvider) {
+    case 'claude':
+    case 'commandcode':
+    case 'ollama':
+      simpleFieldsHtml = `
+        <label class="field field-wide"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="sessionKey=... / cookie" ${isEditing ? '' : 'required'} /></label>
+      `;
+      break;
+    case 'codex':
+      simpleFieldsHtml = `
+        <label class="field field-wide"><span>${tr('accounts.codexAuthJson')}</span><textarea name="authJson" rows="3" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(tr('accounts.codexAuthJsonPlaceholder'))}"></textarea></label>
+        <label class="field"><span>${tr('accounts.accessToken')}</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.codexAccessTokenPlaceholder'))}" /></label>
+        <label class="field"><span>Account ID (optional)</span><input name="accountId" spellcheck="false" placeholder="chatgpt_account_id" /></label>
+      `;
+      break;
+    case 'antigravity':
+      simpleFieldsHtml = `
+        <label class="field"><span>${tr('accounts.agyEndpoint')}</span><input name="endpoint" type="url" spellcheck="false" placeholder="http://127.0.0.1:port" ${isEditing ? '' : 'required'} /></label>
+        <label class="field"><span>${tr('accounts.agyCsrfToken')}</span><input name="csrfToken" type="password" autocomplete="off" spellcheck="false" placeholder="csrf token" ${isEditing ? '' : 'required'} /></label>
+      `;
+      break;
+    case 'qoder':
+      simpleFieldsHtml = `
+        <label class="field"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="cookie" ${isEditing ? '' : 'required'} /></label>
+        <label class="field"><span>${tr('accounts.site')}</span><select name="site"><option value="global">Global</option><option value="cn">China (CN)</option></select></label>
+      `;
+      break;
+    case 'mimo':
+      simpleFieldsHtml = `
+        <label class="field field-wide"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="userId=...; serviceToken=..." ${isEditing ? '' : 'required'} /></label>
+      `;
+      break;
+    case 'copilot':
+      simpleFieldsHtml = `
+        <label class="field"><span>${tr('accounts.accessToken')}</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="ghu_... / token" ${isEditing ? '' : 'required'} /></label>
+        <label class="field"><span>Enterprise Host (optional)</span><input name="enterpriseHost" spellcheck="false" placeholder="github.mycompany.com" /></label>
+      `;
+      break;
+    case 'volcengine':
+      simpleFieldsHtml = `
+        <label class="field"><span>${tr('accounts.accessKeyId')}</span><input name="accessKeyId" spellcheck="false" placeholder="AKLT..." /></label>
+        <label class="field"><span>${tr('accounts.secretAccessKey')}</span><input name="secretAccessKey" type="password" autocomplete="off" spellcheck="false" placeholder="Secret Access Key" /></label>
+        <label class="field"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Ark API Key (alternative)" /></label>
+        <label class="field"><span>${tr('accounts.region')}</span><input name="region" spellcheck="false" placeholder="cn-beijing" /></label>
+      `;
+      break;
+    case 'zaiteam':
+      simpleFieldsHtml = `
+        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="API Key" ${isEditing ? '' : 'required'} /></label>
+        <label class="field"><span>Organization ID</span><input name="organizationId" spellcheck="false" placeholder="org_..." ${isEditing ? '' : 'required'} /></label>
+        <label class="field"><span>Project ID</span><input name="projectId" spellcheck="false" placeholder="proj_..." ${isEditing ? '' : 'required'} /></label>
+      `;
+      break;
+    case 'thirdparty':
+      simpleFieldsHtml = `
+        <label class="field"><span>${tr('accounts.thirdPartyAdapter')}</span><select name="adapter"><option value="newapi">New API / OneAPI</option><option value="custom">Custom</option></select></label>
+        <label class="field"><span>${tr('accounts.thirdPartyBaseUrl')}</span><input name="baseUrl" type="url" spellcheck="false" placeholder="https://api.example.com" ${isEditing ? '' : 'required'} /></label>
+        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." ${isEditing ? '' : 'required'} /></label>
+      `;
+      break;
+    case 'zai':
+      simpleFieldsHtml = `
+        <label class="field"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="API Key" ${isEditing ? '' : 'required'} /></label>
+        <label class="field"><span>${tr('accounts.region')}</span><select name="region"><option value="global">Global</option><option value="cn">China (BigModel)</option></select></label>
+      `;
+      break;
+    case 'kimi':
+      simpleFieldsHtml = `
+        <label class="field"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." /></label>
+        <label class="field"><span>Web Access Token</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="Access token" /></label>
+      `;
+      break;
+    case 'opencode':
+      simpleFieldsHtml = `
+        <label class="field"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="API Key" /></label>
+        <label class="field"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="Cookie / Token" /></label>
+      `;
+      break;
+    default:
+      // deepseek, openrouter, minimax
+      simpleFieldsHtml = `
+        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." ${isEditing ? '' : 'required'} /></label>
+      `;
+      break;
+  }
+
+  const credentialInputsHtml = simpleModeActive
+    ? `<div class="form-grid account-simple-fields">${simpleFieldsHtml}</div>`
+    : `<label class="field field-wide">
+        <span>${tr('accounts.modeJson')}</span>
+        <textarea name="credentialJson" rows="4" spellcheck="false" autocomplete="off" placeholder='{"apiKey":"sk-..."}'></textarea>
+      </label>`;
+
+  const form = `<form class="management-form account-form" data-account-form>
+    <div class="form-section-head">
+      <div>
+        <h3>${formTitle}</h3>
+        <p class="muted tiny">${tr('accounts.hint')}</p>
+      </div>
+      <div class="account-form-head-actions">
+        <div class="mode-toggle-group">
+          <button type="button" class="ghost-btn ${simpleModeActive ? 'active' : ''}" data-account-mode="simple">${tr('accounts.modeSimple')}</button>
+          <button type="button" class="ghost-btn ${!simpleModeActive ? 'active' : ''}" data-account-mode="json">${tr('accounts.modeJson')}</button>
+        </div>
+        ${isEditing ? `<button type="button" class="ghost-btn" data-account-reset>${tr('actions.cancel')}</button>` : ''}
+      </div>
+    </div>
+    <div class="form-grid">
+      <label class="field">
+        <span>${tr('accounts.provider')}</span>
+        <select name="provider" data-account-provider-select ${isEditing ? 'disabled' : ''}>
+          ${providerOptionsHtml}
+        </select>
+      </label>
+      <label class="field">
+        <span>${tr('accounts.name')}</span>
+        <input name="name" required value="${accountField(editing, 'name')}" placeholder="${currentProvider}-1" maxlength="128" />
+      </label>
+      <label class="field field-wide">
+        <span>${tr('accounts.label')}</span>
+        <input name="label" value="${accountField(editing, 'label')}" placeholder="Production / Personal" maxlength="256" />
+      </label>
+      ${isEditing ? `
+      <label class="check-row field-wide">
+        <input name="enabled" type="checkbox" ${editing?.enabled !== false ? 'checked' : ''} />
+        <span>${tr('accounts.enabled')}</span>
+      </label>` : ''}
+    </div>
+    ${credentialInputsHtml}
+    ${(currentProvider === 'codex' || currentProvider === 'antigravity') ? `
+    <div class="account-disclaimer-box">
+      <div class="account-disclaimer-head">
+        <span class="account-disclaimer-icon">⚠️</span>
+        <strong>${escapeHtml(tr('accounts.disclaimerTitle'))}</strong>
+      </div>
+      <p class="account-disclaimer-text">${escapeHtml(tr('accounts.disclaimerText'))}</p>
+      ${!isEditing ? `
+      <label class="check-row account-disclaimer-check">
+        <input name="disclaimerAgree" type="checkbox" required />
+        <span>${escapeHtml(tr('accounts.disclaimerAgree'))}</span>
+      </label>` : ''}
+    </div>` : ''}
+    <div class="drawer-actions">
+      <button type="submit" class="primary-btn" ${state.accountsSaving ? 'disabled' : ''}>
+        ${state.accountsSaving ? tr('actions.saving') : tr('actions.save')}
+      </button>
+    </div>
+  </form>`;
+
+  const management = state.authorization?.scopes?.includes('admin')
+    ? panel(tr('accounts.add'), form)
+    : '';
+
+  return `${panel(tr('accounts.title'), `<div class="summary-grid account-summary">${summary}</div>${list}`)}${management}`;
+}
+
+async function saveAccountFromForm(form) {
+  const values = new FormData(form);
+  const editing = state.accounts?.find((a) => a.id === state.accountEditId) || null;
+  const provider = editing ? editing.provider : String(values.get('provider') || '').trim().toLowerCase();
+  const name = String(values.get('name') || '').trim();
+  const label = String(values.get('label') || '').trim();
+  const enabled = values.get('enabled') !== null ? values.get('enabled') === 'on' : true;
+
+  if (!name) throw new Error(tr('accounts.nameRequired'));
+  if (!provider) throw new Error(tr('accounts.providerRequired'));
+
+  let credential = null;
+  if (state.accountFormMode === 'json') {
+    const rawJson = String(values.get('credentialJson') || '').trim();
+    if (rawJson) {
+      try {
+        credential = JSON.parse(rawJson);
+      } catch (err) {
+        throw new Error(tr('accounts.invalidJson'), { cause: err });
+      }
+      if (!credential || typeof credential !== 'object' || Array.isArray(credential)) {
+        throw new Error(tr('accounts.invalidJson'));
+      }
+    }
+  } else {
+    // Simple mode
+    const apiKey = String(values.get('apiKey') || '').trim();
+    const cookie = String(values.get('cookie') || '').trim();
+    const accessToken = String(values.get('accessToken') || '').trim();
+    const accessKeyId = String(values.get('accessKeyId') || '').trim();
+    const secretAccessKey = String(values.get('secretAccessKey') || '').trim();
+    const region = String(values.get('region') || '').trim();
+    const site = String(values.get('site') || '').trim();
+    const organizationId = String(values.get('organizationId') || '').trim();
+    const projectId = String(values.get('projectId') || '').trim();
+    const adapter = String(values.get('adapter') || '').trim();
+    const baseUrl = String(values.get('baseUrl') || '').trim();
+    const enterpriseHost = String(values.get('enterpriseHost') || '').trim();
+    const authJson = String(values.get('authJson') || '').trim();
+    const endpoint = String(values.get('endpoint') || '').trim();
+    const csrfToken = String(values.get('csrfToken') || '').trim();
+    const accountId = String(values.get('accountId') || '').trim();
+
+    const credObj = {};
+    if (apiKey) credObj.apiKey = apiKey;
+    if (cookie) credObj.cookie = cookie;
+    if (accessToken) credObj.accessToken = accessToken;
+    if (accessKeyId) credObj.accessKeyId = accessKeyId;
+    if (secretAccessKey) credObj.secretAccessKey = secretAccessKey;
+    if (region) credObj.region = region;
+    if (site) credObj.site = site;
+    if (organizationId) credObj.organizationId = organizationId;
+    if (projectId) credObj.projectId = projectId;
+    if (enterpriseHost) credObj.enterpriseHost = enterpriseHost;
+    if (endpoint) credObj.endpoint = endpoint;
+    if (csrfToken) credObj.csrfToken = csrfToken;
+    if (accountId) credObj.accountId = accountId;
+    if (authJson) {
+      try { credObj.authJson = JSON.parse(authJson); }
+      catch (_) { credObj.authJson = authJson; }
+    }
+    if (adapter || baseUrl) {
+      credObj.adapter = adapter || 'newapi';
+      credObj.baseUrl = baseUrl;
+    }
+    if (Object.keys(credObj).length > 0) {
+      credential = credObj;
+    }
+  }
+
+  if (!editing && !credential) {
+    throw new Error(tr('accounts.credentialRequired'));
+  }
+
+  if (!editing && (provider === 'codex' || provider === 'antigravity')) {
+    const agree = values.get('disclaimerAgree');
+    if (agree !== 'on') {
+      throw new Error(tr('accounts.disclaimerRequired'));
+    }
+  }
+
+  state.accountsSaving = true;
+  render();
+  try {
+    if (editing) {
+      const patch = { name, label, enabled };
+      if (credential) patch.credential = credential;
+      await fetchJson(`/api/accounts/${encodeURIComponent(editing.id)}`, {
+        secret: state.secret,
+        method: 'PATCH',
+        body: patch
+      });
+      state.accountEditId = '';
+    } else {
+      await fetchJson('/api/accounts', {
+        secret: state.secret,
+        method: 'POST',
+        body: { provider, name, label, credential }
+      });
+    }
+    showToast(tr('accounts.updated'));
+    await loadAccounts({ force: true });
+    await refreshStats();
+  } catch (error) {
+    showToast(error.message || tr('error.generic'));
+  } finally {
+    state.accountsSaving = false;
+    render();
+  }
+}
+
+async function refreshAccount(accountId) {
+  if (!accountId) return;
+  state.accountsSaving = true;
+  render();
+  try {
+    await fetchJson(`/api/accounts/${encodeURIComponent(accountId)}/refresh`, {
+      secret: state.secret,
+      method: 'POST'
+    });
+    showToast(tr('toast.refreshed'));
+    await loadAccounts({ force: true });
+    await refreshStats();
+  } catch (error) {
+    showToast(error.message || tr('error.generic'));
+  } finally {
+    state.accountsSaving = false;
+    render();
+  }
+}
+
+async function toggleAccount(accountId) {
+  const account = state.accounts?.find((a) => a.id === accountId);
+  if (!account) return;
+  state.accountsSaving = true;
+  render();
+  try {
+    await fetchJson(`/api/accounts/${encodeURIComponent(accountId)}`, {
+      secret: state.secret,
+      method: 'PATCH',
+      body: { enabled: !account.enabled }
+    });
+    showToast(tr('accounts.updated'));
+    await loadAccounts({ force: true });
+    await refreshStats();
+  } catch (error) {
+    showToast(error.message || tr('error.generic'));
+  } finally {
+    state.accountsSaving = false;
+    render();
+  }
+}
+
+async function deleteAccount(accountId) {
+  const account = state.accounts?.find((a) => a.id === accountId);
+  if (!account) return;
+  if (!window.confirm(tr('accounts.confirmDelete', { name: account.name || account.provider }))) return;
+  state.accountsSaving = true;
+  render();
+  try {
+    await fetchJson(`/api/accounts/${encodeURIComponent(accountId)}`, {
+      secret: state.secret,
+      method: 'DELETE'
+    });
+    if (state.accountEditId === accountId) state.accountEditId = '';
+    showToast(tr('accounts.deleted'));
+    await loadAccounts({ force: true });
+    await refreshStats();
+  } catch (error) {
+    showToast(error.message || tr('error.generic'));
+  } finally {
+    state.accountsSaving = false;
+    render();
+  }
+}
+
 async function bootstrapAuthorized() {
   showAuth(false);
   state.loading = true;
@@ -1436,7 +1892,8 @@ async function bootstrapAuthorized() {
   await Promise.all([
     ensureHistory(),
     capabilities.subscriptions === false ? null : loadSubscriptions(),
-    capabilities.pricing === false ? null : loadPricing()
+    capabilities.pricing === false ? null : loadPricing(),
+    capabilities.hubAccounts === false ? null : loadAccounts()
   ]);
   connectStream();
   render();
@@ -1692,6 +2149,7 @@ function bindEvents() {
     openNav(false);
     if (state.prefs.view === 'subscriptions') void loadSubscriptions().then(() => render());
     if (state.prefs.view === 'pricing') void loadPricing().then(() => render());
+    if (state.prefs.view === 'accounts') void loadAccounts().then(() => render());
     if (state.prefs.view === 'trends' || state.prefs.view === 'home') {
       void ensureHistory().then(() => render());
       return;
@@ -1780,6 +2238,40 @@ function bindEvents() {
     if (managementRetry) {
       if (managementRetry.dataset.managementRetry === 'subscriptions-retry') void loadSubscriptions({ force: true });
       if (managementRetry.dataset.managementRetry === 'pricing-retry') void loadPricing({ force: true });
+      if (managementRetry.dataset.managementRetry === 'accounts-retry') void loadAccounts({ force: true });
+      return;
+    }
+    const accountRefresh = event.target.closest('[data-account-refresh]');
+    if (accountRefresh) {
+      void refreshAccount(accountRefresh.dataset.accountRefresh);
+      return;
+    }
+    const accountToggle = event.target.closest('[data-account-toggle]');
+    if (accountToggle) {
+      void toggleAccount(accountToggle.dataset.accountToggle);
+      return;
+    }
+    const accountEdit = event.target.closest('[data-account-edit]');
+    if (accountEdit) {
+      state.accountEditId = accountEdit.dataset.accountEdit || '';
+      render();
+      return;
+    }
+    const accountReset = event.target.closest('[data-account-reset]');
+    if (accountReset) {
+      state.accountEditId = '';
+      render();
+      return;
+    }
+    const accountDelete = event.target.closest('[data-account-delete]');
+    if (accountDelete) {
+      void deleteAccount(accountDelete.dataset.accountDelete);
+      return;
+    }
+    const accountMode = event.target.closest('[data-account-mode]');
+    if (accountMode) {
+      state.accountFormMode = accountMode.dataset.accountMode === 'json' ? 'json' : 'simple';
+      render();
       return;
     }
     const subscriptionEdit = event.target.closest('[data-subscription-edit]');
@@ -1887,12 +2379,29 @@ function bindEvents() {
 
   els.content.addEventListener('change', (event) => {
     const provider = event.target.closest('[data-limit-provider]');
-    if (!provider) return;
-    state.limitProvider = provider.value || '';
-    render();
+    if (provider) {
+      state.limitProvider = provider.value || '';
+      render();
+      return;
+    }
+    const accountProvider = event.target.closest('[data-account-provider-select]');
+    if (accountProvider) {
+      state.accountSelectedProvider = accountProvider.value || 'deepseek';
+      render();
+    }
   });
 
   els.content.addEventListener('submit', (event) => {
+    const accountForm = event.target.closest('[data-account-form]');
+    if (accountForm) {
+      event.preventDefault();
+      try {
+        void saveAccountFromForm(accountForm);
+      } catch (error) {
+        showToast(error.message || tr('error.generic'));
+      }
+      return;
+    }
     const subscriptionForm = event.target.closest('[data-subscription-form]');
     if (subscriptionForm) {
       event.preventDefault();
@@ -1917,7 +2426,11 @@ function bindEvents() {
       await refreshStats();
       state.history = null;
       await ensureHistory();
-      await Promise.all([loadSubscriptions({ force: true }), loadPricing({ force: true })]);
+      await Promise.all([
+        loadSubscriptions({ force: true }),
+        loadPricing({ force: true }),
+        loadAccounts({ force: true })
+      ]);
       showToast(tr('toast.refreshed'));
     } catch (error) {
       if (error.status === 401) showAuth(true);

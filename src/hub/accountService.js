@@ -151,6 +151,27 @@ function providerOptions(account, credential) {
   };
   switch (account.provider) {
     case 'claude': return { ...options, claudeWebCookie: cookie };
+    case 'codex': {
+      const authJson = credential.authJson || (credential.tokens ? credential : null);
+      const codexAccessToken = accessToken || field(credential, 'access_token');
+      const codexAccountId = field(credential, 'account_id', 'accountId');
+      return {
+        ...options,
+        codexAuthJson: authJson,
+        codexAccessToken,
+        codexAccountId,
+        codexAccountLabel: cleanText(account.label, MAX_ACCOUNT_LABEL_LENGTH)
+      };
+    }
+    case 'antigravity': {
+      const antigravityEndpoint = field(credential, 'endpoint', 'url') || 'http://127.0.0.1:0';
+      const antigravityCsrfToken = field(credential, 'csrfToken', 'token', 'csrf');
+      return {
+        ...options,
+        antigravityEndpoint,
+        antigravityCsrfToken
+      };
+    }
     case 'opencode':
       return {
         ...options,

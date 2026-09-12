@@ -32,6 +32,7 @@ test('hub web data exports expected helper surface', () => {
   assert.match(source, /export function limitRemainingTone\(/);
   assert.match(source, /export function clampHomeLimitAccountCount\(/);
   assert.match(source, /openrouter:\s*'OpenRouter'/);
+  assert.match(source, /export const HUB_ACCOUNT_PROVIDERS/);
 });
 
 test('openrouter client icon is published for hub web', () => {
@@ -55,6 +56,11 @@ test('hub web app wires status, heatmap, and active-days controls', () => {
   assert.match(app, /projects\.incomplete|sessions\.truncated/);
   assert.match(app, /id: 'subscriptions'/);
   assert.match(app, /id: 'pricing'/);
+  assert.match(app, /id: 'accounts'/);
+  assert.match(app, /function renderAccounts/);
+  assert.match(app, /data-account-form/);
+  assert.match(app, /data-account-refresh/);
+  assert.match(app, /data-account-delete/);
   assert.match(app, /historyRevision|deviceHistoryRevision/);
   assert.match(app, /data-subscription-form/);
   assert.match(app, /data-pricing-form/);

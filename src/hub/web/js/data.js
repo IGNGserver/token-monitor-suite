@@ -98,10 +98,32 @@ export const PROVIDER_LABELS = {
   zaiteam: 'GLM Team',
   volcengine: 'Volcengine',
   qoder: 'Qoder',
+  commandcode: 'Command Code',
   kimi: 'Kimi',
   ollama: 'Ollama',
-  openrouter: 'OpenRouter'
+  openrouter: 'OpenRouter',
+  thirdparty: 'Third-party'
 };
+
+export const HUB_ACCOUNT_PROVIDERS = [
+  { id: 'deepseek', label: 'DeepSeek' },
+  { id: 'claude', label: 'Claude' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'antigravity', label: 'Antigravity (AGY)' },
+  { id: 'opencode', label: 'OpenCode' },
+  { id: 'openrouter', label: 'OpenRouter' },
+  { id: 'copilot', label: 'GitHub Copilot' },
+  { id: 'minimax', label: 'Minimax' },
+  { id: 'mimo', label: 'MiMo' },
+  { id: 'kimi', label: 'Kimi' },
+  { id: 'zai', label: 'GLM' },
+  { id: 'zaiteam', label: 'GLM Team' },
+  { id: 'volcengine', label: 'Volcengine' },
+  { id: 'qoder', label: 'Qoder' },
+  { id: 'commandcode', label: 'Command Code' },
+  { id: 'ollama', label: 'Ollama' },
+  { id: 'thirdparty', label: 'Third-party' }
+];
 
 const FALLBACK_MODEL_COLORS = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
 
@@ -111,7 +133,8 @@ const ICON_ALIASES = {
   micode: 'xiaomi',
   grok: 'grok',
   zai: 'zai',
-  zaiteam: 'zai'
+  zaiteam: 'zai',
+  thirdparty: 'openrouter'
 };
 
 export function clientLabel(id) {

@@ -172,3 +172,46 @@ test('Hub drops device limits and serves centrally refreshed limits from stats',
     await hub.stop();
   }
 });
+
+test('Hub account API supports adding codex and antigravity accounts with explicit credentials', async () => {
+  const repository = new MemoryRepository();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    adminSecret: 'admin-token',
+    accountCredentialKey: 'account-encryption-key',
+    accountProbe: async (provider) => accountProbe(provider),
+    accountRefreshMs: 60_000,
+    repository,
+    logger: { error() {}, warn() {}, info() {} }
+  });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const codex = await requestJson(port, '/api/accounts', {
+      method: 'POST',
+      token: 'admin-token',
+      body: {
+        provider: 'codex',
+        name: 'codex-hub',
+        credential: { accessToken: 'mock-chatgpt-token' }
+      }
+    });
+    assert.equal(codex.response.status, 201);
+    assert.equal(codex.body.account.provider, 'codex');
+
+    const agy = await requestJson(port, '/api/accounts', {
+      method: 'POST',
+      token: 'admin-token',
+      body: {
+        provider: 'antigravity',
+        name: 'agy-hub',
+        credential: { endpoint: 'http://127.0.0.1:12345', csrfToken: 'mock-csrf' }
+      }
+    });
+    assert.equal(agy.response.status, 201);
+    assert.equal(agy.body.account.provider, 'antigravity');
+  } finally {
+    await hub.stop();
+  }
+});

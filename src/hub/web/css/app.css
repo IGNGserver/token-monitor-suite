@@ -667,7 +667,67 @@ html[data-theme="dark"] .heat.lvl-4 { fill: rgba(110, 168, 255, 0.92); }
 .pricing-form { background: transparent; }
 .pricing-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .pricing-grid .field:first-child { grid-column: 1 / -1; }
-.subscription-summary { margin-bottom: 14px; }
+.subscription-summary, .account-summary { margin-bottom: 14px; }
+
+.account-management-row .client-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+}
+.account-form-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mode-toggle-group {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.mode-toggle-group .ghost-btn {
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: none;
+}
+.mode-toggle-group .ghost-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+.account-simple-fields {
+  margin-top: 4px;
+}
+
+.account-disclaimer-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, #e5a50a 10%, var(--bg-soft));
+  border: 1px solid color-mix(in srgb, #e5a50a 35%, var(--line));
+}
+.account-disclaimer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: color-mix(in srgb, #e5a50a 90%, var(--text));
+}
+.account-disclaimer-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.account-disclaimer-check {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
 
 .drawer {
   position: fixed;

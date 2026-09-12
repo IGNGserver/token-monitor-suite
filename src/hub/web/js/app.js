@@ -1550,8 +1550,12 @@ function renderAccounts() {
   const isEditing = Boolean(editing);
   const formTitle = isEditing ? tr('accounts.edit') : tr('accounts.add');
   const isOAuthCandidate = !isEditing && (currentProvider === 'codex' || currentProvider === 'antigravity');
-  const simpleModeActive = state.accountFormMode === 'simple';
-  const oauthModeActive = state.accountFormMode === 'oauth' && isOAuthCandidate;
+  // If editing, default to simple; if OAuth candidate and mode not explicitly switched to simple/json, default to oauth
+  const effectiveMode = isOAuthCandidate
+    ? (state.accountFormMode === 'simple' || state.accountFormMode === 'json' ? state.accountFormMode : 'oauth')
+    : (state.accountFormMode === 'json' ? 'json' : 'simple');
+  const oauthModeActive = effectiveMode === 'oauth';
+  const simpleModeActive = effectiveMode === 'simple';
 
   let simpleFieldsHtml;
   switch (currentProvider) {
@@ -2343,7 +2347,9 @@ function bindEvents() {
     }
     const accountOAuthStart = event.target.closest('[data-account-oauth-start]');
     if (accountOAuthStart) {
-      const provider = accountOAuthStart.dataset.accountOAuthStart;
+      const form = accountOAuthStart.closest('form');
+      const providerSelect = form?.querySelector('[data-account-provider-select]');
+      const provider = String(providerSelect?.value || accountOAuthStart.dataset.accountOAuthStart || state.accountSelectedProvider || '').trim().toLowerCase();
       state.oauthLoading = true;
       render();
       void (async () => {
@@ -2489,7 +2495,16 @@ function bindEvents() {
     }
     const accountProvider = event.target.closest('[data-account-provider-select]');
     if (accountProvider) {
+      const prevProvider = state.accountSelectedProvider;
       state.accountSelectedProvider = accountProvider.value || 'deepseek';
+      if (prevProvider !== state.accountSelectedProvider) {
+        state.oauthSession = null;
+        if (state.accountSelectedProvider === 'codex' || state.accountSelectedProvider === 'antigravity') {
+          state.accountFormMode = 'oauth';
+        } else {
+          state.accountFormMode = 'simple';
+        }
+      }
       render();
     }
   });

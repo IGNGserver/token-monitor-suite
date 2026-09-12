@@ -14,7 +14,6 @@ function createAgentDeviceRuntime(options = {}, deps = {}, overrides = {}) {
 
   return makeDeviceRuntime({
     envelope: options.envelope,
-    limitsOptions: options.limitsOptions,
     usageOptions: overrides.usageOptions || options.usageOptions,
     transformUsage: options.transformUsage,
     sink,
@@ -64,14 +63,8 @@ async function runAgentOnce(options = {}, deps = {}) {
   });
   options.onRuntime?.(runtime);
 
-  const initialLimits = Promise.resolve(runtime.refreshLimits({}, 'startup-once')).catch((error) => {
-    options.onError?.(error, 'limits:startup-once');
-    return null;
-  });
-
   try {
     await usageReady;
-    await initialLimits;
     if (dryRun && latestRecord) await options.deliver?.(latestRecord);
     await runtime.flush();
     return latestRecord;

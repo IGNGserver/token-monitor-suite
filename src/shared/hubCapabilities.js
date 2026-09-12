@@ -4,6 +4,7 @@ const HUB_API_VERSION = 2;
 
 function hubCapabilities(runtime, options = {}) {
   const worker = runtime === 'cloudflare-worker';
+  const hubAccounts = !worker && options.hubAccounts === true;
   return Object.freeze({
     stats: true,
     history: true,
@@ -13,7 +14,10 @@ function hubCapabilities(runtime, options = {}) {
     pricing: !worker,
     deviceDelete: true,
     deviceRename: true,
-    publicStats: Boolean(options.publicStats)
+    publicStats: Boolean(options.publicStats),
+    hubAccounts,
+    centralLimits: hubAccounts,
+    limitsAuthority: hubAccounts ? 'hub' : 'none'
   });
 }
 

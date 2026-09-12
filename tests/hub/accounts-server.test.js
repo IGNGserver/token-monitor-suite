@@ -1,0 +1,144 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const { createHub } = require('../../src/hub/server');
+const { MemoryRepository } = require('./memory-repository');
+
+function accountProbe(provider) {
+  return {
+    provider,
+    status: 'ok',
+    accountKey: `${provider}-server-account`,
+    accountEmail: `${provider}@example.test`,
+    accountLabel: 'Server account',
+    windows: [{ label: 'daily', used: 12, limit: 100, remaining: 88, unit: 'tokens' }]
+  };
+}
+
+async function requestJson(port, path, { method = 'GET', token, body } = {}) {
+  const headers = {};
+  if (token) headers.authorization = `Bearer ${token}`;
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  return { response, body: await response.json() };
+}
+
+function usagePayload() {
+  return {
+    deviceId: 'device-a',
+    updatedAt: '2026-09-11T00:00:00.000Z',
+    today: { totalTokens: 10 },
+    month: { totalTokens: 10 },
+    allTime: {
+      totalTokens: 10,
+      clients: { codex: 10 },
+      clientCosts: { codex: 0 },
+      models: { 'gpt-5': 10 },
+      modelCosts: { 'gpt-5': 0 },
+      clientModels: { codex: { 'gpt-5': 10 } },
+      clientModelCosts: { codex: { 'gpt-5': 0 } },
+      sessions: {}
+    },
+    limits: {
+      providers: [{ provider: 'deepseek', status: 'ok', accountKey: 'device-side-secret' }]
+    },
+    limitsOnly: true
+  };
+}
+
+test('Hub account API stores credentials centrally and never returns them', async () => {
+  const repository = new MemoryRepository();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    adminSecret: 'admin-token',
+    ingestCredentials: { 'device-a': 'device-token' },
+    accountCredentialKey: 'account-encryption-key',
+    accountProbe: async (provider) => accountProbe(provider),
+    accountRefreshMs: 60_000,
+    repository,
+    logger: { error() {}, warn() {}, info() {} }
+  });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const unauthenticated = await requestJson(port, '/api/accounts');
+    assert.equal(unauthenticated.response.status, 401);
+
+    const added = await requestJson(port, '/api/accounts', {
+      method: 'POST',
+      token: 'admin-token',
+      body: {
+        provider: 'deepseek',
+        name: 'work',
+        credential: { apiKey: 'server-secret-api-key' }
+      }
+    });
+    assert.equal(added.response.status, 201);
+    assert.equal(added.body.account.provider, 'deepseek');
+    assert.equal(JSON.stringify(added.body).includes('server-secret-api-key'), false);
+
+    const accountId = added.body.account.id;
+    const envelope = repository.hubCredentials.get(accountId);
+    assert.ok(envelope);
+    assert.equal(JSON.stringify(envelope).includes('server-secret-api-key'), false);
+
+    const listed = await requestJson(port, '/api/accounts', { token: 'admin-token' });
+    assert.equal(listed.response.status, 200);
+    assert.equal(listed.body.authority, 'hub');
+    assert.equal(listed.body.accounts.length, 1);
+    assert.equal(JSON.stringify(listed.body).includes('server-secret-api-key'), false);
+  } finally {
+    await hub.stop();
+  }
+});
+
+test('Hub drops device limits and serves centrally refreshed limits from stats', async () => {
+  const repository = new MemoryRepository();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    adminSecret: 'admin-token',
+    ingestCredentials: { 'device-a': 'device-token' },
+    accountCredentialKey: 'account-encryption-key',
+    accountProbe: async (provider) => accountProbe(provider),
+    accountRefreshMs: 60_000,
+    repository,
+    logger: { error() {}, warn() {}, info() {} }
+  });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const added = await requestJson(port, '/api/accounts', {
+      method: 'POST',
+      token: 'admin-token',
+      body: { provider: 'deepseek', credential: { apiKey: 'central-key' } }
+    });
+    assert.equal(added.response.status, 201);
+
+    const ingested = await requestJson(port, '/api/ingest', {
+      method: 'POST',
+      token: 'device-token',
+      body: usagePayload()
+    });
+    assert.equal(ingested.response.status, 200);
+    assert.equal(Object.prototype.hasOwnProperty.call(repository.devices.get('device-a'), 'limits'), false);
+
+    const stats = await requestJson(port, '/api/stats', { token: 'admin-token' });
+    assert.equal(stats.response.status, 200);
+    assert.equal(stats.body.limitsAuthority, 'hub');
+    assert.equal(stats.body.devices.length, 1);
+    assert.equal(Object.prototype.hasOwnProperty.call(stats.body.devices[0], 'limits'), false);
+    assert.equal(stats.body.limits.providers.length, 1);
+    assert.equal(stats.body.limits.providers[0].authority, 'hub');
+    assert.equal(stats.body.limits.providers[0].accountId, added.body.account.id);
+  } finally {
+    await hub.stop();
+  }
+});

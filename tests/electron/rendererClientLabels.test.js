@@ -13,6 +13,10 @@ function rendererStyles() {
   return fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'styles.css'), 'utf8');
 }
 
+function rendererHtml() {
+  return fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'index.html'), 'utf8');
+}
+
 function clientLabelIds(source) {
   const match = source.match(/const clientLabels = \{([^}]+)\};/);
   assert.ok(match, 'clientLabels declaration should exist');
@@ -91,6 +95,30 @@ test('renderer uses the CodeBuddy and WorkBuddy brand icons for their tool rows'
   const styles = rendererStyles();
   assert.match(styles, /\.row-icon-codebuddy\s*\{[^}]*assets\/icons\/codebuddy\.svg/s);
   assert.match(styles, /\.row-icon-workbuddy\s*\{[^}]*assets\/icons\/workbuddy\.svg/s);
+});
+
+test('renderer labels transcript-derived totals as estimated', () => {
+  const source = rendererSource();
+  const html = rendererHtml();
+
+  assert.match(html, /id="usageEstimateBadge"[^>]*data-i18n="usage\.estimated"/);
+  assert.match(source, /usageEstimateBadge: document\.getElementById\('usageEstimateBadge'\)/);
+  assert.match(source, /const estimated = period\?\.estimated === true/);
+  assert.match(source, /renderUsageEstimateBadge\(period\)/);
+});
+
+test('renderer exposes all four sync health channels and their lifecycle state', () => {
+  const source = rendererSource();
+  const html = rendererHtml();
+
+  assert.match(html, /id="syncHealthStatus"[^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(source, /\['local', 'settings\.sync\.healthLocal'\]/);
+  assert.match(source, /\['upload', 'settings\.sync\.healthUpload'\]/);
+  assert.match(source, /\['rest', 'settings\.sync\.healthRest'\]/);
+  assert.match(source, /\['stream', 'settings\.sync\.healthStream'\]/);
+  assert.match(source, /settings\.sync\.healthState\.connecting/);
+  assert.match(source, /settings\.sync\.healthState\.backoff/);
+  assert.match(source, /settings\.sync\.healthState\.idleTimeout/);
 });
 
 test('renderer wires the Command Code, Qoder CN, and Reasonix tool icons', () => {

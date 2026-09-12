@@ -13,18 +13,30 @@ const {
   QODER_CN_MODEL_DISPLAY_NAMES,
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
+  collectQoderCnMainRows,
   collectQoderCnRows,
   collectQoderCnTranscriptRows,
   estimateQoderCnContentTokens,
+  mergeQoderCnRows,
   normalizeQoderCnDbRow,
+  QODER_CN_SQLITE_BACKEND_UNAVAILABLE,
   qoderCnDataPaths,
   readQoderCnDbRows,
+  readQoderCnMainDbRows,
   resolveQoderCnPricing,
   resetQoderCnChatSessionProbe,
   resetQoderCnPricingCache
 } = require('../../src/shared/qoderCnUsage');
 
 const QODER_CN_DB_FIXTURE = path.join(__dirname, '..', 'fixtures', 'qoder-cn-local.db');
+
+function skipOnlyWhenSqliteBackendIsMissing(t, error) {
+  if (error?.code === QODER_CN_SQLITE_BACKEND_UNAVAILABLE) {
+    t.skip(`no sqlite backend available: ${error.message}`);
+    return true;
+  }
+  throw error;
+}
 
 test('QODER_CN_MODEL_DISPLAY_NAMES covers every official model code and the retired preview', () => {
   // Official codes from Qoder CN.app i18n `modelSelector.item.*` plus the
@@ -198,15 +210,150 @@ test('undated Qoder CN rows count for allTime only, mirroring the proma includeU
 
 test('qoderCnDataPaths resolves QoderCN DB path per platform', () => {
   const suffix = path.join('QoderCN', 'SharedClientCache', 'cache', 'db', 'local.db');
+  const mainSuffix = path.join('com.qoder.app.stable', 'main.sqlite');
 
   const darwin = qoderCnDataPaths({ homeDir: '/Users/test', platform: 'darwin', env: {} });
   assert.deepEqual(darwin.dbPaths, [path.join('/Users/test', 'Library', 'Application Support', suffix)]);
+  assert.deepEqual(darwin.mainDbPaths, [path.join('/Users/test', 'Library', 'Application Support', mainSuffix)]);
+  const darwinArm = qoderCnDataPaths({ homeDir: '/Users/test', platform: 'darwin-arm64', env: {} });
+  assert.deepEqual(darwinArm.dbPaths, darwin.dbPaths);
 
   const win = qoderCnDataPaths({ homeDir: '/home/test', platform: 'win32', env: { APPDATA: '/home/test/AppData/Roaming' } });
   assert.deepEqual(win.dbPaths, [path.join('/home/test/AppData/Roaming', suffix)]);
+  assert.deepEqual(win.mainDbPaths, [path.join('/home/test/AppData/Roaming', mainSuffix)]);
+  const winX64 = qoderCnDataPaths({ homeDir: '/home/test', platform: 'win32-x64', env: { APPDATA: '/home/test/AppData/Roaming' } });
+  assert.deepEqual(winX64.dbPaths, win.dbPaths);
 
   const linux = qoderCnDataPaths({ homeDir: '/home/test', platform: 'linux', env: {} });
   assert.deepEqual(linux.dbPaths, [path.join('/home/test/.config', suffix)]);
+  assert.deepEqual(linux.mainDbPaths, [path.join('/home/test/.config', mainSuffix)]);
+
+  const customConfig = qoderCnDataPaths({
+    homeDir: '/home/test',
+    platform: 'linux',
+    env: { QODERCN_CONFIG_DIR: '/var/lib/qodercn' }
+  });
+  assert.deepEqual(customConfig.transcriptRoots, [path.join('/var/lib/qodercn', 'projects')]);
+
+  const relativeConfig = qoderCnDataPaths({
+    homeDir: '/home/test',
+    platform: 'linux',
+    env: { QODERCN_CONFIG_DIR: 'qoder-config' }
+  });
+  assert.deepEqual(relativeConfig.transcriptRoots, [path.resolve('qoder-config', 'projects')]);
+});
+
+test('Qoder 0.1.x main.sqlite rows estimate message content without exposing source ids', async (t) => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-main-usage-'));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const first = Date.parse('2026-09-03T10:00:00.000Z');
+  const second = Date.parse('2026-09-03T10:01:00.000Z');
+  const rows = await collectQoderCnMainRows({
+    homeDir,
+    platform: 'win32',
+    env: {},
+    mainDbPaths: ['/virtual/main.sqlite'],
+    readMainDbRows: async () => [
+      {
+        session_id: 'private-session',
+        message_id: 'private-user',
+        sequence: 1,
+        created_at: first,
+        session_model: 'qfmodel',
+        payload_json: JSON.stringify({ role: 'user', text: 'prompt' })
+      },
+      {
+        session_id: 'private-session',
+        message_id: 'private-assistant',
+        sequence: 2,
+        created_at: first + 1_000,
+        session_model: 'qfmodel',
+        payload_json: JSON.stringify({
+          role: 'assistant',
+          text: 'answer',
+          timestamp: new Date(first + 1_000).toISOString(),
+          parts: [
+            { type: 'thinking', text: 'think' },
+            { type: 'text', text: 'answer' },
+            { type: 'tool', tool: { name: 'Read', input: { path: 'file' }, response: 'result' } }
+          ]
+        })
+      },
+      {
+        session_id: 'private-session',
+        message_id: 'private-user-2',
+        sequence: 3,
+        created_at: second,
+        session_model: 'qfmodel',
+        payload_json: JSON.stringify({ role: 'user', text: 'next' })
+      },
+      {
+        session_id: 'private-session',
+        message_id: 'private-assistant-2',
+        sequence: 4,
+        created_at: second + 1_000,
+        session_model: 'qfmodel',
+        payload_json: JSON.stringify({ role: 'assistant', text: 'done', parts: [{ type: 'text', text: 'done' }] })
+      }
+    ]
+  });
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].model, 'qfmodel', 'unknown 0.1.x model codes remain explicit, not falsely mapped');
+  assert.equal(rows[0].projectLabel, '', 'main.sqlite does not provide a safe project label by default');
+  assert.equal(rows[0].input, 2, 'the user prompt is the first request context');
+  assert.equal(rows[0].output, 10, 'assembled text, thinking, tool input and tool response are estimated once');
+  assert.equal(rows[1].input, 13, 'later requests retain prior session content');
+  assert.equal(rows[1].output, 1);
+  assert.equal(rows[0].estimated, true);
+  assert.deepEqual(Object.keys(rows[0]).sort(), [
+    'cacheRead', 'cacheWrite', 'createdAt', 'estimated', 'input', 'messageId',
+    'messages', 'model', 'output', 'projectLabel', 'sessionId'
+  ]);
+  assert.deepEqual(rows[0].sourceIdentities, ['private-assistant']);
+  assert.equal(rows[0].messageId.includes('private-assistant'), false);
+});
+
+(sqlite ? test : test.skip)('Qoder 0.1.x main.sqlite schema is read end to end', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-main-sqlite-'));
+  const dbPath = path.join(tmp, 'main.sqlite');
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const database = new sqlite.DatabaseSync(dbPath);
+  database.exec(`CREATE TABLE chat_sessions (
+    session_id TEXT PRIMARY KEY,
+    model TEXT,
+    cwd TEXT,
+    workspace_id TEXT
+  );
+  CREATE TABLE chat_session_messages (
+    session_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    turn_id TEXT,
+    sequence INTEGER NOT NULL,
+    payload_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    feedback TEXT,
+    source TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );`);
+  database.prepare('INSERT INTO chat_sessions (session_id, model) VALUES (?, ?)').run('s1', 'lite');
+  const insert = database.prepare(`INSERT INTO chat_session_messages
+    (session_id, message_id, sequence, payload_json, status, source, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'completed', 'local', ?, ?)`);
+  const timestamp = Date.parse('2026-09-03T10:00:00.000Z');
+  insert.run('s1', 'u1', 1, JSON.stringify({ role: 'user', text: 'hi', timestamp: new Date(timestamp).toISOString() }), timestamp, timestamp);
+  insert.run('s1', 'a1', 2, JSON.stringify({ role: 'assistant', text: 'hello', timestamp: new Date(timestamp + 1_000).toISOString(), parts: [{ type: 'text', text: 'hello' }] }), timestamp + 1_000, timestamp + 1_000);
+  database.close();
+
+  const rawRows = await readQoderCnMainDbRows(dbPath);
+  assert.equal(rawRows.length, 2);
+  assert.equal(rawRows[1].session_model, 'lite');
+  const rows = await collectQoderCnMainRows({ mainDbPaths: [dbPath] });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].model, 'Lite');
+  assert.equal(rows[0].input, 1);
+  assert.equal(rows[0].output, 2);
 });
 
 test('collectQoderCnRows reads DB rows and deduplicates by messageId', async (t) => {
@@ -279,6 +426,23 @@ test('sqlite3 maxBuffer failures do not fall through to an unbounded Node read',
   );
   assert.equal(nodeFallbackCalled, false);
   resetQoderCnChatSessionProbe();
+});
+
+(sqlite ? test : test.skip)('Qoder SQLite fixture passes an integrity check', (t) => {
+  let database;
+  try {
+    database = new sqlite.DatabaseSync(QODER_CN_DB_FIXTURE, { readOnly: true });
+    const result = database.prepare('PRAGMA quick_check').get();
+    assert.equal(result?.quick_check, 'ok');
+  } catch (error) {
+    if (error?.code === 'ENOENT' || /cannot find|not available/i.test(String(error?.message || ''))) {
+      t.skip(`no sqlite backend available: ${error.message}`);
+      return;
+    }
+    throw error;
+  } finally {
+    database?.close();
+  }
 });
 
 (sqlite ? test : test.skip)('node:sqlite reads fail closed when the row budget is exceeded', async (t) => {
@@ -399,7 +563,7 @@ test('Qoder SQLite fixture is queried and normalized end to end', async (t) => {
   try {
     rows = await collectQoderCnRows({ dbPaths: [QODER_CN_DB_FIXTURE] });
   } catch (error) {
-    t.skip(`no sqlite backend available: ${error.message}`);
+    skipOnlyWhenSqliteBackendIsMissing(t, error);
     return;
   }
 
@@ -435,7 +599,7 @@ test('anchored read applies a lenient window to text timestamps and filters in S
   try {
     rows = await readQoderCnDbRows(QODER_CN_DB_FIXTURE, { sinceMs: 1_785_286_800_000 });
   } catch (error) {
-    t.skip(`no sqlite backend available: ${error.message}`);
+    skipOnlyWhenSqliteBackendIsMissing(t, error);
     return;
   }
   const ids = rows.map((row) => row.id);
@@ -462,7 +626,7 @@ test('sessions reach the projects rollup with project labels end to end', async 
   try {
     rows = await collectQoderCnRows({ dbPaths: [QODER_CN_DB_FIXTURE] });
   } catch (error) {
-    t.skip(`no sqlite backend available: ${error.message}`);
+    skipOnlyWhenSqliteBackendIsMissing(t, error);
     return;
   }
   const periods = buildQoderCnPeriods({ now: new Date(), allTimeSince: '2024-01-01', rows });
@@ -578,6 +742,157 @@ test('collectQoderCnTranscriptRows: skips oversized lines and bad JSON', () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+test('collectQoderCnTranscriptRows streams transcript files without readFileSync', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-stream-'));
+  const projectsDir = path.join(tmpDir, '.qoder-cn', 'projects', 'p1');
+  fs.mkdirSync(projectsDir, { recursive: true });
+  const sessionFile = path.join(projectsDir, 'session.jsonl');
+  const userLine = JSON.stringify({
+    type: 'user',
+    timestamp: '2026-08-15T10:00:00Z',
+    message: { role: 'user', content: `${'x'.repeat(65 * 1024)}你好` }
+  });
+  const assistantLine = JSON.stringify({
+    type: 'assistant',
+    timestamp: '2026-08-15T10:00:01Z',
+    message: { role: 'assistant', content: 'answer', model: 'dfmodel' }
+  });
+  fs.writeFileSync(sessionFile, `${userLine}\n${assistantLine}\n`);
+
+  const originalReadFileSync = fs.readFileSync;
+  let readFileSyncCalled = false;
+  fs.readFileSync = (...args) => {
+    if (String(args[0]) === sessionFile) readFileSyncCalled = true;
+    return originalReadFileSync(...args);
+  };
+  try {
+    const rows = collectQoderCnTranscriptRows({ homeDir: tmpDir });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].messages, 1);
+    assert.equal(readFileSyncCalled, false, 'transcript content must be consumed in bounded chunks');
+  } finally {
+    fs.readFileSync = originalReadFileSync;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('collectQoderCnTranscriptRows only bills assistant messages', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-role-'));
+  const projectsDir = path.join(tmpDir, '.qoder-cn', 'projects', 'p1');
+  fs.mkdirSync(projectsDir, { recursive: true });
+  const sessionFile = path.join(projectsDir, 'session.jsonl');
+  const line = (type, role, content, credits, uuid) => JSON.stringify({
+    type,
+    uuid,
+    timestamp: '2026-08-15T10:00:00Z',
+    message: { role, content, model: 'dfmodel', usage: { credits } }
+  });
+  fs.writeFileSync(sessionFile, [
+    line('user', 'user', 'prompt', 99, 'user-1'),
+    line('assistant', 'assistant', 'answer', 1, 'assistant-1')
+  ].join('\n') + '\n');
+
+  const rows = collectQoderCnTranscriptRows({ homeDir: tmpDir });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].messages, 1, 'user messages must not be billed as model requests');
+  assert.equal(rows[0].input, 2, 'user content still contributes to the next request context');
+  assert.equal(rows[0].output, 2);
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('collectQoderCnTranscriptRows keeps assistant requests when Credits fields are absent', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-optional-credits-'));
+  const projectsDir = path.join(tmpDir, '.qoder-cn', 'projects', 'p1');
+  fs.mkdirSync(projectsDir, { recursive: true });
+  const sessionFile = path.join(projectsDir, 'session.jsonl');
+  fs.writeFileSync(sessionFile, JSON.stringify({
+    type: 'assistant',
+    uuid: 'assistant-legacy',
+    timestamp: '2026-08-15T10:00:00Z',
+    message: { role: 'assistant', content: 'hello', model: 'dfmodel' }
+  }) + '\n');
+
+  const rows = collectQoderCnTranscriptRows({ homeDir: tmpDir });
+  assert.equal(rows.length, 1, 'missing Credits must not discard a complete assistant request');
+  assert.equal(rows[0].messages, 1);
+  assert.equal(rows[0].output, 2, 'hello = ceil(5/4) = 2 estimated tokens');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('mergeQoderCnRows drops only an overlapping identified transcript request', () => {
+  const now = Date.parse('2026-08-15T10:00:00Z');
+  const databaseRow = normalizeQoderCnDbRow({
+    id: 'db-message-a',
+    request_id: 'request-a',
+    session_id: 'db-session',
+    project_name: 'p1',
+    token_info: JSON.stringify({ prompt_tokens: 4, completion_tokens: 2 }),
+    model_info: JSON.stringify({ model_key: 'dfmodel' }),
+    gmt_create: now
+  }, 'db');
+  const transcriptRows = ['request-a', 'request-b'].map((requestId, index) => {
+    const row = {
+      sessionId: `transcript-${index}`,
+      messageId: `transcript-${index}`,
+      model: 'DeepSeek-V4-Flash',
+      projectLabel: 'p1',
+      input: 3,
+      output: 2,
+      cacheRead: 0,
+      cacheWrite: 0,
+      createdAt: now,
+      messages: 1,
+      estimated: true
+    };
+    Object.defineProperty(row, 'sourceIdentities', { value: [requestId], enumerable: false });
+    return row;
+  });
+
+  const merged = mergeQoderCnRows([databaseRow], transcriptRows);
+  assert.equal(merged.length, 2);
+  assert.equal(merged.filter((row) => row.sourceIdentities?.[0] === 'request-a').length, 1);
+  assert.equal(merged.some((row) => row.sourceIdentities?.[0] === 'request-b'), true);
+});
+
+test('mergeQoderCnRows gives SQLite precedence when a matching bucket lacks identity', () => {
+  const now = Date.parse('2026-08-15T10:00:00Z');
+  const databaseRow = {
+    sessionId: 'sqlite-session',
+    messageId: 'sqlite-message',
+    model: 'DeepSeek-V4-Flash',
+    projectLabel: 'p1',
+    input: 4,
+    output: 2,
+    cacheRead: 0,
+    cacheWrite: 0,
+    createdAt: now,
+    messages: 1
+  };
+  const transcriptRow = {
+    sessionId: 'transcript-session',
+    messageId: 'transcript-message',
+    model: 'DeepSeek-V4-Flash',
+    projectLabel: 'p1',
+    input: 3,
+    output: 2,
+    cacheRead: 0,
+    cacheWrite: 0,
+    createdAt: now,
+    messages: 1,
+    estimated: true
+  };
+  Object.defineProperty(transcriptRow, 'sourceIdentities', {
+    value: ['transcript-request'],
+    enumerable: false
+  });
+  const diagnostics = {};
+  const merged = mergeQoderCnRows([databaseRow], [transcriptRow], diagnostics);
+
+  assert.deepEqual(merged, [databaseRow]);
+  assert.equal(diagnostics.duplicateRows, 1);
+  assert.deepEqual(diagnostics.usedSources, ['sqlite']);
+});
+
 test('collectQoderCnTranscriptRows: respects sinceMs filter', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-test-'));
   const projectsDir = path.join(tmpDir, '.qoder-cn', 'projects', 'p1');
@@ -596,5 +911,91 @@ test('collectQoderCnTranscriptRows: respects sinceMs filter', () => {
   const rows = collectQoderCnTranscriptRows({ homeDir: tmpDir, sinceMs });
   assert.equal(rows.length, 1, 'only line after sinceMs should be included');
   assert.ok(rows[0].sessionId.includes('2026-08-15'));
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('collectQoderCnTranscriptRows filters same-day events by their actual timestamp', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-since-day-'));
+  const projectsDir = path.join(tmpDir, '.qoder-cn', 'projects', 'p1');
+  fs.mkdirSync(projectsDir, { recursive: true });
+  const sessionFile = path.join(projectsDir, 'session.jsonl');
+  const event = (timestamp, content) => JSON.stringify({
+    type: 'assistant',
+    timestamp,
+    message: { role: 'assistant', content, model: 'dfmodel', usage: { credits: 1 } }
+  });
+  fs.writeFileSync(sessionFile, [
+    event('2026-08-15T09:00:00Z', 'before'),
+    event('2026-08-15T11:00:00Z', 'after')
+  ].join('\n') + '\n');
+  const rows = collectQoderCnTranscriptRows({
+    homeDir: tmpDir,
+    sinceMs: Date.parse('2026-08-15T10:00:00Z')
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].messages, 1, 'the event before sinceMs must be excluded');
+  assert.equal(rows[0].output, 2, 'only the retained event contributes output');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('collectQoderCnTranscriptRows ignores cumulative Result usage instead of double-counting it', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-result-'));
+  const projectsDir = path.join(tmpDir, '.qoder-cn', 'projects', 'p1');
+  fs.mkdirSync(projectsDir, { recursive: true });
+  const sessionFile = path.join(projectsDir, 'session.jsonl');
+  fs.writeFileSync(sessionFile, [
+    JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-08-15T10:00:00Z',
+      message: { role: 'assistant', content: 'answer', model: 'dfmodel', usage: { credits: 1 } }
+    }),
+    JSON.stringify({
+      type: 'result',
+      timestamp: '2026-08-15T10:00:01Z',
+      total_credits: 1,
+      message: { role: 'result', content: 'final' }
+    })
+  ].join('\n') + '\n');
+  const rows = collectQoderCnTranscriptRows({ homeDir: tmpDir });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].messages, 1, 'Result cumulative credits are not another request');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('collectQoderCnTranscriptRows inherits the model from a system init record', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-model-init-'));
+  const projectsDir = path.join(tmpDir, '.qoder-cn', 'projects', 'p1');
+  fs.mkdirSync(projectsDir, { recursive: true });
+  const sessionFile = path.join(projectsDir, 'session.jsonl');
+  fs.writeFileSync(sessionFile, [
+    JSON.stringify({
+      type: 'system',
+      subtype: 'init',
+      model: 'q35model_preview',
+      session_id: 'session-1'
+    }),
+    JSON.stringify({
+      type: 'user',
+      uuid: 'user-1',
+      timestamp: '2026-08-15T10:00:00Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'prompt' }] }
+    }),
+    JSON.stringify({
+      type: 'assistant',
+      uuid: 'assistant-1',
+      session_id: 'session-1',
+      timestamp: '2026-08-15T10:00:01Z',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'answer' }]
+      }
+    })
+  ].join('\n') + '\n');
+
+  const rows = collectQoderCnTranscriptRows({ homeDir: tmpDir });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].model, 'Qwen3.8-Max-Preview');
+  assert.equal(rows[0].input, 2, 'the preceding user content remains part of the request context');
+  assert.equal(rows[0].output, 2);
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });

@@ -79,9 +79,15 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 #### Qoder CN（ローカルアダプター）
 
-Qoder CN のトークン使用量は API ではなくアプリのローカル SQLite データベースから読み取ります。Settings → tools で有効化します（オプトイン、デフォルト無効）。データベースはプラットフォームごとに自動検出されます：macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`、Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`、Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — `TOKEN_MONITOR_QODER_CN_DB_PATH` で上書き可能です。
+Qoder CN の設定ディレクトリを移動している場合は、Qoder CN 自身の `QODERCN_CONFIG_DIR` を設定してください。`TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` を指定しない限り、その下の `projects` を監視します。
 
-これは高度なローカル統合です：読み取りには PATH 上の `sqlite3` CLI、またはフラグ不要の `node:sqlite` を備えた Node ランタイム（Node ≥ 23.4、Electron では CLI が必要な場合あり）が必要です。読み取りエラーはログに記録され、完全な既存スナップショットがあればゼロ使用量で上書きせず保持します。コストはマッピングされた各モデルの models.dev カタログ料金から推定されます。Qoder がデータベーススキーマを変更すると動作しなくなる可能性があります。
+Qoder CN のトークン使用量は API ではなくアプリのローカル SQLite データベースから読み取ります。Settings → tools で有効化します（オプトイン、デフォルト無効）。旧データベースはプラットフォームごとに自動検出されます：macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`、Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`、Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — `TOKEN_MONITOR_QODER_CN_DB_PATH` で上書き可能です。Qoder CN 0.1.x はアプリケーションサポートディレクトリ下の `com.qoder.app.stable/main.sqlite` に会話メッセージも保存します。必要なら `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH` で上書きできます。また `~/.qoder-cn/projects/**/*.jsonl` に transcript を追加する場合もあり、このディレクトリはライブ更新のため監視され、`TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` で変更できます。
+
+これは高度なローカル統合です：読み取りには PATH 上の `sqlite3` CLI、またはフラグ不要の `node:sqlite` を備えた Node ランタイム（Node ≥ 23.4、Electron では CLI が必要な場合あり）が必要です。読み取りエラーはログに記録され、完全な既存スナップショットがあればゼロ使用量で上書きせず保持します。Main SQLite と Transcript の行は CJK 文字数 / 1.5 とその他の文字数 / 4 の混合式で推定します。ローカルレコードにはプロバイダーの請求フィールド、システムプロンプト、ツール schema がないため、これらの使用量とコストには `estimated` が付き、正確な請求 Token ではありません。コストはマッピングされた各モデルの models.dev カタログ料金から推定されます。Qoder がデータベーススキーマを変更すると動作しなくなる可能性があります。
+
+#### Qoder アカウント制限
+
+`qoder` の制限アカウントは Hub に手動で追加します。ローカルの `qodercn` 使用量アダプターとは別です。Hub は入力された認証情報を暗号化して保存し、アカウント制限を自動更新して、正規化した結果を接続中のデバイスへ配布します。デバイス側ではローカル Qoder ログイン、ブラウザプロファイル、環境認証情報、CLI アカウントの自動検出を削除しており、それらの認証情報を送信したり制限の情報源にしたりしません。
 </details>
 
 ## ショーケース
@@ -89,7 +95,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 <table>
 <tr>
 <td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="ホームビュー"><br><sub>カスタマイズ可能なダッシュボード — 表示するモジュールと順序を選択</sub></td>
-<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="制限ビュー"><br><sub>複数アカウントを並べて表示、Codex はローカルアカウントをワンクリック切り替え</sub></td>
+<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="制限ビュー"><br><sub>Hub 管理アカウントと各デバイスに配布される最新制限</sub></td>
 <td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="ツールビュー"><br><sub>任意のツールをクリックして入力／出力とキャッシュヒットの内訳を展開</sub></td>
 </tr>
 <tr>
@@ -123,7 +129,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 ### 制限・トレンド・エクスポート
 
 - **AI ツール制限検出** — Claude Code、Codex、Cursor、OpenRouter、サードパーティAPI、GLM、Kimi など 19+ プロバイダーの session/weekly/billing/credits、複数の OpenRouter／サードパーティプロファイル、DeepSeek プリペイド残高と使用額
-- **複数アカウントと Codex 切り替え** — 1 つのプロバイダーで複数アカウントを追跡し、それぞれの制限を表示。追跡済みの Codex アカウントは、再認証なしでローカルアカウントとしてワンクリック切り替え可能
+- **Hub 管理のアカウント制限** — プロバイダーごとに複数アカウントを手動追加し、認証情報を Hub だけに保存。Hub が制限を更新し、接続中のすべてのデバイスへ配布
 - **削除されたセッション使用量を保持** — 多くのツールは古いセッションを削除します（Claude Code はデフォルトで 30 日後にトランスクリプトを削除）。有効にすると、Token Monitor は観測済みの日別ツール/モデル使用量をローカルにアーカイブし、元ファイルが消えてもヒートマップとトレンドを維持します（下記 [セッションデータの保持期間](#セッションデータの保持期間) を参照）
 - **使用トレンド & ダッシュボード** — ホーム画面のアクティビティヒートマップ・トレンドチャート、連続日数・全デバイス横断のツール/モデル別累積使用（棒・K 線）専用ダッシュボードウィンドウ
 - **ステータスビュー**（任意） — Claude、OpenAI、Cursor、DeepSeek のステータスページを手動/定期確認
@@ -170,6 +176,8 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 すべてのデバイス（および headless agent）が接続する **hub を 1 つ** 選びます。各デバイスでウィジェットを開き、**設定 → マルチデバイス同期** でモードを選択します。ウィジェットがこのデバイスの使用量を自動的にアップロードします。ウィジェットがないマシンでのみ `npm run agent` を実行してください。
 
 Hub 認証情報は権限別です。viewer は読み取り専用、device token は紐付けられた Device ID だけを送信でき、admin だけが変更を行えます。リモート接続は既定で HTTPS が必要で、Android リリース版は HTTP を許可しません。
+
+古い設定がローカル以外の `http://` Hub を指していても、アップグレード時に安全性を下げることはありません。ローカル収集は続行しますが、Hub の読み取り／アップロード／ライブストリームは HTTPS に変更するか、ユーザーが信頼済み LAN オプションを明示的に有効にするまで blocked のままです。同期設定では各チャネルを分けて表示し、設定変更後は同じプロセス内で復旧できます。
 
 #### オプション A — ウィジェットから hub をホスト（最も簡単、CLI 不要）
 

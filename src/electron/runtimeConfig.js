@@ -1,7 +1,6 @@
 'use strict';
 
 const { clientsCsvForSetting } = require('../shared/clientTracking');
-const { normalizeLimitsRefreshMs, parseLimitProviders } = require('../shared/limitCollector');
 
 const MODE_STRUCTURAL_KEYS = Object.freeze([
   'hubMode',
@@ -23,27 +22,7 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'projectsEnabled',
   'wslScanEnabled'
 ]);
-const LIMITS_RECONFIGURE_KEYS = Object.freeze([
-  'limitsEnabled',
-  'limitProviders',
-  'limitsRefreshMs'
-]);
 const SINK_STRUCTURAL_KEYS = Object.freeze(['syncUploadIntervalMs']);
-const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
-  opencode: ['opencodeCookie', 'opencodeProfiles'],
-  openrouter: ['openrouterProfiles'],
-  deepseek: ['deepseekApiKey'],
-  minimax: ['minimaxApiKey'],
-  copilot: ['copilotApiToken', 'copilotEnterpriseHost'],
-  zai: ['zaiApiKey', 'zaiApiRegion'],
-  zaiteam: ['zaiTeamApiKey', 'zaiTeamOrganizationId', 'zaiTeamProjectId'],
-  volcengine: ['volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion'],
-  qoder: ['qoderCookie', 'qoderSite'],
-  kimi: ['kimiApiKey', 'kimiWebAccessToken'],
-  ollama: ['ollamaCookie'],
-  codex: ['codexManagedAccounts'],
-  mimo: ['mimoManagedAccounts']
-});
 
 function equalSetting(left, right) {
   if (left === right) return true;
@@ -78,37 +57,6 @@ function usageConfigFromSettings(settings = {}, context = {}) {
   };
 }
 
-function limitsConfigFromSettings(settings = {}, context = {}) {
-  const env = context.env || process.env;
-  return {
-    limitsEnabled: settings.limitsEnabled !== false,
-    limitProviders: settings.limitProviders ?? context.defaultLimitProviders,
-    limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
-    opencodeCookie: settings.opencodeCookie || env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
-    opencodeProfiles: settings.opencodeProfiles || {},
-    openrouterProfiles: settings.openrouterProfiles || {},
-    deepseekApiKey: settings.deepseekApiKey || '',
-    minimaxApiKey: settings.minimaxApiKey || '',
-    copilotApiToken: settings.copilotApiToken || '',
-    copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
-    zaiApiKey: settings.zaiApiKey || '',
-    zaiApiRegion: settings.zaiApiRegion || 'global',
-    zaiTeamApiKey: settings.zaiTeamApiKey || '',
-    zaiTeamOrganizationId: settings.zaiTeamOrganizationId || '',
-    zaiTeamProjectId: settings.zaiTeamProjectId || '',
-    volcengineAccessKeyId: settings.volcengineAccessKeyId || '',
-    volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
-    volcengineRegion: settings.volcengineRegion || '',
-    qoderCookie: settings.qoderCookie || '',
-    qoderSite: settings.qoderSite || 'global',
-    kimiApiKey: settings.kimiApiKey || '',
-    kimiWebAccessToken: settings.kimiWebAccessToken || '',
-    ollamaCookie: settings.ollamaCookie || '',
-    codexManagedAccounts: context.codexManagedAccounts ?? settings.codexManagedAccounts ?? [],
-    mimoManagedAccounts: context.mimoManagedAccounts ?? settings.mimoManagedAccounts ?? []
-  };
-}
-
 function envelopeFromSettings(settings = {}, context = {}) {
   return {
     deviceId: settings.deviceId || context.defaultDeviceId,
@@ -118,24 +66,17 @@ function envelopeFromSettings(settings = {}, context = {}) {
 }
 
 function classifySettingsChange(previous = {}, next = {}) {
-  const limitScopes = [];
-  for (const [provider, keys] of Object.entries(LIMIT_PROVIDER_SETTING_KEYS)) {
-    if (changedAny(previous, next, keys)) limitScopes.push({ provider });
-  }
   return {
     modeStructural: changedAny(previous, next, MODE_STRUCTURAL_KEYS),
     usageStructural: changedAny(previous, next, USAGE_STRUCTURAL_KEYS),
-    limitsReconfigure: changedAny(previous, next, LIMITS_RECONFIGURE_KEYS),
     sinkStructural: changedAny(previous, next, SINK_STRUCTURAL_KEYS),
-    limitScopes,
-    enabledProviders: parseLimitProviders(next.limitProviders)
+    limitsReconfigure: false,
+    limitScopes: []
   };
 }
 
 module.exports = {
-  LIMIT_PROVIDER_SETTING_KEYS,
   classifySettingsChange,
   envelopeFromSettings,
-  limitsConfigFromSettings,
   usageConfigFromSettings
 };

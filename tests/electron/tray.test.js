@@ -13,11 +13,9 @@ const {
   buildTrayMenuTemplate,
   createTray,
   formatTrayText,
-  reconcileCodexAccountSelection,
   pickUsageTrayIconId,
   refreshTrayMenu,
-  shouldUseTemplateTrayIcon,
-  sortCodexAccountsForDisplay
+  shouldUseTemplateTrayIcon
 } = require('../../src/electron/tray');
 const { translate } = require('../../src/electron/renderer/i18n');
 const {
@@ -268,156 +266,6 @@ test('tray context menu disables unavailable views', () => {
 
   assert.equal(template[1].submenu.find((item) => item.label === 'Projects').enabled, false);
   assert.equal(template[1].submenu.find((item) => item.label === 'Sessions').enabled, true);
-});
-
-test('tray context menu switches between enabled Codex accounts', () => {
-  const calls = [];
-  const template = buildTrayMenuTemplate({
-    state: {
-      trayContent: 'tokens',
-      trayMode: true,
-      codexAccounts: [
-        { id: 'one', email: 'primary.user@example.com', workspaceLabel: 'Personal' },
-        { id: 'two', email: 'power@example.com', workspaceLabel: 'Team' }
-      ],
-      activeCodexAccountId: 'one',
-      maskAccountEmails: true
-    },
-    onSwitchCodexAccount: (id) => calls.push(id)
-  });
-
-  assert.equal(template[2].label, 'Codex Account · p***r@example.com · Personal');
-  assert.deepEqual(template[2].submenu.map((item) => [item.label, item.checked]), [
-    ['p***r@example.com · Personal', true],
-    ['p***r@example.com · Team', false]
-  ]);
-  template[2].submenu[0].click();
-  template[2].submenu[1].click();
-  assert.deepEqual(calls, ['two']);
-});
-
-test('tray Codex account labels keep unique emails compact and disambiguate duplicate emails', () => {
-  const unique = buildTrayMenuTemplate({
-    state: {
-      trayContent: 'tokens',
-      trayMode: true,
-      codexAccounts: [
-        { id: 'one', email: 'one@example.com', workspaceLabel: 'Personal' },
-        { id: 'two', email: 'two@example.com', workspaceLabel: 'Team' }
-      ],
-      activeCodexAccountId: 'one'
-    }
-  });
-  assert.deepEqual(unique[2].submenu.map((item) => item.label), [
-    'one@example.com',
-    'two@example.com'
-  ]);
-
-  const duplicate = buildTrayMenuTemplate({
-    state: {
-      trayContent: 'tokens',
-      trayMode: true,
-      codexAccounts: [
-        { id: 'personal', email: 'member@example.com', workspaceKind: 'personal' },
-        { id: 'team', email: 'member@example.com', workspaceLabel: 'Team' }
-      ],
-      activeCodexAccountId: 'personal'
-    },
-    translate: (key, params) => translate('zh-TW', key, params)
-  });
-  assert.deepEqual(duplicate[2].submenu.map((item) => item.label), [
-    'member@example.com · 個人',
-    'member@example.com · Team'
-  ]);
-
-  const duplicateWorkspaceNames = buildTrayMenuTemplate({
-    state: {
-      trayContent: 'tokens',
-      trayMode: true,
-      codexAccounts: [
-        {
-          id: 'team-one',
-          email: 'member@example.com',
-          workspaceLabel: 'Acme Team',
-          accountKey: 'sha256:abcdef123456'
-        },
-        {
-          id: 'team-two',
-          email: 'member@example.com',
-          workspaceLabel: 'Acme Team',
-          accountKey: 'sha256:abcdef654321'
-        }
-      ],
-      activeCodexAccountId: 'team-one'
-    }
-  });
-  assert.deepEqual(duplicateWorkspaceNames[2].submenu.map((item) => item.label), [
-    'member@example.com · Acme Team · #abcdef1',
-    'member@example.com · Acme Team · #abcdef6'
-  ]);
-});
-
-test('tray context menu hides Codex switching until two accounts are enabled', () => {
-  const template = buildTrayMenuTemplate({
-    state: {
-      trayContent: 'tokens',
-      trayMode: true,
-      codexAccounts: [{ id: 'one', email: 'one@example.com' }],
-      activeCodexAccountId: 'one'
-    }
-  });
-
-  assert.equal(template.some((item) => item.label?.startsWith('Codex Account')), false);
-});
-
-test('Codex tray accounts use the same stable label order as Limits', () => {
-  const accounts = [
-    { id: 'gamma', email: 'gamma@example.com' },
-    { id: 'beta', email: 'beta@example.com' },
-    { id: 'alpha', email: 'alpha@example.com' }
-  ];
-
-  assert.deepEqual(
-    sortCodexAccountsForDisplay(accounts).map((account) => account.id),
-    ['alpha', 'beta', 'gamma']
-  );
-  assert.deepEqual(accounts.map((account) => account.id), ['gamma', 'beta', 'alpha']);
-});
-
-test('Codex tray account selection waits for a post-switch local provider snapshot', () => {
-  assert.deepEqual(reconcileCodexAccountSelection({
-    detectedAccountId: 'new',
-    detectedAt: '2026-07-14T03:00:00.000Z',
-    pendingAccountId: 'new',
-    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
-  }), { activeAccountId: 'new', pendingAccountId: 'new' });
-
-  assert.deepEqual(reconcileCodexAccountSelection({
-    detectedAccountId: 'old',
-    detectedAt: '2026-07-14T03:00:00.000Z',
-    pendingAccountId: 'new',
-    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
-  }), { activeAccountId: 'new', pendingAccountId: 'new' });
-
-  assert.deepEqual(reconcileCodexAccountSelection({
-    detectedAccountId: '',
-    pendingAccountId: 'new',
-    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
-  }), { activeAccountId: 'new', pendingAccountId: 'new' });
-
-  assert.deepEqual(reconcileCodexAccountSelection({
-    detectedAccountId: 'new',
-    detectedAt: '2026-07-14T03:02:00.000Z',
-    pendingAccountId: 'new',
-    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
-  }), { activeAccountId: 'new', pendingAccountId: '' });
-
-  assert.deepEqual(reconcileCodexAccountSelection({
-    detectedAccountId: 'other',
-    detectedAt: '2026-07-14T03:02:00.000Z',
-    pendingAccountId: 'new',
-    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
-  }), { activeAccountId: 'other', pendingAccountId: '' });
 });
 
 test('tray main-process actions surface refresh errors and expand a collapsed bubble before tray mode', () => {

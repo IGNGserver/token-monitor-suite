@@ -12,15 +12,10 @@ function deferred() {
 }
 
 for (const mode of ['local', 'client', 'host']) {
-  test(`${mode} manual refresh awaits usage but never waits for limits`, async () => {
+  test(`${mode} manual refresh awaits usage without a local limits refresh`, async () => {
     const usage = deferred();
-    const limits = deferred();
     const calls = [];
     const runtime = {
-      refreshLimits(scope, reason) {
-        calls.push(['limits', scope, reason]);
-        return limits.promise;
-      },
       tick(reason, options) {
         calls.push(['usage', reason, options]);
         return usage.promise;
@@ -30,24 +25,28 @@ for (const mode of ['local', 'client', 'host']) {
     let completed = false;
     const refresh = runManualDeviceRefresh(runtime, { forceHistory: true }).then(() => { completed = true; });
     await Promise.resolve();
-    assert.deepEqual(calls, [
-      ['limits', { all: true }, 'manual'],
-      ['usage', 'manual', { forceHistory: true }]
-    ]);
+    assert.deepEqual(calls, [['usage', 'manual', { forceHistory: true }]]);
     usage.resolve();
     await refresh;
     assert.equal(completed, true);
-    limits.resolve();
   });
 }
 
-test('manual refresh reports a late limits failure without rejecting completed usage', async () => {
-  const errors = [];
+test('manual refresh does not invoke a local limits failure handler', async () => {
   const runtime = {
-    refreshLimits: async () => { throw new Error('quota offline'); },
     tick: async () => {}
   };
-  await runManualDeviceRefresh(runtime, { onLimitsError: (error) => errors.push(error.message) });
-  await Promise.resolve();
-  assert.deepEqual(errors, ['quota offline']);
+  assert.deepEqual(await runManualDeviceRefresh(runtime), { ok: true });
+});
+
+test('manual refresh reports a handled usage tick failure', async () => {
+  const runtime = {
+    refreshLimits: async () => {},
+    tick: async () => false
+  };
+
+  assert.deepEqual(await runManualDeviceRefresh(runtime), {
+    ok: false,
+    code: 'collection_failed'
+  });
 });

@@ -6,12 +6,7 @@ const { defaultDeviceId, loadDotEnv, normalizeHubUrl, parseArgs, pidFilePath } =
 const { appVersion } = require('../shared/appVersion');
 const { clientsCsvForSetting } = require('../shared/clientTracking');
 const { normalizeHistoryIntervalMs } = require('../shared/collector');
-const {
-  normalizeLimitsRefreshMode,
-  normalizeLimitsRefreshMs,
-  parseBoolean,
-  parseLimitProviders
-} = require('../shared/limitCollector');
+const { parseBoolean } = require('../shared/limitCollector');
 const { postSyncPayload } = require('../shared/syncPayload');
 const { requireSafeHubTransport } = require('../shared/hubTransport');
 const { applyProjectRollups } = require('../shared/usage');
@@ -48,29 +43,10 @@ const watchDebounceMs = Number(args.watchDebounceMs || process.env.TOKEN_MONITOR
 const clients = clientsCsvForSetting(args.clients ?? process.env.TOKEN_MONITOR_CLIENTS);
 const allTimeSince = String(args.since || args.allTimeSince || process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01');
 const commandTimeoutMs = Number(args.timeoutMs || process.env.TOKEN_MONITOR_TOKSCALE_TIMEOUT_MS || 120 * 1000);
-const limitsEnabled = parseBoolean(args.limits ?? args.limitsEnabled ?? process.env.TOKEN_MONITOR_LIMITS_ENABLED, true);
-const limitProviders = parseLimitProviders(args.limitProviders ?? process.env.TOKEN_MONITOR_LIMIT_PROVIDERS).join(',');
-const limitsRefreshMs = normalizeLimitsRefreshMs(args.limitsRefreshMs || process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS);
-const limitsRefreshMode = normalizeLimitsRefreshMode(args.limitsRefreshMode || process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE);
 const historyEnabled = parseBoolean(args.history ?? args.historyEnabled ?? process.env.TOKEN_MONITOR_HISTORY_ENABLED, true);
 const projectsEnabled = parseBoolean(args.projects ?? args.projectsEnabled ?? process.env.TOKEN_MONITOR_PROJECTS_ENABLED, false);
 const sessionUsageArchiveEnabled = parseBoolean(args.sessionArchive ?? args.sessionUsageArchiveEnabled ?? process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true);
 const wslScanEnabled = parseBoolean(args.wslScan ?? args.wslScanEnabled ?? process.env.TOKEN_MONITOR_WSL_SCAN, true);
-const opencodeLocalLimitsEnabled = parseBoolean(
-  args['opencode-local-limits']
-    ?? args.opencodeLocalLimits
-    ?? args.opencodeLocalLimitsEnabled
-    ?? process.env.TOKEN_MONITOR_OPENCODE_LOCAL_LIMITS,
-  false
-);
-const opencodeAmbientEnabled = parseBoolean(
-  args['opencode-ambient']
-    ?? args.opencodeAmbient
-    ?? args.opencodeAmbientEnabled
-    ?? process.env.TOKEN_MONITOR_OPENCODE_AMBIENT,
-  true
-);
-const opencodeCookie = String(process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '').trim();
 const once = Boolean(args.once);
 const dryRun = Boolean(args['dry-run'] || args.dryRun);
 
@@ -96,16 +72,6 @@ const usageOptions = {
   wslScanEnabled,
   onError: (error, reason) => console.error(`[${new Date().toISOString()}] (${reason}) ${error.message}`),
   logger: (message) => (dryRun ? console.error(message) : console.log(message))
-};
-const limitsOptions = {
-  limitsEnabled,
-  limitProviders,
-  limitsRefreshMode,
-  limitsRefreshMs,
-  claudeWebCookie: '',
-  opencodeLocalLimitsEnabled,
-  opencodeAmbientEnabled,
-  opencodeCookie
 };
 let sessionUsageArchive;
 
@@ -162,7 +128,7 @@ function registerPidFile(stopRuntime) {
 }
 
 async function main() {
-  const startupMessage = `Token Monitor agent device=${deviceId} hub=${hubUrl} intervalMs=${intervalMs} watch=${watchEnabled} projects=${projectsEnabled ? 'on' : 'off'} history=${historyEnabled ? 'on' : 'off'} sessionArchive=${sessionUsageArchiveEnabled ? 'on' : 'off'} limits=${limitsEnabled ? `${limitProviders || 'none'}:${limitsRefreshMs}ms` : 'off'}`;
+  const startupMessage = `Token Monitor agent device=${deviceId} hub=${hubUrl} intervalMs=${intervalMs} watch=${watchEnabled} projects=${projectsEnabled ? 'on' : 'off'} history=${historyEnabled ? 'on' : 'off'} sessionArchive=${sessionUsageArchiveEnabled ? 'on' : 'off'} limits=hub`;
   if (dryRun) console.error(startupMessage);
   else console.log(startupMessage);
   if (!secret) console.warn('Warning: TOKEN_MONITOR_SECRET is not set. Posting without authorization header.');
@@ -173,7 +139,6 @@ async function main() {
   const runtimeOptions = {
     envelope: { deviceId, agentVersion: appVersion(), agentRuntime: 'headless-agent' },
     usageOptions,
-    limitsOptions,
     transformUsage: summaryWithSessionUsageArchive,
     deliver,
     dryRun,

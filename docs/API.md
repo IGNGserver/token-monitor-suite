@@ -13,6 +13,7 @@ Configure independent credentials:
 - `TOKEN_MONITOR_VIEWER_SECRET`: read-only dashboard/API access. This is the only credential accepted through `?secret=` for header-limited widgets.
 - `TOKEN_MONITOR_INGEST_CREDENTIALS`: JSON object mapping the exact `deviceId` to a device token, for example `{"workstation":"...","laptop":"..."}`. A device token can read shared stats and ingest only its bound identity.
 - `TOKEN_MONITOR_SECRET`: legacy read-only credential. Temporary ingest/admin elevation requires `TOKEN_MONITOR_ALLOW_LEGACY_INGEST=1` or `TOKEN_MONITOR_ALLOW_LEGACY_ADMIN=1`; remove those flags after migration.
+- `TOKEN_MONITOR_HUB_CREDENTIAL_KEY`: stable secret used to encrypt manually added Hub account credentials at rest. A standalone Hub must set it before enabling accounts; changing it makes existing account credentials unreadable and requires manual re-login.
 
 Every configured admin, viewer, legacy, and device credential must be distinct;
 the Hub refuses to start when one token would resolve to more than one role.
@@ -203,37 +204,16 @@ Example payload:
   "periodWindows": {
     "today": { "key": "2026-05-18", "endsAt": "2026-05-19T00:00:00.000Z" },
     "month": { "key": "2026-05", "endsAt": "2026-06-01T00:00:00.000Z" }
-  },
-  "limits": {
-    "updatedAt": "2026-05-18T00:00:00.000Z",
-    "refreshMs": 300000,
-    "providers": [
-      {
-        "provider": "claude",
-        "accountKey": "sha256:...",
-        "status": "ok",
-        "updatedAt": "2026-05-18T00:00:00.000Z",
-        "windows": [
-          {
-            "kind": "session",
-            "usedPercent": 42,
-            "remainingPercent": 58,
-            "resetsAt": "2026-05-18T05:00:00.000Z"
-          },
-          {
-            "kind": "weekly",
-            "usedPercent": 20,
-            "remainingPercent": 80,
-            "resetsAt": "2026-05-25T00:00:00.000Z"
-          }
-        ]
-      }
-    ]
   }
 }
 ```
 
 The hub normalizes records before storing them. The Node hub accepts JSON ingest bodies up to 1 MiB; larger bodies return `413 payload_too_large`.
+
+Device `limits` and `limitsOnly` fields are accepted only for mixed-version
+compatibility and are discarded before persistence. Devices and agents do not
+probe or report local provider accounts. Quota data shown by `/api/stats` is
+owned by the Hub account service.
 
 The MySQL Node hub stores each change between a device's cumulative all-time snapshots in an append-only `usage_events` ledger. A row records the time that the difference was recorded (`recorded_at`), not an individual provider API request time. The synchronized protocol intentionally omits unbounded `allTime.sessions`; in that case the hub uses a `snapshot:<client>:<model>` session id to preserve the client/model aggregate without implying an original conversation id. Counter resets never produce negative events: the newly reported cumulative value is recorded as the start of a new counter cycle.
 
@@ -253,10 +233,13 @@ Current agents and widgets include `osName` and, when known, `osVersion` so devi
 
 `limits.providers[].provider` is one of `claude`, `codex`, `opencode`, `cursor`, `antigravity`, `kimi`, `grok`, `copilot`, `commandcode`, `mimo`, `zai`, `zaiteam`, `kiro`, `qoder`, `deepseek`, `openrouter`, `minimax`, `volcengine`, `ollama`, or `thirdparty`.
 `limits.providers[].accountKey` is a stable hashed account identifier (`sha256:…`) used to dedupe the same account across devices. `accountEmail` is the account email when available, and `accountName` is a sanitized display/profile name. Codex may additionally send `workspaceKind: "personal"` when the workspace has no provider-supplied name, allowing account-management UI to localize the Personal label without persisting translated text. `accountLabel` is the legacy provider-defined short label retained for mixed-version compatibility: older OpenCode renderers use it as the profile name, while existing providers may use it for the plan. `planLabel` is the explicit plan label (for example `Plus`, `Go`, or `Zen`) when identity and plan must be carried separately; readers fall back to `accountLabel` for payloads produced before `planLabel` existed. These fields MAY be sent to the authenticated hub so devices can identify each account and its plan. Hub ingest requires an admin, explicitly elevated legacy, or device-bound credential; the **public** stats endpoints (`publicLimits`) strip `accountKey`, `accountEmail`, `accountName`, `accountLabel`, `planLabel`, and `workspaceKind` so neither account identity nor plan labels are exposed publicly.
-`limits.providers[].source` is one of `oauth`, `cli`, `web`, `rpc`, `local`, or `api`; `local` means the value was read from an on-disk store such as OpenCode Go usage from `opencode.db`, `web` means a browser/session cookie backed web endpoint (Cursor, OpenCode web accounts, Qoder, MiMo, Kimi membership, Ollama), and `api` means a provider HTTP API authenticated by an API key or AK/SK credentials (OpenRouter, DeepSeek, Minimax, Copilot, GLM/Z.ai, Volcengine, Kimi Code).
+`limits.providers[].source` is one of `oauth`, `cli`, `web`, `rpc`, `local`, or `api`; it describes how the Hub-side provider probe obtained the result. It does not imply that a device discovered or uploaded a local account.
+`limits.providers[].credentialOrigin` is `manual` for accounts created through the Hub account API. `automatic` is retained only for mixed-version records and must not be produced by the new device path.
 `limits.providers[].balanceUsd` is an optional prepaid credit balance in USD (OpenCode Zen); `null` when the provider has no balance concept or none could be read. A genuine `0` (no remaining credit) is distinct from `null`.
 `limits.providers[].balance` is an optional native-currency prepaid balance block. DeepSeek uses `{ amount, currency, todaySpend, monthSpend, allTimeSpend, trackingSince, monthSinceTracking }`: `amount` is the spendable balance in the account's own currency (e.g. `CNY`/`USD`); the spend fields are derived from locally observed paid-balance drawdown, `allTimeSpend` keeps accumulating after old daily buckets are pruned, `trackingSince` records when that local observation began, and `monthSinceTracking` is `true` until a full month of history has accrued. OpenRouter uses USD: `/key` supplies `todaySpend`, `weekSpend`, `monthSpend`, and the provider-reported lifetime `allTimeSpend`; when OpenRouter authorizes `/credits` (officially documented for Management keys), `amount` and the corresponding real Credits meter are also included. Other API keys can still report their own spend and configured key limit without inventing an account balance. MiMo may additionally send `giftBalance`, `cashBalance`, Token Plan usage fields, and `planStatus` (`active`, `expired`, `none`, or `null`). An expired MiMo Token Plan has no quota window even when its prepaid balance remains available. `null` when not applicable. DeepSeek uses `source: "api"` with an empty `windows` array (it has no rate-limit windows). OpenRouter, GLM/Z.ai, Volcengine, Qoder, Kimi, and Ollama report quota/credit windows through the same `windows` array.
 `windows[].kind` is `session`, `weekly`, or `billing`. `windows[].metric` is an optional stable machine-readable role; `credits` identifies the OpenRouter account-credits meter independently of its display label. `windows[].detail` is an optional bounded display-only description for a window, such as the Kimi-vs-Code composition of the single shared monthly membership meter; it must not contain credentials or raw provider response data.
+
+Qoder CN local usage is opt-in as the `qodercn` client. Its legacy SQLite adapter, the 0.1.x `com.qoder.app.stable/main.sqlite` message adapter, and transcript adapter may all contribute to a record; main-database and transcript-derived periods, sessions, and costs carry `estimated: true` because those sources do not expose exact provider token billing. `qoderCnDiagnostics` is optional, bounded, and non-secret; it reports source selection, candidate/read counts, byte/event counts, last-data time, truncation, fallback, and stable failure codes. It never contains transcript paths, content, cookies, account credentials, or session identifiers.
 
 ## `GET /api/stats`
 
@@ -276,10 +259,53 @@ Response includes:
 - `projectsIncomplete` plus the corresponding `devices[].allTimeProjectsOmitted`, `devices[].allTimeProjectsIncomplete`, or `devices[].projectsEnabled` diagnostic
 - `historyPreview.daily[].activeTimeMs`, `historyPreview.monthly[].activeTimeMs`, and `historyPreview.summary.activeTimeMs` when tokscale graph exposes session active-time metrics
 - `limits.providers` aggregated by provider account
-- `devices`, including each device's normalized `periods`, `limits`, `receivedAt`, `osName` / `osVersion` when reported, optional `syncUploadIntervalMs`, and optional `periodWindows`
+- `devices`, including each device's normalized `periods`, `receivedAt`, `osName` / `osVersion` when reported, optional `syncUploadIntervalMs`, and optional `periodWindows`; device-level `limits` are not stored or returned
 - stale status for devices that have not reported recently
 
-If multiple devices report the same provider account, the hub keeps the freshest valid limits status for that account. Public Worker stats omit account identifiers.
+The top-level `limits` object is the Hub-owned account snapshot. Public Worker
+stats omit account identifiers. The Node Hub does not merge device-reported
+quota rows because the new device protocol does not accept them as authoritative.
+
+## Hub account management
+
+These routes require the admin scope. `GET /api/accounts` requires read scope
+and returns account metadata plus the current normalized quota snapshot; it
+never returns the stored credential.
+
+### `GET /api/accounts`
+
+Returns `{ "authority": "hub", "providers": [...], "accounts": [...] }`.
+Each account includes its `id`, provider, display fields, status, refresh
+timestamps, identity metadata, and `limits`; credential material is omitted.
+
+### `POST /api/accounts`
+
+Adds a manually supplied account, probes it immediately, encrypts its credential
+in the Hub database, and schedules refreshes. Request body:
+
+```json
+{
+  "provider": "qoder",
+  "name": "work",
+  "label": "Work account",
+  "credential": { "cookie": "<provider credential>" }
+}
+```
+
+The credential shape is provider-specific and is never echoed in the response.
+
+### `PATCH /api/accounts/:id`
+
+Updates `name`, `label`, or `enabled`. Supplying `credential` replaces the
+encrypted credential and performs an immediate probe.
+
+### `POST /api/accounts/:id/refresh`
+
+Performs an immediate Hub-side quota refresh and returns the sanitized account.
+
+### `DELETE /api/accounts/:id`
+
+Deletes the account, its encrypted credential, and its stored quota snapshot.
 
 ## `GET /api/devices`
 

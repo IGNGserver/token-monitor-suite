@@ -10,7 +10,7 @@ const test = require('node:test');
 
 const { deviceRecordFromAnchor } = require('../../src/shared/anchorSeed');
 const { configFingerprint } = require('../../src/shared/collector');
-const { qoderCnDataPaths } = require('../../src/shared/qoderCnUsage');
+const { qoderCnSourceFingerprint } = require('../../src/shared/qoderCnUsage');
 const { aggregateDevices, emptyPeriod } = require('../../src/shared/usage');
 
 const CLIENTS = 'claude,codex';
@@ -107,10 +107,10 @@ test('the seed reports the project setting it was built under', () => {
 
 test('the cold-start seed accepts an anchor configured for Qoder CN', () => {
   const homeDir = '/tmp/token-monitor-qodercn-home';
-  const qoderCnDbPath = qoderCnDataPaths({ homeDir }).dbPaths[0];
+  const qoderCnSource = qoderCnSourceFingerprint({ homeDir, platform: 'darwin' });
   const clients = 'claude,qodercn';
   const anchor = anchorFixture({
-    configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true, qoderCnDbPath)
+    configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true, qoderCnSource)
   });
 
   const record = deviceRecordFromAnchor(anchor, seedOptions({ clients, homeDir }));

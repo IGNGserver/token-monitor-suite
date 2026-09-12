@@ -1,7 +1,6 @@
 'use strict';
 
 const { fetchBufferedWithTimeout, MAX_JSON_BODY_BYTES } = require('./http');
-const { syncLimits } = require('./limits');
 const { isReasonixSyntheticSession } = require('./reasonixSessionGuard');
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
@@ -186,7 +185,8 @@ function buildSyncPayload(summary, {
   omitHistoryTokenComponents = false
 } = {}) {
   if (!summary || typeof summary !== 'object') return summary;
-  const payload = { ...summary, limits: syncLimits(summary.limits) };
+  const payload = { ...summary };
+  delete payload.limits;
   if (summary.history && typeof summary.history === 'object') {
     payload.history = historyForSync(summary.history, summary.periodWindows);
     if (omitHistoryTokenComponents) {

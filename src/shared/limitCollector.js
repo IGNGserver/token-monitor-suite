@@ -9,6 +9,10 @@ const { appVersion } = require('./appVersion');
 const { BROWSER_USER_AGENT } = require('./browserUserAgent');
 const { LIMIT_PROVIDER_IDS } = require('./limitProviders');
 const {
+  limitProviderAutoDetectDisabled,
+  parseLimitProviderAutoDetectDisabled
+} = require('./limitProviderSources');
+const {
   DEFAULT_LIMITS_REFRESH_MS,
   normalizeLimitProvider,
   normalizeLimitsSummary,
@@ -111,6 +115,58 @@ function parseLimitProviders(value) {
     providers.push(provider);
   }
   return providers;
+}
+
+function hasEnabledProfileCredential(profiles, predicate) {
+  return Object.values(profiles || {}).some((profile) => (
+    profile && profile.enabled !== false && (!predicate || predicate(profile))
+  ));
+}
+
+// A disabled auto-detection lane may still use credentials the user explicitly
+// saved in the widget. The check belongs at the collector boundary so each
+// provider cannot accidentally re-introduce an env/app/browser account.
+function hasExplicitLimitProviderConfig(provider, options = {}) {
+  switch (provider) {
+    case 'claude': return Boolean(options.claudeWebCookie);
+    case 'codex': return normalizeCodexManagedAccounts(options.codexManagedAccounts || options.managedAccounts)
+      .some((account) => account.enabled !== false);
+    case 'cursor': return options.cursorManualAccountConfigured === true;
+    case 'opencode': return Boolean(options.opencodeCookie)
+      || hasEnabledProfileCredential(options.opencodeProfiles, (profile) => profile.cookie || profile.apiKey);
+    case 'openrouter': return hasEnabledProfileCredential(options.openrouterProfiles, (profile) => profile.apiKey);
+    case 'deepseek': return Boolean(options.deepseekApiKey);
+    case 'minimax': return Boolean(options.minimaxApiKey);
+    case 'mimo': return Array.isArray(options.mimoManagedAccounts || options.managedAccounts)
+      && (options.mimoManagedAccounts || options.managedAccounts).some((account) => account?.enabled !== false && account.cookieHeader);
+    case 'copilot': return Boolean(options.copilotApiToken);
+    case 'zai': return Boolean(options.zaiApiKey);
+    case 'zaiteam': return Boolean(options.zaiTeamApiKey && options.zaiTeamOrganizationId && options.zaiTeamProjectId);
+    case 'volcengine': return Boolean(options.volcengineAccessKeyId && options.volcengineSecretAccessKey);
+    case 'qoder': return Boolean(options.qoderCookie);
+    case 'commandcode': return Boolean(options.commandcodeCookie);
+    case 'ollama': return Boolean(options.ollamaCookie);
+    case 'kimi': return Boolean(options.kimiApiKey || options.kimiWebAccessToken);
+    case 'thirdparty': return hasEnabledProfileCredential(options.thirdPartyProfiles, (profile) => (
+      profile.adapter && profile.baseUrl && (profile.accessToken || profile.apiKey)
+    ));
+    default: return false;
+  }
+}
+
+function credentialOriginForRow(provider, row, options = {}) {
+  const explicit = String(row?.credentialOrigin ?? row?.credential_origin ?? '').trim().toLowerCase();
+  if (explicit === 'manual' || explicit === 'automatic' || explicit === 'unknown') return explicit;
+  const configured = options.limitCredentialOrigins?.[provider];
+  if (configured === 'manual' || configured === 'automatic' || configured === 'unknown') return configured;
+  if (row?.sourceDetail === 'managed' || row?.sourceDetail === 'manual') return 'manual';
+  if (options.suppressAutoDetectedAccounts === true) return 'manual';
+  return 'automatic';
+}
+
+function annotateCredentialOrigin(provider, row, options = {}) {
+  if (!row || typeof row !== 'object') return row;
+  return { ...row, credentialOrigin: credentialOriginForRow(provider, row, options) };
 }
 
 function normalizeLimitsRefreshMs(value) {
@@ -1534,7 +1590,10 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const platform = deps.platform || process.platform;
   const webCookie = claudeWebCookie(deps.env || process.env, options);
-  if (webCookie) return fetchClaudeWebLimits(webCookie, deps, options);
+  if (webCookie) {
+    const provider = await fetchClaudeWebLimits(webCookie, deps, options);
+    return { ...provider, credentialOrigin: 'manual' };
+  }
   let oauthIdentity = null;
   try {
     let credentials = await readClaudeCredentials(deps);
@@ -3027,7 +3086,9 @@ async function fetchCodexLimits(options = {}, deps = {}) {
       if (scope.accountLabel) return account.accountLabel === scope.accountLabel;
       return false;
     });
-  let includeLiveAccount = options.includeLiveCodexAccount !== false;
+  let includeLiveAccount = options.includeLiveCodexAccount !== false
+    && options.suppressAutoDetectedAccounts !== true
+    && !limitProviderAutoDetectDisabled('codex', options);
   if (scope) {
     if (scope.sourceDetail) {
       includeLiveAccount = includeLiveAccount && scope.sourceDetail !== 'managed';
@@ -3202,7 +3263,9 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
 
   // Determine cookie sources: explicit profiles > legacy single cookie > env var
   const explicitProfiles = options.opencodeProfiles;
-  const envCookie = (deps.env || process.env).TOKEN_MONITOR_OPENCODE_COOKIE || '';
+  const suppressAutoDetectedAccounts = options.suppressAutoDetectedAccounts === true
+    || limitProviderAutoDetectDisabled('opencode', options);
+  const envCookie = suppressAutoDetectedAccounts ? '' : (deps.env || process.env).TOKEN_MONITOR_OPENCODE_COOKIE || '';
 
   // An account is a name, and credentials belong to a name. A profile may hold
   // any of: a cookie (Go quota plus Zen balance), a stored API key (Go quota),
@@ -3212,23 +3275,34 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   // come from another. The reference is stored rather than the key itself, so the
   // key is re-read every tick; it resolves only while it is still the key the
   // reference was bound to.
-  const ambientKey = hasInjectedLocalCollector ? '' : readGoApiKey(deps.env || process.env);
+  const ambientKey = suppressAutoDetectedAccounts || hasInjectedLocalCollector
+    ? ''
+    : readGoApiKey(deps.env || process.env);
   const ambientIdentity = ambientKey ? opencodeGoApi.goApiIdentity(ambientKey) : '';
   const ambientFor = (p) => opencodeProfiles.ambientKeyFor(p, ambientKey, ambientIdentity);
   let cookies = [];
   if (explicitProfiles && Object.keys(explicitProfiles).length > 0) {
     for (const [name, p] of Object.entries(explicitProfiles)) {
       if (!p.enabled) continue;
-      const apiKey = p.apiKey || ambientFor(p);
-      if (apiKey || p.cookie) cookies.push({ name, apiKey, cookie: p.cookie });
+      const explicitApiKey = p.apiKey || '';
+      const ambientApiKey = explicitApiKey ? '' : ambientFor(p);
+      const apiKey = explicitApiKey || ambientApiKey;
+      if (apiKey || p.cookie) {
+        cookies.push({
+          name,
+          apiKey,
+          cookie: p.cookie,
+          credentialOrigin: p.cookie || explicitApiKey ? 'manual' : 'automatic'
+        });
+      }
     }
   } else if (options.opencodeCookie) {
-    cookies = [{ name: 'default', cookie: options.opencodeCookie }];
+    cookies = [{ name: 'default', cookie: options.opencodeCookie, credentialOrigin: 'manual' }];
   }
 
   // Env var — show only if its cookie isn't already in a profile
   if (envCookie && !cookies.some((c) => c.cookie === envCookie)) {
-    cookies.push({ name: 'default (env)', cookie: envCookie });
+    cookies.push({ name: 'default (env)', cookie: envCookie, credentialOrigin: 'automatic' });
   }
 
   // The auto-detected key is an unnamed credential until someone names it, so it
@@ -3241,7 +3315,7 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   // the key it is that account's credential, and the account's own toggle owns
   // it, exactly as for a cookie.
   if (ambientKey && !ambientClaimed && options.opencodeAmbientEnabled !== false) {
-    cookies.push({ name: OPENCODE_AMBIENT_ACCOUNT_NAME, apiKey: ambientKey, ambient: true });
+    cookies.push({ name: OPENCODE_AMBIENT_ACCOUNT_NAME, apiKey: ambientKey, ambient: true, credentialOrigin: 'automatic' });
   }
 
   const multiAccountMode = cookies.length > 1;
@@ -3263,7 +3337,8 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
   if (!multiAccountMode) {
     // The database is device-wide and has no stable account identity, so every
     // caller must opt in explicitly before this process reads it.
-    const goLocal = (options.opencodeLocalLimitsEnabled === true || hasInjectedLocalCollector)
+    const goLocal = (!suppressAutoDetectedAccounts
+      && (options.opencodeLocalLimitsEnabled === true || hasInjectedLocalCollector))
       ? collectGo({ env: deps.env || process.env, now: () => nowMs })
       : { status: 'notConfigured', windows: [] };
     const primary = cookies[0] || {};
@@ -3375,6 +3450,7 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
       accountLabel,
       source,
       sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL,
+      credentialOrigin: primary.credentialOrigin || (primary.apiKey || primary.cookie ? 'manual' : 'automatic'),
       status,
       updatedAt,
       windows,
@@ -3396,7 +3472,12 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
       fetchZen,
       nowMs,
       updatedAt,
-      { apiKey: profile.apiKey, collectGoApi, deps }
+      {
+        apiKey: profile.apiKey,
+        credentialOrigin: profile.credentialOrigin,
+        collectGoApi,
+        deps
+      }
     ))
   );
   for (const provider of results) {
@@ -3535,6 +3616,7 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
       planLabel,
       source,
       sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL,
+      credentialOrigin: api.credentialOrigin || 'manual',
       status,
       updatedAt,
       windows,
@@ -3560,7 +3642,9 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
       provider: 'opencode', accountKey,
       accountName: name, accountLabel: name, planLabel: '',
       source: api.apiKey && !cookie ? 'api' : 'web',
-      sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL, status: 'unavailable',
+      sourceDetail: OPENCODE_COMPONENT_PROVENANCE_DETAIL,
+      credentialOrigin: api.credentialOrigin || 'manual',
+      status: 'unavailable',
       updatedAt, windows: [], balanceUsd: null
     });
   }
@@ -3760,17 +3844,41 @@ function resolveProviderFetch(provider, deps = {}) {
 async function probeLimitProvider(provider, options = {}, context = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const fetcher = providerFetchers(deps)[provider];
-  if (!fetcher) return [statusProvider(provider, 'notConfigured', nowIso(nowMs))];
+  const suppressAutoDetectedAccounts = options.limitProviderAuthority === 'hub'
+    || limitProviderAutoDetectDisabled(provider, options);
+  if (suppressAutoDetectedAccounts && !hasExplicitLimitProviderConfig(provider, options)) return [];
+  const providerOptions = suppressAutoDetectedAccounts
+    ? { ...options, suppressAutoDetectedAccounts: true }
+    : options;
+  if (!fetcher) {
+    return [annotateCredentialOrigin(
+      provider,
+      statusProvider(provider, 'notConfigured', nowIso(nowMs)),
+      providerOptions
+    )];
+  }
   try {
     const signal = context.signal ?? deps.signal;
-    const result = await fetcher(options, {
-      ...deps,
-      fetch: createProbeFetch(resolveProviderFetch(provider, deps), { ...context, signal }, deps),
+    const probeDeps = suppressAutoDetectedAccounts
+      ? { ...deps, env: Object.create(null) }
+      : deps;
+    const result = await fetcher(providerOptions, {
+      ...probeDeps,
+      fetch: createProbeFetch(resolveProviderFetch(provider, probeDeps), { ...context, signal }, probeDeps),
       signal
     });
-    return (Array.isArray(result) ? result : [result]).filter(Boolean);
+    const rows = (Array.isArray(result) ? result : [result])
+      .filter(Boolean)
+      .map((row) => annotateCredentialOrigin(provider, row, providerOptions));
+    return suppressAutoDetectedAccounts
+      ? rows.filter((row) => row.credentialOrigin === 'manual')
+      : rows;
   } catch (error) {
-    return [statusProvider(provider, providerStatusFromError(error), nowIso(nowMs))];
+    return [annotateCredentialOrigin(
+      provider,
+      statusProvider(provider, providerStatusFromError(error), nowIso(nowMs)),
+      providerOptions
+    )];
   }
 }
 
@@ -3859,9 +3967,13 @@ function cursorBillingWindow(label, fields = {}) {
   };
 }
 
-async function fetchCursorLimits(_options = {}, deps = {}) {
+async function fetchCursorLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const updatedAt = new Date(nowMs).toISOString();
+  const credentialOrigin = options.cursorManualAccountConfigured === true
+    || options.suppressAutoDetectedAccounts === true
+    ? 'manual'
+    : 'automatic';
   const readActiveAccount = deps.readActiveAccount || cursorAuth.readActiveAccount;
   const probe = deps.probe || cursorProbe.probe;
 
@@ -3873,6 +3985,7 @@ async function fetchCursorLimits(_options = {}, deps = {}) {
       accountLabel: '',
       status: 'notConfigured',
       source: 'web',
+      credentialOrigin,
       updatedAt,
       windows: []
     };
@@ -3887,6 +4000,7 @@ async function fetchCursorLimits(_options = {}, deps = {}) {
       accountLabel: account.label || '',
       status: kind,
       source: 'web',
+      credentialOrigin,
       updatedAt,
       windows: []
     };
@@ -3986,6 +4100,7 @@ async function fetchCursorLimits(_options = {}, deps = {}) {
     accountLabel: formatCursorMembership(usage.membershipType) || account.label || '',
     status: 'ok',
     source: 'web',
+    credentialOrigin,
     updatedAt,
     windows
   };
@@ -4057,7 +4172,10 @@ module.exports = {
   mapCodexRateLimitsToProvider,
   parseClaudeCliUsageText,
   parseBoolean,
+  parseLimitProviderAutoDetectDisabled,
   parseLimitProviders,
+  limitProviderAutoDetectDisabled,
+  hasExplicitLimitProviderConfig,
   normalizeLimitsRefreshMode,
   normalizeLimitsRefreshMs,
   refreshClaudeAccessToken,

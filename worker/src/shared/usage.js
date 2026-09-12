@@ -468,6 +468,7 @@ function mergeSession(target, source) {
   target.cacheReadTokens += Math.max(0, Math.round(asNumber(source.cacheReadTokens)));
   target.cacheWriteTokens += Math.max(0, Math.round(asNumber(source.cacheWriteTokens)));
   target.reasoningTokens += Math.max(0, Math.round(asNumber(source.reasoningTokens)));
+  if (source.estimated === true) target.estimated = true;
   const sourceStarted = timestampMs(source.startedAt);
   const targetStarted = timestampMs(target.startedAt);
   if (sourceStarted && (!targetStarted || sourceStarted < targetStarted)) target.startedAt = new Date(sourceStarted).toISOString();
@@ -522,6 +523,7 @@ function sessionFromRow(row) {
   const id = detectSessionId(row);
   if (!id) return null;
   const session = emptySession(client, id);
+  if (row.estimated === true) session.estimated = true;
   session.totalTokens = Math.max(0, Math.round(tokenValueForClient(row, client)));
   session.costUsd = costValue(row);
   session.messageCount = Math.max(0, Math.round(firstNumber(row, MESSAGE_COUNT_KEYS)));
@@ -546,6 +548,7 @@ function normalizeSession(input, fallbackKey) {
   const id = normalizeSessionId(input.sessionId || input.session_id || input.session || input.conversationId || input.conversation_id || input.threadId || input.thread_id || fallbackKey);
   if (!client || client === REASONIX_CLIENT || !id) return null;
   const session = emptySession(client, id);
+  if (input.estimated === true) session.estimated = true;
   const components = sessionTokenComponents(input);
   Object.assign(session, components);
   const componentTotal = components.inputTokens + components.outputTokens + components.cacheReadTokens + components.cacheWriteTokens; // reasoning is a subset of output — see TOKEN_COMPONENT_KEYS
@@ -582,6 +585,7 @@ function normalizePeriod(input, options = {}) {
   const period = emptyPeriod();
   if (!input || typeof input !== 'object') return period;
   const projectsEnabled = options.projectsEnabled !== false;
+  if (input.estimated === true) period.estimated = true;
   period.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? 0)));
   const componentCapability = input.capabilities?.tokenComponents;
   const hasLegacyComponentShape = [
@@ -739,6 +743,7 @@ const UNATTRIBUTED_USAGE_CLIENT = '__unattributed';
 
 function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const client = detectedClient;
+  if (row?.estimated === true) period.estimated = true;
   const tokens = tokenValueForClient(row, client);
   const cost = costValue(row);
   const cacheRead = Math.max(0, Math.round(firstNumber(row, CACHE_READ_TOKEN_KEYS)));
@@ -844,6 +849,83 @@ function normalizePeriodOmissionCounts(value) {
   return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
+const QODER_CN_DIAGNOSTIC_SOURCES = new Set(['none', 'sqlite', 'transcript', 'sqlite+transcript']);
+const QODER_CN_DIAGNOSTIC_USED_SOURCES = new Set(['sqlite', 'main-sqlite', 'transcript']);
+
+function normalizeDiagnosticCount(value) {
+  const number = Math.round(asNumber(value));
+  return Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, number));
+}
+
+function normalizeDiagnosticCode(value) {
+  const code = String(value || '').trim();
+  return /^[A-Z0-9_:-]{1,80}$/.test(code) ? code : null;
+}
+
+function normalizeQoderCnDiagnostics(input) {
+  if (!input || typeof input !== 'object') return null;
+  const result = {
+    rootExists: input.rootExists === true,
+    rootsFound: normalizeDiagnosticCount(input.rootsFound),
+    candidateFiles: normalizeDiagnosticCount(input.candidateFiles),
+    readFiles: normalizeDiagnosticCount(input.readFiles),
+    readBytes: normalizeDiagnosticCount(input.readBytes),
+    recognizedEvents: normalizeDiagnosticCount(input.recognizedEvents),
+    ignoredEvents: normalizeDiagnosticCount(input.ignoredEvents),
+    badJsonLines: normalizeDiagnosticCount(input.badJsonLines),
+    oversizedFiles: normalizeDiagnosticCount(input.oversizedFiles),
+    oversizedLines: normalizeDiagnosticCount(input.oversizedLines),
+    readErrors: normalizeDiagnosticCount(input.readErrors),
+    duplicateRows: normalizeDiagnosticCount(input.duplicateRows),
+    transcriptRows: normalizeDiagnosticCount(input.transcriptRows),
+    lastDataAt: normalizeIsoTimestamp(input.lastDataAt),
+    source: QODER_CN_DIAGNOSTIC_SOURCES.has(input.source) ? input.source : 'none',
+    usedSources: Array.isArray(input.usedSources)
+      ? [...new Set(input.usedSources.filter((source) => QODER_CN_DIAGNOSTIC_USED_SOURCES.has(source)))]
+      : [],
+    estimated: input.estimated === true,
+    fallback: input.fallback === true,
+    truncated: input.truncated === true,
+    failureCode: normalizeDiagnosticCode(input.failureCode)
+  };
+  if (input.legacyDb && typeof input.legacyDb === 'object') {
+    result.legacyDb = {
+      configured: input.legacyDb.configured !== false,
+      rows: normalizeDiagnosticCount(input.legacyDb.rows),
+      failed: input.legacyDb.failed === true,
+      failureCode: normalizeDiagnosticCode(input.legacyDb.failureCode)
+    };
+  }
+  if (input.mainDb && typeof input.mainDb === 'object') {
+    result.mainDb = {
+      configured: input.mainDb.configured !== false,
+      rows: normalizeDiagnosticCount(input.mainDb.rows),
+      failed: input.mainDb.failed === true,
+      failureCode: normalizeDiagnosticCode(input.mainDb.failureCode)
+    };
+  }
+  if (input.transcript && typeof input.transcript === 'object') {
+    result.transcript = {
+      rootExists: input.transcript.rootExists === true,
+      rootsFound: normalizeDiagnosticCount(input.transcript.rootsFound),
+      candidateFiles: normalizeDiagnosticCount(input.transcript.candidateFiles),
+      readFiles: normalizeDiagnosticCount(input.transcript.readFiles),
+      readBytes: normalizeDiagnosticCount(input.transcript.readBytes),
+      recognizedEvents: normalizeDiagnosticCount(input.transcript.recognizedEvents),
+      ignoredEvents: normalizeDiagnosticCount(input.transcript.ignoredEvents),
+      badJsonLines: normalizeDiagnosticCount(input.transcript.badJsonLines),
+      oversizedFiles: normalizeDiagnosticCount(input.transcript.oversizedFiles),
+      oversizedLines: normalizeDiagnosticCount(input.transcript.oversizedLines),
+      readErrors: normalizeDiagnosticCount(input.transcript.readErrors),
+      lastDataAt: normalizeIsoTimestamp(input.transcript.lastDataAt),
+      estimated: input.transcript.estimated === true,
+      truncated: input.transcript.truncated === true,
+      failureCode: normalizeDiagnosticCode(input.transcript.failureCode)
+    };
+  }
+  return result;
+}
+
 function normalizeDeviceOsVersion(value) {
   return String(value || '').trim().slice(0, 128);
 }
@@ -894,6 +976,10 @@ function normalizeDeviceRecord(record) {
   if (hasOwn(record, 'periodWindows')) {
     const windows = normalizePeriodWindows(record.periodWindows);
     if (windows) normalized.periodWindows = windows;
+  }
+  if (hasOwn(record, 'qoderCnDiagnostics')) {
+    const diagnostics = normalizeQoderCnDiagnostics(record.qoderCnDiagnostics);
+    if (diagnostics) normalized.qoderCnDiagnostics = diagnostics;
   }
   for (const periodName of PERIODS) {
     normalized.periods[periodName] = normalizePeriod(record[periodName] || record.periods?.[periodName], {
@@ -1242,6 +1328,7 @@ function aggregateHistory(devices, options = {}) {
 // emptyPeriod()-shaped object). Shared by device aggregation and the WSL merge so
 // the two never diverge on which period fields exist.
 function addPeriodInto(target, source) {
+  if (source.estimated === true) target.estimated = true;
   target.capabilities.tokenComponents = target.capabilities.tokenComponents === true
     && source.capabilities?.tokenComponents === true;
   target.totalTokens += source.totalTokens;

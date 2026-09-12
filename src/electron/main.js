@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, Notification, screen, session, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, Notification, powerMonitor, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, sharedDataDir, normalizeHubUrl } = require('../shared/config');
 const {
@@ -12,7 +12,6 @@ const {
   credentialSettingsForRenderer,
   hasCredentialSettings,
   persistSettingsAndCredentials,
-  readRegularFileNoFollow,
   stripCredentialSettings,
   writePrivateJsonAtomic
 } = require('../shared/credentialStore');
@@ -27,7 +26,13 @@ const motionPreferenceApi = require('./motionPreference');
 // a closed parent pipe turns the next log call into an unhandled 'error'
 // event and Electron pops a "JavaScript error in the main process" dialog.
 installSafeStdout();
-const { DEFAULT_CLIENTS, KNOWN_CLIENTS, clientsCsvForSetting, applyNewDefaultClientMigration } = require('../shared/clientTracking');
+const {
+  DEFAULT_CLIENTS,
+  KNOWN_CLIENTS,
+  clientsCsvForSetting,
+  applyNewDefaultClientMigration,
+  shouldMigrateNewDefaultClients
+} = require('../shared/clientTracking');
 const { collectCustomRangeOnce, lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { customPricingPath } = require('../shared/tokscaleConfig');
@@ -36,29 +41,9 @@ const { createHub } = require('../hub/server');
 const { createHubAuthPolicy } = require('../shared/hubAuth');
 const { validateDeviceRecordPayload } = require('../shared/wireValidation');
 const { requireSafeHubTransport } = require('../shared/hubTransport');
-const { deepseekToken, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, kimiToken, kimiWebToken, ollamaSessionCookie } = require('../shared/limitCollector');
-const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/ollamaLimits');
-const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/copilotDeviceFlow');
-const {
-  codexAuthIdentity,
-  codexManagedAccountIdentityKey,
-  codexManagedAccountMatchesIdentity,
-  hashAccountKey,
-  preserveCodexManagedHydrationCollisions,
-  upgradeCodexManagedAccountIdentity
-} = require('../shared/codexAuth');
-const { codexLoginUrlFromOutput, isAllowedCodexLoginUrl } = require('../shared/codexLogin');
-const {
-  authWithSelectedCodexWorkspace,
-  listCodexWorkspaces,
-  normalizeWorkspaceId
-} = require('../shared/codexWorkspaces');
-const {
-  codexAccountMatchesIdentity,
-  liveCodexAuthPath,
-  readCodexAuthMaterial,
-  writeCodexAuthFile
-} = require('../shared/codexSystemSwitch');
+const { parseBoolean, parseLimitProviders } = require('../shared/limitCollector');
+const { isAllowedCodexLoginUrl } = require('../shared/codexLogin');
+const { isAllowedVerificationUrl } = require('../shared/copilotDeviceFlow');
 const {
   normalizeClientDisplayOrder,
   normalizeHiddenClients,
@@ -94,10 +79,6 @@ const {
   shouldSkipAppUpdateCheck,
   updateInstallQuitPolicy
 } = require('../shared/appUpdater');
-const cursorAuth = require('../shared/cursorAuth');
-const cursorProbe = require('../shared/cursorProbe');
-const opencodeWeb = require('../shared/opencodeWeb');
-const openrouterLimits = require('../shared/openrouterLimits');
 const semver = require('semver');
 const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
 const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
@@ -121,12 +102,6 @@ const { aggregateDevices, aggregateHistory, applyProjectRollups } = require('../
 const { fetchBufferedWithTimeout, fetchWithTimeout } = require('../shared/http');
 const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
-const {
-  MIMO_PLATFORM_CONSOLE_URL,
-  createMimoManagedAccount,
-  fetchMimoLimits,
-  normalizeMimoCookieHeader
-} = require('../shared/mimoLimits');
 const { historyPreview, historyRevision } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
 const {
@@ -136,7 +111,6 @@ const {
 const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
 const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
 const linuxAutostart = require('./linuxAutostart');
-const { codexAccountIdForProvider, localLiveCodexProvider } = require('./renderer/accountIdentity');
 const {
   buildTrayIcon,
   createTray,
@@ -144,9 +118,7 @@ const {
   isBarsTrayIconMode,
   pickUsageTrayIconId,
   popoverBounds,
-  reconcileCodexAccountSelection,
   refreshTrayMenu,
-  sortCodexAccountsForDisplay,
   shouldUseTemplateTrayIcon
 } = require('./tray');
 const {
@@ -164,7 +136,6 @@ const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('.
 const {
   classifySettingsChange,
   envelopeFromSettings,
-  limitsConfigFromSettings,
   usageConfigFromSettings
 } = require('./runtimeConfig');
 const { runManualDeviceRefresh } = require('./deviceRuntimeCoordinator');
@@ -249,6 +220,10 @@ const HUB_REQUEST_TIMEOUT_MS = 15 * 1000;
 // The Node/Worker hubs emit a heartbeat every 30 seconds by default. Allow two
 // missed beats before treating a half-open stream as disconnected.
 const SSE_IDLE_TIMEOUT_MS = 90 * 1000;
+const SSE_RETRY_BASE_MS = 1000;
+const SSE_RETRY_MAX_MS = 30 * 1000;
+const SYNC_REST_POLL_MS = 60 * 1000;
+const SYNC_RECOVERY_TIMEOUT_MS = 20 * 1000;
 const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
 const DEFAULT_VIEW_LIST = ['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'].map((id) => ({ id }));
 const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends'].map((id) => ({ id }));
@@ -285,6 +260,42 @@ app.on('open-url', (event, url) => {
 
 const HOME_LIMIT_ACCOUNT_COUNT_DEFAULT = 3;
 const HOME_LIMIT_ACCOUNT_COUNT_MAX = 12;
+const LEGACY_LOCAL_LIMIT_SETTING_KEYS = Object.freeze([
+  'claudeWebCookie',
+  'opencodeCookie',
+  'opencodeProfiles',
+  'openrouterProfiles',
+  'deepseekApiKey',
+  'minimaxApiKey',
+  'copilotApiToken',
+  'copilotEnterpriseHost',
+  'zaiApiKey',
+  'zaiTeamApiKey',
+  'zaiTeamOrganizationId',
+  'zaiTeamProjectId',
+  'volcengineAccessKeyId',
+  'volcengineSecretAccessKey',
+  'volcengineRegion',
+  'qoderCookie',
+  'qoderSite',
+  'qoderCookieMode',
+  'cursorManualAccountConfigured',
+  'kimiApiKey',
+  'kimiWebAccessToken',
+  'ollamaCookie',
+  'codexManagedAccounts',
+  'mimoManagedAccounts'
+]);
+
+function stripLegacyLocalLimitSettings(value) {
+  const clean = { ...(value || {}) };
+  for (const key of LEGACY_LOCAL_LIMIT_SETTING_KEYS) delete clean[key];
+  return clean;
+}
+
+function hasLegacyLocalLimitSettings(value) {
+  return LEGACY_LOCAL_LIMIT_SETTING_KEYS.some((key) => Object.hasOwn(value || {}, key));
+}
 
 function normalizeHomeLimitAccountCount(value) {
   const count = Math.trunc(Number(value));
@@ -369,7 +380,6 @@ function defaultSettings() {
     homeLimitProviderOrder: '',
     hiddenHomeLimitProviders: '',
     homeLimitAccountCount: HOME_LIMIT_ACCOUNT_COUNT_DEFAULT,
-    limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
     showLimitUsed: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_USED, false),
@@ -388,28 +398,8 @@ function defaultSettings() {
     startAtLogin: false,
     automaticAppUpdates: false,
     language: 'auto',
-    opencodeCookie: '',
-    opencodeProfiles: {},
-    openrouterProfiles: {},
-    deepseekApiKey: '',
-    minimaxApiKey: '',
-    copilotApiToken: '',
-    copilotEnterpriseHost: '',
-    zaiApiKey: '',
-    zaiApiRegion: normalizeZaiApiRegion(process.env.TOKEN_MONITOR_ZAI_API_REGION || process.env.ZAI_API_REGION || process.env.Z_AI_API_HOST || 'global'),
-    zaiTeamApiKey: '',
-    zaiTeamOrganizationId: '',
-    zaiTeamProjectId: '',
-    volcengineAccessKeyId: '',
-    volcengineSecretAccessKey: '',
-    volcengineRegion: '',
-    qoderCookie: '',
-    qoderSite: 'global',
-    kimiApiKey: '',
-    kimiWebAccessToken: '',
-    ollamaCookie: '',
-    codexManagedAccounts: [],
-    mimoManagedAccounts: [],
+    hubAdminSecret: process.env.TOKEN_MONITOR_ADMIN_SECRET || '',
+    hubAccountCredentialKey: process.env.TOKEN_MONITOR_HUB_CREDENTIAL_KEY || '',
     appUpdate: {
       lastCheckedAt: null,
       lastKnownLatest: null,
@@ -472,53 +462,16 @@ function electronUsageConfig(errorPrefix) {
   });
 }
 
-function electronLimitsConfig() {
-  return limitsConfigFromSettings(settings, {
-    env: process.env,
-    defaultLimitProviders: defaultLimitProviders(),
-    codexManagedAccounts: codexManagedAccountsForCollector(),
-    mimoManagedAccounts: mimoManagedAccountsForCollector()
-  });
-}
-
 function electronDeviceEnvelope() {
   return envelopeFromSettings(settings, {
+    defaultDeviceId: defaultDeviceId(),
     agentVersion: appVersion(),
-    agentRuntime: 'electron-widget',
-    defaultDeviceId: defaultDeviceId()
+    agentRuntime: 'electron-widget'
   });
-}
-
-function defaultLimitProviders() {
-  return parseLimitProviders(process.env.TOKEN_MONITOR_LIMIT_PROVIDERS).join(',');
 }
 
 function defaultLimitProviderOrder() {
   return parseLimitProviders().join(',');
-}
-
-function normalizeDeepSeekApiKey(value) {
-  return deepseekToken({}, String(value || ''));
-}
-
-function currentDeepSeekApiKey() {
-  return settings?.deepseekApiKey || deepseekToken(process.env);
-}
-
-function normalizeMinimaxApiKey(value) {
-  return minimaxToken({}, String(value || ''));
-}
-
-function currentMinimaxApiKey() {
-  return settings?.minimaxApiKey || minimaxToken(process.env);
-}
-
-function normalizeCopilotApiToken(value) {
-  return copilotToken({}, { copilotApiToken: String(value || '') });
-}
-
-function currentCopilotApiToken() {
-  return settings?.copilotApiToken || copilotToken(process.env);
 }
 
 function normalizeSecretSetting(value) {
@@ -527,841 +480,6 @@ function normalizeSecretSetting(value) {
     raw = raw.slice(1, -1).trim();
   }
   return raw;
-}
-
-function normalizeZaiApiKey(value) {
-  return zaiToken({}, String(value || ''));
-}
-
-function normalizeZaiApiRegion(value) {
-  return zaiRegion({ zaiApiRegion: value }, {});
-}
-
-function currentZaiApiKey() {
-  return settings?.zaiApiKey || zaiToken(process.env);
-}
-
-function normalizeZaiTeamApiKey(value) {
-  return zaiTeamToken({}, String(value || ''));
-}
-
-function normalizeZaiTeamId(value) {
-  return String(value || '').trim();
-}
-
-function currentZaiTeamApiKey() {
-  return settings?.zaiTeamApiKey || zaiTeamToken(process.env);
-}
-
-function normalizeVolcengineRegion(value) {
-  const raw = String(value || '').trim().toLowerCase();
-  return raw || '';
-}
-
-function currentVolcengineCredentials() {
-  return volcengineCredentials(process.env, settings || {});
-}
-
-function normalizeQoderCookie(value) {
-  return qoderCookie({}, { qoderCookie: String(value || '') });
-}
-
-function normalizeQoderSite(value) {
-  const raw = String(value || '').trim().toLowerCase();
-  if (raw === 'cn' || raw === 'china' || raw.includes('qoder.com.cn')) return 'cn';
-  return 'global';
-}
-
-function currentQoderCookie() {
-  return settings?.qoderCookie || qoderCookie(process.env);
-}
-
-function normalizeOllamaCookie(value) {
-  return ollamaSessionCookie({}, { ollamaCookie: String(value || '') });
-}
-
-function currentOllamaCookie() {
-  return settings?.ollamaCookie || ollamaSessionCookie(process.env);
-}
-
-function normalizeKimiApiKey(value) {
-  return kimiToken({}, String(value || ''));
-}
-
-function currentKimiApiKey() {
-  return settings?.kimiApiKey || kimiToken(process.env);
-}
-
-function normalizeKimiWebAccessToken(value) {
-  return kimiWebToken({}, String(value || ''));
-}
-
-function currentKimiWebAccessToken() {
-  return settings?.kimiWebAccessToken || kimiWebToken(process.env);
-}
-
-function normalizeCopilotEnterpriseHost(value) {
-  return String(value || '').trim().replace(/^https?:\/\//i, '').split('/')[0].toLowerCase();
-}
-
-let codexLoginController = null;
-let codexLoginFlowId = '';
-let codexLoginCanCancel = false;
-let codexWorkspaceSelection = null;
-let codexWorkspaceLabelHydrationPromise = null;
-let copilotLoginController = null;
-let copilotLoginFlowId = '';
-const CODEX_WORKSPACE_LABEL_HYDRATION_CONCURRENCY = 3;
-
-// Startup label hydration is a small one-shot map. LimitsRuntime's bounded
-// executor owns lane-aware provider refresh state, so it is not reusable here.
-async function mapWithConcurrency(items, concurrency, mapper) {
-  const results = new Array(items.length);
-  let nextIndex = 0;
-  async function worker() {
-    while (nextIndex < items.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      results[index] = await mapper(items[index], index);
-    }
-  }
-  const workerCount = Math.min(items.length, Math.max(1, Math.trunc(concurrency) || 1));
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
-  return results;
-}
-
-function normalizeCodexManagedAccounts(value) {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set();
-  const accounts = [];
-  for (const account of value) {
-    if (!account || typeof account !== 'object') continue;
-    const id = String(account.id || '').trim();
-    const homePath = String(account.homePath || '').trim();
-    if (!id || !homePath) continue;
-    const email = String(account.email || '').trim().toLowerCase();
-    const workspaceAccountId = normalizeWorkspaceId(
-      account.workspaceAccountId
-      || account.providerAccountId
-    );
-    const rawWorkspaceLabel = String(account.workspaceLabel || '').trim();
-    const workspaceKind = account.workspaceKind === 'personal' ? 'personal' : '';
-    const accountKey = String(account.accountKey || '').trim();
-    const dedupe = codexManagedAccountIdentityKey({
-      id,
-      accountKey,
-      email,
-      workspaceAccountId
-    });
-    if (seen.has(dedupe)) continue;
-    seen.add(dedupe);
-    accounts.push({
-      id,
-      email,
-      accountKey,
-      accountLabel: String(account.accountLabel || '').trim(),
-      workspaceAccountId,
-      workspaceLabel: workspaceKind ? '' : rawWorkspaceLabel,
-      workspaceKind,
-      homePath,
-      authPath: String(account.authPath || path.join(homePath, 'auth.json')).trim(),
-      addedAt: account.addedAt || new Date().toISOString(),
-      updatedAt: account.updatedAt || account.addedAt || new Date().toISOString(),
-      enabled: account.enabled !== false
-    });
-  }
-  return accounts;
-}
-
-function hydrateCodexManagedAccounts(value) {
-  const storedAccounts = normalizeCodexManagedAccounts(value);
-  const hydratedAccounts = storedAccounts.map((account) => {
-    try {
-      const auth = JSON.parse(readRegularFileNoFollow(account.authPath, {
-        fs,
-        description: 'Managed Codex auth',
-        encoding: 'utf8'
-      }));
-      return upgradeCodexManagedAccountIdentity(account, codexAuthIdentity(auth));
-    } catch (_) {
-      return account;
-    }
-  });
-  const resolvedAccounts = preserveCodexManagedHydrationCollisions(storedAccounts, hydratedAccounts);
-  if (resolvedAccounts.some((account, index) => account !== hydratedAccounts[index])) {
-    console.warn('[codex] Managed account identity hydration found a collision; preserved stored identities.');
-  }
-  return resolvedAccounts;
-}
-
-function hydrateCodexManagedWorkspaceLabels() {
-  if (codexWorkspaceLabelHydrationPromise) return codexWorkspaceLabelHydrationPromise;
-  if (
-    settings?.limitsEnabled === false
-    || !parseLimitProviders(settings?.limitProviders).includes('codex')
-  ) return Promise.resolve(false);
-  const candidates = normalizeCodexManagedAccounts(settings?.codexManagedAccounts)
-    .filter((account) => (
-      account.enabled !== false
-      && account.workspaceAccountId
-      && !account.workspaceLabel
-      && !account.workspaceKind
-    ));
-  if (candidates.length === 0) return Promise.resolve(false);
-
-  const task = mapWithConcurrency(
-    candidates,
-    CODEX_WORKSPACE_LABEL_HYDRATION_CONCURRENCY,
-    async (account) => {
-      try {
-        const auth = JSON.parse(readRegularFileNoFollow(account.authPath, {
-          fs,
-          description: 'Managed Codex auth',
-          encoding: 'utf8'
-        }));
-        const workspaces = await listCodexWorkspaces(auth, { env: process.env });
-        const workspace = workspaces.find((entry) => entry.id === account.workspaceAccountId);
-        return workspace
-          ? {
-              id: account.id,
-              workspaceAccountId: account.workspaceAccountId,
-              label: workspace.label,
-              workspaceKind: workspace.workspaceKind
-            }
-          : null;
-      } catch (_) {
-        return null;
-      }
-    }
-  ).then((results) => {
-    const labels = new Map(
-      results.filter(Boolean).map((result) => [result.id, result])
-    );
-    if (labels.size === 0) return false;
-    let changed = false;
-    const accounts = normalizeCodexManagedAccounts(settings?.codexManagedAccounts).map((account) => {
-      const resolved = labels.get(account.id);
-      if (
-        !resolved
-        || account.workspaceLabel
-        || account.workspaceKind
-        || account.enabled === false
-        || account.workspaceAccountId !== resolved.workspaceAccountId
-      ) return account;
-      changed = true;
-      return {
-        ...account,
-        workspaceLabel: resolved.label,
-        workspaceKind: resolved.workspaceKind,
-        updatedAt: new Date().toISOString()
-      };
-    });
-    if (!changed) return false;
-    settings.codexManagedAccounts = accounts;
-    saveSettings();
-    pushSettingsToRenderer();
-    void queueLimitInvalidation({ provider: 'codex' }, 'workspace-label-hydrated');
-    return true;
-  });
-
-  codexWorkspaceLabelHydrationPromise = task.finally(() => {
-    codexWorkspaceLabelHydrationPromise = null;
-  });
-  return codexWorkspaceLabelHydrationPromise;
-}
-
-function codexAccountsForRenderer() {
-  return normalizeCodexManagedAccounts(settings?.codexManagedAccounts).map(({
-    id, email, accountKey, accountLabel, workspaceAccountId, workspaceLabel, workspaceKind, addedAt, updatedAt, enabled
-  }) => ({
-    id,
-    email,
-    accountKey,
-    accountLabel,
-    workspaceAccountId,
-    workspaceLabel,
-    workspaceKind,
-    addedAt,
-    updatedAt,
-    enabled
-  }));
-}
-
-function codexManagedAccountsForCollector() {
-  return normalizeCodexManagedAccounts(settings?.codexManagedAccounts);
-}
-
-function normalizeMimoManagedAccounts(value) {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set();
-  const accounts = [];
-  for (const account of value) {
-    if (!account || typeof account !== 'object') continue;
-    const id = String(account.id || '').trim();
-    const accountKey = String(account.accountKey || '').trim();
-    if (!id || !accountKey) continue;
-    if (seen.has(accountKey)) continue;
-    seen.add(accountKey);
-    accounts.push({
-      id,
-      accountKey,
-      accountEmail: String(account.accountEmail || '').trim().slice(0, 254),
-      accountLabel: String(account.accountLabel || '').trim(),
-      addedAt: account.addedAt || new Date().toISOString(),
-      updatedAt: account.updatedAt || account.addedAt || new Date().toISOString(),
-      enabled: account.enabled !== false
-    });
-  }
-  return accounts;
-}
-
-function mimoAccountsForRenderer() {
-  return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map(({
-    id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled
-  }) => ({ id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled }));
-}
-
-function mimoManagedAccountsForCollector() {
-  return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map((account) => ({
-    ...account,
-    cookieHeader: readMimoCredential(account.id)
-  })).filter((account) => account.cookieHeader);
-}
-
-function legacyMimoCredentialPath(id) {
-  const digest = crypto.createHash('sha256').update(String(id || '')).digest('hex');
-  return path.join(app.getPath('userData'), 'mimo-credentials', `${digest}.cookie`);
-}
-
-function writeMimoCredential(id, value) {
-  const cookieHeader = normalizeMimoCookieHeader(value);
-  if (!cookieHeader) return false;
-  try {
-    return ensureCredentialStore().writeMimoCredential(id, cookieHeader);
-  } catch (_) {
-    return false;
-  }
-}
-
-function readMimoCredential(id) {
-  try {
-    return normalizeMimoCookieHeader(ensureCredentialStore().readMimoCredential(id));
-  } catch (_) {
-    return '';
-  }
-}
-
-function removeMimoCredential(id) {
-  try {
-    return ensureCredentialStore().removeMimoCredential(id);
-  } catch (_) {
-    return false;
-  }
-}
-
-async function addMimoManagedAccount(cookieValue) {
-  const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
-  const result = createMimoManagedAccount(cookieValue, accounts);
-  if (!result.ok) return result;
-  const [validation] = await fetchMimoLimits({ mimoManagedAccounts: [result.account] });
-  if (validation?.status !== 'ok') {
-    const errorCode = validation?.status === 'unauthorized'
-      ? 'invalidCookie'
-      : validation?.status === 'sourceRateLimited' ? 'validationRateLimited' : 'validationUnavailable';
-    return { ok: false, errorCode };
-  }
-  result.account.accountEmail = String(validation.accountEmail || '').trim().slice(0, 254);
-  const previousCookie = readMimoCredential(result.account.id);
-  const credentialStored = writeMimoCredential(result.account.id, result.account.cookieHeader);
-  delete result.account.cookieHeader;
-  if (!credentialStored) return { ok: false, errorCode: 'credentialStorageUnavailable' };
-  settings.mimoManagedAccounts = normalizeMimoManagedAccounts([
-    ...accounts.filter((account) => account.accountKey !== result.account.accountKey),
-    result.account
-  ]);
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (_) {
-    if (previousCookie) writeMimoCredential(result.account.id, previousCookie);
-    else removeMimoCredential(result.account.id);
-    return { ok: false, errorCode: 'credentialStorageUnavailable' };
-  }
-  pushSettingsToRenderer();
-  sendMimoAccountsPush();
-  void queueLimitInvalidation({
-    provider: 'mimo',
-    accountId: result.account.id,
-    accountKey: result.account.accountKey
-  }, 'account-added');
-  return { ok: true, accounts: mimoAccountsForRenderer() };
-}
-
-async function removeMimoManagedAccount(id) {
-  const accountId = String(id || '').trim();
-  const accounts = normalizeMimoManagedAccounts(settings.mimoManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  const previousCookie = readMimoCredential(accountId);
-  if (!removeMimoCredential(accountId)) return { ok: false, error: 'Could not remove stored credential' };
-  settings.mimoManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (_) {
-    if (previousCookie) writeMimoCredential(accountId, previousCookie);
-    return { ok: false, error: 'Could not persist account removal' };
-  }
-  pushSettingsToRenderer();
-  sendMimoAccountsPush();
-  void queueLimitInvalidation({ provider: 'mimo', accountId, accountKey: account.accountKey }, 'account-removed', {
-    clear: true,
-    refresh: false
-  });
-  return { ok: true, accounts: mimoAccountsForRenderer() };
-}
-
-function setMimoManagedAccountEnabled(id, enabled) {
-  const accountId = String(id || '').trim();
-  const accounts = normalizeMimoManagedAccounts(settings.mimoManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  account.enabled = Boolean(enabled);
-  account.updatedAt = new Date().toISOString();
-  settings.mimoManagedAccounts = accounts;
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (_) {
-    return { ok: false, error: 'Could not persist account state' };
-  }
-  pushSettingsToRenderer();
-  sendMimoAccountsPush();
-  void queueLimitInvalidation({ provider: 'mimo', accountId, accountKey: account.accountKey }, 'account-state', {
-    clear: !account.enabled,
-    refresh: account.enabled
-  });
-  return { ok: true, accounts: mimoAccountsForRenderer() };
-}
-
-function codexManagedRoot() {
-  return path.join(app.getPath('userData'), 'managed-codex-homes');
-}
-
-function codexManagedHomePath(accountId) {
-  const resolvedRoot = path.resolve(codexManagedRoot());
-  const resolvedHome = path.resolve(resolvedRoot, String(accountId || ''));
-  if (resolvedHome === resolvedRoot) return '';
-  if (!resolvedHome.startsWith(`${resolvedRoot}${path.sep}`)) return '';
-  return resolvedHome;
-}
-
-function findExistingCodexAccount(accounts, identity) {
-  return accounts.find((account) => codexManagedAccountMatchesIdentity(account, identity));
-}
-
-function codexAccountId(identity, existing) {
-  if (existing?.id) return existing.id;
-  return `codex-${(identity.accountKey || hashAccountKey(identity.email)).replace(/^sha256:/, '').slice(0, 12)}`;
-}
-
-// Deletes a managed home only when it resolves under our managed root, mirroring
-// CodexBar's safe-delete guard so a bad record can never wipe an arbitrary path.
-async function removeManagedHomeIfSafe(homePath) {
-  if (!homePath) return;
-  const resolvedHome = path.resolve(homePath);
-  const resolvedRoot = path.resolve(codexManagedRoot());
-  if (resolvedHome === resolvedRoot) return;
-  if (!resolvedHome.startsWith(`${resolvedRoot}${path.sep}`)) return;
-  await fs.promises.rm(resolvedHome, { recursive: true, force: true });
-}
-
-// Records a managed account for the auth that already lives in `homePath`, then
-// reloads the collector so the new account's limits show up immediately.
-function commitCodexManagedAccount(identity, homePath, existing, options = {}) {
-  const now = new Date().toISOString();
-  const id = codexAccountId(identity, existing);
-  const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
-  const record = {
-    id,
-    email: identity.email,
-    accountKey: identity.accountKey || hashAccountKey(identity.email || id),
-    accountLabel: identity.accountLabel,
-    workspaceAccountId: identity.workspaceAccountId || identity.providerAccountId || '',
-    workspaceLabel: String(identity.workspaceLabel || '').trim(),
-    workspaceKind: identity.workspaceKind === 'personal' ? 'personal' : '',
-    homePath,
-    authPath: path.join(homePath, 'auth.json'),
-    addedAt: existing?.addedAt || now,
-    updatedAt: now,
-    enabled: options.enabled ?? true
-  };
-  settings.codexManagedAccounts = normalizeCodexManagedAccounts([
-    ...accounts.filter((account) => account.id !== id),
-    record
-  ]);
-  if (options.persist !== false) saveSettings({ throwOnError: true });
-  return codexAccountsForRenderer().find((account) => account.id === id);
-}
-
-function hasCodexIdentity(identity) {
-  return Boolean(identity?.accountKey || identity?.email);
-}
-
-async function snapshotCodexAuthFile(authPath) {
-  let parentExisted = true;
-  try { await fs.promises.stat(path.dirname(authPath)); } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
-    parentExisted = false;
-  }
-  try {
-    return { authPath, data: await fs.promises.readFile(authPath, 'utf8'), existed: true, parentExisted };
-  } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
-    return { authPath, data: '', existed: false, parentExisted };
-  }
-}
-
-async function restoreCodexAuthFileSnapshot(snapshot, options = {}) {
-  if (snapshot.existed) {
-    await writeCodexAuthFile(snapshot.authPath, snapshot.data);
-    return;
-  }
-  await fs.promises.rm(snapshot.authPath, { force: true });
-  if (options.removeNewParent && !snapshot.parentExisted) {
-    await removeManagedHomeIfSafe(path.dirname(snapshot.authPath));
-  }
-}
-
-async function preserveLiveCodexAuthAsManagedAccount(targetIdentity) {
-  let liveMaterial;
-  try {
-    liveMaterial = await readCodexAuthMaterial(liveCodexAuthPath(process.env));
-  } catch (error) {
-    if (error?.code !== 'ENOENT') console.warn('Could not read live Codex auth before switching accounts:', error?.message || error);
-    return null;
-  }
-  if (!hasCodexIdentity(liveMaterial.identity)) return null;
-  if (codexAccountMatchesIdentity(targetIdentity, liveMaterial.identity)) return null;
-  const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
-  const existing = findExistingCodexAccount(accounts, liveMaterial.identity);
-  const homePath = codexManagedHomePath(codexAccountId(liveMaterial.identity, existing));
-  if (!homePath) return null;
-  const authSnapshot = await snapshotCodexAuthFile(path.join(homePath, 'auth.json'));
-  try {
-    await writeCodexAuthFile(authSnapshot.authPath, liveMaterial.data);
-    const account = commitCodexManagedAccount(liveMaterial.identity, homePath, existing, {
-      enabled: existing?.enabled ?? true,
-      persist: false,
-      restart: false
-    });
-    return {
-      account,
-      rollback: () => restoreCodexAuthFileSnapshot(authSnapshot, { removeNewParent: true })
-    };
-  } catch (error) {
-    await restoreCodexAuthFileSnapshot(authSnapshot, { removeNewParent: true }).catch(() => {});
-    throw error;
-  }
-}
-
-function codexLoginErrorMessage(result) {
-  const detail = result.output ? `\n\n${result.output}` : '';
-  switch (result.outcome) {
-    case 'missingBinary':
-      return 'Codex CLI not found. Install Codex, then try again.';
-    case 'launchFailed':
-      return `Could not start codex login.${detail}`;
-    case 'timedOut':
-      return `Sign-in timed out. Finish the browser login, then try again.${detail}`;
-    case 'cancelled':
-      return 'Sign-in cancelled.';
-    default:
-      return `codex login failed.${detail}`;
-  }
-}
-
-function cancelledCodexLoginResult() {
-  return {
-    ok: false,
-    error: codexLoginErrorMessage({ outcome: 'cancelled' }),
-    outcome: 'cancelled'
-  };
-}
-
-async function rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal) {
-  if (movedToFinal) await removeManagedHomeIfSafe(homePath);
-  if (backupHomePath) await fs.promises.rename(backupHomePath, homePath);
-}
-
-async function resolveCodexWorkspaceAfterLogin(auth, homePath, options = {}) {
-  const initialIdentity = codexAuthIdentity(auth);
-  let workspaces;
-  try {
-    workspaces = await listCodexWorkspaces(auth, {
-      env: process.env,
-      signal: options.signal
-    });
-  } catch (error) {
-    if (options.signal?.aborted) return { cancelled: true };
-    console.warn('Could not list Codex workspaces after sign-in:', error?.message || error);
-    return { auth, identity: initialIdentity };
-  }
-  if (options.signal?.aborted) return { cancelled: true };
-  if (workspaces.length === 0) return { auth, identity: initialIdentity };
-
-  const currentWorkspaceId = normalizeWorkspaceId(initialIdentity.workspaceAccountId);
-  let selected;
-  if (workspaces.length === 1) {
-    selected = workspaces[0];
-  } else if (typeof options.selectWorkspace === 'function') {
-    const selectedId = normalizeWorkspaceId(await options.selectWorkspace({
-      email: initialIdentity.email,
-      currentWorkspaceId,
-      workspaces
-    }));
-    if (!selectedId || options.signal?.aborted) return { cancelled: true };
-    selected = workspaces.find((workspace) => workspace.id === selectedId) || null;
-    if (!selected) throw new Error('The selected Codex workspace is no longer available.');
-  } else {
-    selected = workspaces.find((workspace) => workspace.id === currentWorkspaceId) || null;
-  }
-  if (!selected) return { auth, identity: initialIdentity };
-
-  const selectedAuth = authWithSelectedCodexWorkspace(auth, selected.id);
-  await writeCodexAuthFile(
-    path.join(homePath, 'auth.json'),
-    `${JSON.stringify(selectedAuth, null, 2)}\n`
-  );
-  return {
-    auth: selectedAuth,
-    identity: {
-      ...codexAuthIdentity(selectedAuth),
-      workspaceLabel: selected.label,
-      workspaceKind: selected.workspaceKind
-    }
-  };
-}
-
-// Best practice: each account gets its own OAuth grant via an isolated
-// `codex login` (CodexBar/tokscale model), so it never shares a refresh-token
-// lineage with the user's live Codex CLI login.
-async function addCodexManagedAccount(onOutput, options = {}) {
-  await fs.promises.mkdir(codexManagedRoot(), { recursive: true });
-  const tempHome = path.join(codexManagedRoot(), `pending-${crypto.randomUUID()}`);
-  await fs.promises.mkdir(tempHome, { recursive: true });
-  let backupHomePath = '';
-  let movedToFinal = false;
-  let accountCommitted = false;
-  try {
-    const result = await runCodexLogin({ homePath: tempHome, onOutput, signal: options.signal }, { env: process.env });
-    if (result.outcome !== 'success') {
-      return { ok: false, error: codexLoginErrorMessage(result), outcome: result.outcome };
-    }
-    if (options.signal?.aborted) return cancelledCodexLoginResult();
-    let auth;
-    try {
-      auth = JSON.parse(await fs.promises.readFile(path.join(tempHome, 'auth.json'), 'utf8'));
-    } catch (_) {
-      return { ok: false, error: 'Sign-in finished but no Codex credentials were written.' };
-    }
-    const workspaceResult = await resolveCodexWorkspaceAfterLogin(auth, tempHome, options);
-    if (workspaceResult.cancelled) return cancelledCodexLoginResult();
-    auth = workspaceResult.auth;
-    const identity = workspaceResult.identity;
-    if (!identity.accountKey && !identity.email) {
-      return { ok: false, error: 'Could not identify the Codex account after sign-in.' };
-    }
-    if (options.signal?.aborted) return cancelledCodexLoginResult();
-    const existing = findExistingCodexAccount(normalizeCodexManagedAccounts(settings.codexManagedAccounts), identity);
-    const homePath = codexManagedHomePath(codexAccountId(identity, existing));
-    if (!homePath) return { ok: false, error: 'The saved Codex account path is invalid.' };
-    if (path.resolve(homePath) !== path.resolve(tempHome)) {
-      if (options.signal?.aborted) return cancelledCodexLoginResult();
-      const candidateBackupPath = `${homePath}.backup-${crypto.randomUUID()}`;
-      try {
-        await fs.promises.rename(homePath, candidateBackupPath);
-        backupHomePath = candidateBackupPath;
-      } catch (error) {
-        if (error?.code !== 'ENOENT') throw error;
-      }
-      if (options.signal?.aborted) {
-        await rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal);
-        backupHomePath = '';
-        return cancelledCodexLoginResult();
-      }
-      try {
-        await fs.promises.rename(tempHome, homePath);
-        movedToFinal = true;
-      } catch (error) {
-        await rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal);
-        backupHomePath = '';
-        throw error;
-      }
-      if (options.signal?.aborted) {
-        await rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal);
-        backupHomePath = '';
-        movedToFinal = false;
-        return cancelledCodexLoginResult();
-      }
-    }
-    if (options.signal?.aborted) {
-      await rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal);
-      backupHomePath = '';
-      movedToFinal = false;
-      return cancelledCodexLoginResult();
-    }
-    const previousAccounts = settings.codexManagedAccounts;
-    options.onCommit?.();
-    let account;
-    try {
-      account = commitCodexManagedAccount(identity, homePath, existing, { restart: false });
-      if (backupHomePath) {
-        await removeManagedHomeIfSafe(backupHomePath);
-        backupHomePath = '';
-      }
-      accountCommitted = true;
-    } catch (error) {
-      settings.codexManagedAccounts = previousAccounts;
-      try {
-        saveSettings();
-      } catch (rollbackError) {
-        console.warn('Could not restore Codex account settings:', rollbackError?.message || rollbackError);
-      }
-      await rollbackCodexManagedHome(homePath, backupHomePath, movedToFinal);
-      backupHomePath = '';
-      movedToFinal = false;
-      throw error;
-    }
-    void queueLimitInvalidation({
-      provider: 'codex',
-      accountId: account.id,
-      accountKey: account.accountKey || ''
-    }, 'account-added');
-    return { ok: true, account };
-  } finally {
-    if (!accountCommitted) await removeManagedHomeIfSafe(tempHome).catch(() => {});
-  }
-}
-
-async function removeCodexManagedAccount(id) {
-  const accountId = String(id || '').trim();
-  const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  settings.codexManagedAccounts = accounts.filter((entry) => entry.id !== accountId);
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (error) {
-    return { ok: false, error: error?.message || 'Could not persist account removal' };
-  }
-  await removeManagedHomeIfSafe(account.homePath);
-  void queueLimitInvalidation({ provider: 'codex', accountId, accountKey: account.accountKey || '' }, 'account-removed', {
-    clear: true,
-    refresh: false
-  });
-  return { ok: true, accounts: codexAccountsForRenderer() };
-}
-
-function setCodexManagedAccountEnabled(id, enabled) {
-  const accountId = String(id || '').trim();
-  const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  account.enabled = Boolean(enabled);
-  settings.codexManagedAccounts = accounts;
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (error) {
-    return { ok: false, error: error?.message || 'Could not persist account state' };
-  }
-  void queueLimitInvalidation({ provider: 'codex', accountId, accountKey: account.accountKey || '' }, 'account-state', {
-    clear: !account.enabled,
-    refresh: account.enabled
-  });
-  return { ok: true, accounts: codexAccountsForRenderer() };
-}
-
-async function switchCodexSystemAccount(id) {
-  const accountId = String(id || '').trim();
-  const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  if (account.enabled === false) return { ok: false, error: 'Account is disabled' };
-
-  let targetMaterial;
-  try {
-    targetMaterial = await readCodexAuthMaterial(account.authPath || path.join(account.homePath, 'auth.json'));
-  } catch (error) {
-    return { ok: false, error: `Could not read the selected Codex account credentials: ${error?.message || error}` };
-  }
-  if (!hasCodexIdentity(targetMaterial.identity)) {
-    return { ok: false, error: 'Could not identify the selected Codex account credentials.' };
-  }
-
-  const previousAccounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
-  const liveAuthPath = liveCodexAuthPath(process.env);
-  let liveAuthSnapshot;
-  try {
-    liveAuthSnapshot = await snapshotCodexAuthFile(liveAuthPath);
-  } catch (error) {
-    return { ok: false, error: `Could not back up the local Codex account: ${error?.message || error}` };
-  }
-  let preservedLiveAccount = null;
-  try {
-    preservedLiveAccount = await preserveLiveCodexAuthAsManagedAccount(targetMaterial.identity);
-    await writeCodexAuthFile(liveAuthPath, targetMaterial.data);
-    const refreshedAccounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
-    const refreshed = refreshedAccounts.find((entry) => entry.id === account.id) || account;
-    commitCodexManagedAccount(targetMaterial.identity, refreshed.homePath, refreshed, {
-      enabled: refreshed.enabled !== false,
-      restart: false
-    });
-    void queueLimitInvalidation({ provider: 'codex' }, 'system-account-switch');
-    const activeAccountId = codexAccountId(targetMaterial.identity, refreshed);
-    const accountsForRenderer = codexAccountsForRenderer();
-    return {
-      ok: true,
-      activeAccountId,
-      activeAccount: accountsForRenderer.find((entry) => entry.id === activeAccountId) || null,
-      accounts: accountsForRenderer
-    };
-  } catch (error) {
-    settings.codexManagedAccounts = previousAccounts;
-    const rollbackErrors = [];
-    try { await restoreCodexAuthFileSnapshot(liveAuthSnapshot); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
-    try { await preservedLiveAccount?.rollback?.(); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
-    const rollbackDetail = rollbackErrors.length > 0
-      ? ` Rollback also failed: ${rollbackErrors.map((rollbackError) => rollbackError?.message || rollbackError).join('; ')}`
-      : '';
-    return { ok: false, error: `Could not switch the local Codex account: ${error?.message || error}.${rollbackDetail}` };
-  }
-}
-
-async function refreshCodexManagedAccountLimits(id) {
-  const accountId = String(id || '').trim();
-  const accounts = normalizeCodexManagedAccounts(settings.codexManagedAccounts);
-  const account = accounts.find((entry) => entry.id === accountId);
-  if (!account) return { ok: false, error: 'Account not found' };
-  if (account.enabled === false) return { ok: false, error: 'Account is disabled' };
-  if (!deviceRuntimeHandle) return { ok: false, error: 'Limits runtime is not ready' };
-  try {
-    const result = await deviceRuntimeHandle.refreshLimits({
-      provider: 'codex',
-      accountId: account.id,
-      accountKey: account.accountKey || ''
-    }, 'account-refresh');
-    const summary = result?.snapshot || deviceRuntimeHandle.getSnapshot()?.limits;
-    const providers = (summary?.providers || []).filter((provider) => {
-      if (provider?.provider !== 'codex') return false;
-      if (account.accountKey) return provider.accountKey === account.accountKey;
-      if (account.email) return String(provider.accountEmail || '').toLowerCase() === account.email;
-      return provider.sourceDetail === 'managed';
-    });
-    return {
-      ok: true,
-      providers
-    };
-  } catch (error) {
-    return { ok: false, error: `Could not refresh Codex account limits: ${error?.message || error}` };
-  }
 }
 
 function migrateLimitProviders(value) {
@@ -1496,7 +614,11 @@ function ensureSettingsLoaded() {
   if (settings) return settings;
   settings = readSettings();
   // Auto-enable newly introduced default clients (e.g. claude-desktop) once for existing installs.
-  {
+  // An explicit environment selection is a complete selection, including an
+  // empty one. Persisted values still retain their normal read precedence, but
+  // this compatibility migration must not broaden an explicit env selection.
+  const hasExplicitEnvClients = Object.prototype.hasOwnProperty.call(process.env, 'TOKEN_MONITOR_CLIENTS');
+  if (shouldMigrateNewDefaultClients({ hasExplicitEnvClients })) {
     const migration = applyNewDefaultClientMigration(settings.clients, settings.migratedDefaultClients);
     if (migration.changed) {
       settings.clients = migration.clients;
@@ -1517,17 +639,7 @@ function ensureSettingsLoaded() {
     settings.appUpdate = { ...settings.appUpdate, lastKnownLatest: null, lastCheckedAt: null, dismissedVersion: null };
     saveSettings();
   }
-  const persistedCodexAccounts = settings.codexManagedAccounts;
-  const hydratedCodexAccounts = hydrateCodexManagedAccounts(persistedCodexAccounts);
   persistedSettingsSnapshot = cloneSettingsSnapshot(settings);
-  if (JSON.stringify(hydratedCodexAccounts) !== JSON.stringify(persistedCodexAccounts)) {
-    settings.codexManagedAccounts = hydratedCodexAccounts;
-    if (!saveSettings()) {
-      // Keep the runtime identity coherent even if the migration cannot be
-      // persisted yet; the next ordinary settings save will retry it.
-      settings.codexManagedAccounts = hydratedCodexAccounts;
-    }
-  }
   rendererViewState = normalizeInitialRendererViewState(settings.lastViewState, rendererViewState);
   return settings;
 }
@@ -1821,6 +933,7 @@ function loadCredentialSettings(saved) {
   try {
     const store = ensureCredentialStore();
     store.migrateLegacySettings(saved);
+    store.clearLegacyLocalLimitCredentials();
     const stored = store.settingsCredentials();
     // Cleanup is intentionally independent from the migration marker. If the
     // first cleanup write fails after credentials.json was committed, retry on
@@ -1839,29 +952,39 @@ function loadCredentialSettings(saved) {
   }
 }
 
-function migrateLegacyMimoCredentialFiles(accounts) {
-  const entries = [];
-  for (const account of accounts || []) {
+function invalidateLegacyLocalLimitCredentialFiles() {
+  const legacyPaths = [
+    path.join(app.getPath('userData'), 'mimo-credentials'),
+    path.join(app.getPath('userData'), 'managed-codex-homes')
+  ];
+  for (const legacyPath of legacyPaths) {
     try {
-      const cookieHeader = normalizeMimoCookieHeader(readRegularFileNoFollow(legacyMimoCredentialPath(account.id), {
-        fs,
-        description: 'Legacy MiMo credential',
-        encoding: 'utf8'
-      }));
-      if (cookieHeader) entries.push({ id: account.id, cookieHeader });
-    } catch (_) {}
-  }
-  if (entries.length === 0) return;
-  try {
-    ensureCredentialStore().migrateLegacyMimoCredentials(entries);
-    for (const entry of entries) {
-      if (!readMimoCredential(entry.id)) continue;
-      try { fs.rmSync(legacyMimoCredentialPath(entry.id), { force: true }); } catch (_) {}
+      fs.rmSync(legacyPath, { recursive: true, force: true });
+    } catch (error) {
+      console.warn(`[credentials] Could not remove legacy local credential path ${legacyPath}: ${error.message}`);
     }
-    try { fs.rmdirSync(path.join(app.getPath('userData'), 'mimo-credentials')); } catch (_) {}
-  } catch (error) {
-    console.warn(`[credentials] Could not migrate MiMo credentials: ${error.message}`);
   }
+}
+
+function sanitizeSavedSettings(saved) {
+  const sanitized = stripLegacyLocalLimitSettings(saved);
+  if (hasLegacyLocalLimitSettings(saved)) {
+    try {
+      writePrivateJsonAtomic(settingsPath, stripCredentialSettings(sanitized));
+    } catch (error) {
+      reportCredentialStorageError('could not remove legacy local account settings', error);
+    }
+  }
+  return sanitized;
+}
+
+function invalidateLegacyLocalLimitData() {
+  try {
+    ensureCredentialStore().clearLegacyLocalLimitCredentials();
+  } catch (error) {
+    reportCredentialStorageError('could not invalidate legacy local credentials', error);
+  }
+  invalidateLegacyLocalLimitCredentialFiles();
 }
 
 function readSettings() {
@@ -1870,8 +993,8 @@ function readSettings() {
     const defaults = defaultSettings();
     let saved = {};
     try {
-      saved = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-      if (!saved || typeof saved !== 'object' || Array.isArray(saved)) saved = {};
+      const loaded = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      saved = !loaded || typeof loaded !== 'object' || Array.isArray(loaded) ? {} : loaded;
     } catch (error) {
       if (error.code !== 'ENOENT') console.warn(`[settings] Could not load settings.json: ${error.message}`);
     }
@@ -1881,6 +1004,8 @@ function readSettings() {
         if (stat.isFile() && !stat.isSymbolicLink()) fs.chmodSync(settingsPath, 0o600);
       } catch (_) {}
     }
+    const rawSaved = saved;
+    saved = sanitizeSavedSettings(rawSaved);
     const storedCredentials = loadCredentialSettings(saved);
     if (!saved.secret && defaults.secret) delete saved.secret;
     const merged = { ...defaults, ...saved, ...storedCredentials };
@@ -1952,8 +1077,6 @@ function readSettings() {
     if (saved.serviceStatusRefreshMs !== undefined) {
       merged.serviceStatusRefreshMs = normalizeServiceStatusRefreshMs(saved.serviceStatusRefreshMs);
     }
-    merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
-    merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
     if (saved.windowBehavior === undefined && saved.alwaysOnTop !== undefined) {
       merged.windowBehavior = saved.alwaysOnTop ? 'floating' : 'normal';
     }
@@ -1967,6 +1090,10 @@ function readSettings() {
     merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
     merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
     merged.hubHostAdminSecret = typeof merged.hubHostAdminSecret === 'string' ? merged.hubHostAdminSecret : '';
+    merged.hubAdminSecret = typeof merged.hubAdminSecret === 'string' ? merged.hubAdminSecret : '';
+    merged.hubAccountCredentialKey = typeof merged.hubAccountCredentialKey === 'string'
+      ? merged.hubAccountCredentialKey
+      : '';
     merged.allowInsecureHubHttp = parseBoolean(merged.allowInsecureHubHttp, false);
     merged.floatingBubbleEnabled = parseBoolean(merged.floatingBubbleEnabled ?? merged.edgeDrawerEnabled, false);
     merged.archivedClientUsage = normalizeArchivedClientUsage(merged.archivedClientUsage);
@@ -1977,11 +1104,7 @@ function readSettings() {
     merged.trayCustomLayout = normalizeTrayLayout(merged.trayCustomLayout);
     merged.showTrayProviderBadge = parseBoolean(merged.showTrayProviderBadge, false);
     merged.windowToggleShortcut = normalizeWindowToggleShortcut(merged.windowToggleShortcut);
-    // 如果设置了 opencodeCookie 但没有 profiles，自动迁移
-    if (merged.opencodeCookie && Object.keys(merged.opencodeProfiles || {}).length === 0) {
-      merged.opencodeProfiles = { default: { cookie: merged.opencodeCookie, enabled: true } };
-    }
-    migrateLegacyMimoCredentialFiles(merged.mimoManagedAccounts);
+    invalidateLegacyLocalLimitData();
     Object.assign(merged, normalizeTrayModeSettings(merged));
     return normalizeWindowBehaviorSettings(merged);
   }
@@ -2277,6 +1400,25 @@ let sseIdleTimer = null;
 let sseIdleController = null;
 let streamConnected = false;
 let streamFailure = null;
+let sseGeneration = 0;
+let sseAttempt = 0;
+let sseLastConnectAttemptAt = null;
+let sseLastEventAt = null;
+let sseLastHeartbeatAt = null;
+let sseNextRetryAt = null;
+let syncRestPollTimer = null;
+let syncUploadSchedulerHandle = null;
+let syncRecoveryPromise = null;
+let syncRecoveryForceStreamRequested = false;
+let syncNetworkPollTimer = null;
+let lastNetworkOnline = null;
+let restBootstrapAbortController = null;
+const syncHealth = {
+  local: { state: 'idle', lastSuccessAt: null, lastFailureAt: null, failureCode: null },
+  upload: { state: 'idle', lastAttemptAt: null, lastSuccessAt: null, failureCode: null, status: null, consecutiveFailures: 0, nextRetryAt: null, pendingRevision: null, inFlightAgeMs: 0 },
+  rest: { state: 'idle', lastSuccessAt: null, lastFailureAt: null, failureCode: null, status: null },
+  stream: { state: 'offline', attempt: 0, lastEventAt: null, lastHeartbeatAt: null, nextRetryAt: null, failureCode: null, status: null }
+};
 let lastCollectedDevice = null;
 let latestHubStats = null;
 let tray = null;
@@ -2284,10 +1426,6 @@ let latestStats = null;
 let macWidgetPublisher = null;
 let cachedMacWidgetConfiguration;
 let trayRefreshInFlight = false;
-let trayCodexActiveAccountId = '';
-let trayCodexPendingAccountId = '';
-let trayCodexPendingSince = 0;
-let trayCodexSwitchInFlight = false;
 const DEFAULT_EXPORT_INTERVAL_MS = 60 * 1000;
 let lastExportAt = 0;
 let lastAutoExport = { dir: null, signature: null };
@@ -2313,81 +1451,57 @@ let embeddedHub = null;
 let embeddedHubError = null;
 let embeddedHubUnsub = null;
 let modeQueue = Promise.resolve();
-const pendingLimitInvalidations = new Map();
-const pendingUsageClientRefreshes = new Map();
+let modeGeneration = 0;
 
-function limitInvalidationKey(scope) {
-  const provider = String(scope?.provider || '').trim().toLowerCase();
-  const account = String(
-    scope?.accountKey
-    || scope?.accountId
-    || scope?.id
-    || scope?.accountName
-    || scope?.accountEmail
-    || scope?.accountLabel
-    || ''
-  ).trim();
-  return account ? `${provider}:${account}` : `${provider}:*`;
+function stableSyncFailureCode(error, fallback = 'sync_failed') {
+  const status = Number(error?.status ?? error?.statusCode ?? error?.response?.status);
+  if (status === 401) return 'unauthorized';
+  if (status === 403) return 'forbidden';
+  if (status === 408) return 'request_timeout';
+  if (status === 429) return 'rate_limited';
+  if (Number.isInteger(status) && status >= 500) return 'hub_server_error';
+  const code = String(error?.code || error?.cause?.code || '').trim().toLowerCase();
+  if (code === 'request_timeout' || code === 'etimedout' || code === 'timeout') return 'request_timeout';
+  if (code === 'econnrefused') return 'refused';
+  if (code === 'enotfound' || code === 'eai_again') return 'dns';
+  if (code === 'enetunreach' || code === 'ehostunreach') return 'unreachable';
+  if (code === 'abort_err' || code === 'aborted' || code === 'aborterror') return 'aborted';
+  return code.replace(/[^a-z0-9_-]/g, '_').slice(0, 64) || fallback;
 }
 
-function rememberPendingLimitInvalidation(scope, reason, clear = false, refresh = true) {
-  const normalized = { ...scope, provider: String(scope?.provider || '').trim().toLowerCase() };
-  const key = limitInvalidationKey(normalized);
-  if (key.endsWith(':*')) {
-    for (const pendingKey of pendingLimitInvalidations.keys()) {
-      if (pendingKey.startsWith(`${normalized.provider}:`)) pendingLimitInvalidations.delete(pendingKey);
-    }
-  }
-  pendingLimitInvalidations.set(key, { scope: normalized, reason, clear, refresh });
+function syncHealthSnapshot() {
+  const upload = syncUploadSchedulerHandle?.getDiagnostics?.() || syncHealth.upload;
+  const stream = {
+    ...syncHealth.stream,
+    attempt: sseAttempt,
+    lastConnectAttemptAt: sseLastConnectAttemptAt,
+    lastEventAt: sseLastEventAt,
+    lastHeartbeatAt: sseLastHeartbeatAt,
+    nextRetryAt: sseNextRetryAt
+  };
+  return {
+    mode,
+    local: { ...syncHealth.local },
+    upload: { ...upload },
+    rest: { ...syncHealth.rest },
+    stream,
+    // These aliases make the two high-value timestamps easy to consume while
+    // keeping the channel-specific objects extensible for diagnostics UIs.
+    lastUploadSuccessAt: upload.lastSuccessAt || null,
+    lastStreamEventAt: sseLastEventAt,
+    nextUploadRetryAt: upload.nextRetryAt || null,
+    nextStreamRetryAt: sseNextRetryAt
+  };
 }
 
-function queueLimitInvalidation(scope, reason = 'credential-change', options = {}) {
-  const clear = options.clear === true;
-  const refresh = options.refresh !== false;
-  if (!deviceRuntimeHandle) {
-    rememberPendingLimitInvalidation(scope, reason, clear, refresh);
-    return Promise.resolve({ queued: true });
-  }
-  if (clear) deviceRuntimeHandle.clearLimits(scope, reason);
-  if (!refresh) return Promise.resolve({ cleared: true });
-  return Promise.resolve(deviceRuntimeHandle.refreshLimits(scope, reason));
+function publishSyncHealth() {
+  sendPush({ event: 'sync-health', data: { health: syncHealthSnapshot() } });
 }
 
-function drainPendingLimitInvalidations(runtime) {
-  const pending = [...pendingLimitInvalidations.values()];
-  pendingLimitInvalidations.clear();
-  for (const entry of pending) {
-    if (entry.clear) runtime.clearLimits(entry.scope, entry.reason);
-    if (entry.refresh) {
-      void Promise.resolve(runtime.refreshLimits(entry.scope, entry.reason)).catch((error) => {
-        console.log(`[limits-runtime] pending refresh failed: ${error.message}`);
-      });
-    }
-  }
-}
-
-function refreshUsageClient(clientId, options = {}) {
-  const client = String(clientId || '').trim().toLowerCase();
-  if (!deviceRuntimeHandle) {
-    pendingUsageClientRefreshes.set(client, { clientId: client, options: { ...options } });
-    return Promise.resolve({ queued: true });
-  }
-  return Promise.resolve(deviceRuntimeHandle.refreshClient(client, options));
-}
-
-function drainPendingUsageClientRefreshes(runtime) {
-  const pending = [...pendingUsageClientRefreshes.values()];
-  pendingUsageClientRefreshes.clear();
-  for (const entry of pending) {
-    void Promise.resolve(runtime.refreshClient(entry.clientId, entry.options)).catch((error) => {
-      console.log(`[usage-runtime] pending client refresh failed: ${error.message}`);
-    });
-  }
-}
-
-function drainPendingRuntimeActions(runtime) {
-  drainPendingLimitInvalidations(runtime);
-  drainPendingUsageClientRefreshes(runtime);
+function updateSyncHealth(channel, patch = {}) {
+  if (!syncHealth[channel]) return;
+  syncHealth[channel] = { ...syncHealth[channel], ...patch };
+  publishSyncHealth();
 }
 
 function hostIngestCredentials() {
@@ -2415,6 +1529,10 @@ function ensureEmbeddedHubCredentials() {
   }
   if (!settings.hubHostAdminSecret) {
     settings.hubHostAdminSecret = generateHubSecret();
+    settingsChanged = true;
+  }
+  if (!settings.hubAccountCredentialKey) {
+    settings.hubAccountCredentialKey = generateHubSecret();
     settingsChanged = true;
   }
   const deviceId = String(settings.deviceId || defaultDeviceId()).trim();
@@ -2456,6 +1574,76 @@ function effectiveHubConfig() {
   return { url: null, secret: '' };
 }
 
+function effectiveHubAdminConfig() {
+  if (settings?.hubMode === 'host') {
+    ensureEmbeddedHubCredentials();
+    return {
+      url: `http://127.0.0.1:${normalizeHubPort(settings.hubHostPort)}`,
+      secret: settings.hubHostAdminSecret || ''
+    };
+  }
+  if (settings?.hubMode === 'client') {
+    const url = normalizeHubUrl(settings.hubUrl);
+    return {
+      url: url ? requireSafeHubTransport(url, { allowInsecureHttp: settings.allowInsecureHubHttp === true }) : null,
+      secret: settings.hubAdminSecret || ''
+    };
+  }
+  return { url: null, secret: '' };
+}
+
+async function requestHubAccount(pathname, options = {}) {
+  if (settings?.hubMode === 'host' && !embeddedHub) await startEmbeddedHub();
+  const config = effectiveHubAdminConfig();
+  if (!config.url) throw Object.assign(new Error('Hub is not configured'), { code: 'hub_not_configured' });
+  if (!config.secret) throw Object.assign(new Error('Hub administrator secret is not configured'), { code: 'hub_admin_not_configured' });
+  const headers = {
+    authorization: `Bearer ${config.secret}`,
+    ...(options.body !== undefined ? { 'content-type': 'application/json' } : {}),
+    ...(options.headers || {})
+  };
+  const response = await fetchBufferedWithTimeout(fetch, `${config.url.replace(/\/$/, '')}${pathname}`, {
+    ...options,
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body)
+  }, HUB_REQUEST_TIMEOUT_MS);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(body.error || body.message || `Hub request failed (${response.status})`);
+    Object.assign(error, {
+      code: body.code || 'hub_request_failed',
+      status: response.status,
+      responseBody: body
+    });
+    throw error;
+  }
+  return body;
+}
+
+function parseHubAccountCredential(request = {}) {
+  if (request.credential !== undefined) return request.credential;
+  const raw = String(request.credentialText || '').trim();
+  if (!raw) throw Object.assign(new Error('A credential is required'), { code: 'credential_required' });
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    return { value: raw };
+  }
+}
+
+function safeEffectiveHubConfig() {
+  try {
+    return { ok: true, ...effectiveHubConfig() };
+  } catch (error) {
+    return {
+      ok: false,
+      url: null,
+      secret: '',
+      error
+    };
+  }
+}
+
 function hubDataFile() {
   return path.join(app.getPath('userData'), 'hub-devices.json');
 }
@@ -2491,10 +1679,14 @@ async function startEmbeddedHub() {
       host: '0.0.0.0',
       adminSecret: settings.hubHostAdminSecret,
       viewerSecret: settings.hubHostSecret,
+      accountCredentialKey: settings.hubAccountCredentialKey,
       ingestCredentials,
       allowInsecureHttp: true,
       dataFile: hubDataFile(),
-      logger: { error: (err) => console.log(`[hub] ${err?.message || err}`) }
+      logger: {
+        error: (err) => console.log(`[hub] ${err?.message || err}`),
+        info: (message) => console.log(`[hub] ${message}`)
+      }
     });
     await hub.start();
     embeddedHub = { hub, port };
@@ -2527,7 +1719,7 @@ function isExternalAgentActive() {
   } catch (_) { return false; }
 }
 
-async function renameDeviceOnHub(previousDeviceId, nextDeviceId) {
+async function renameDeviceOnHub(previousDeviceId, nextDeviceId, options = {}) {
   if (settings?.hubMode === 'host' && embeddedHub?.hub) {
     const result = await embeddedHub.hub.renameDevice(previousDeviceId, nextDeviceId);
     if (result?.reason === 'not_found' || result?.reason === 'baseline_missing') return false;
@@ -2546,7 +1738,8 @@ async function renameDeviceOnHub(previousDeviceId, nextDeviceId) {
   if (!hubUrl) return false;
   const base = hubUrl.replace(/\/$/, '');
   const devicesResponse = await fetchBufferedWithTimeout(fetch, `${base}/api/devices`, {
-    headers: secret ? { authorization: `Bearer ${secret}` } : {}
+    headers: secret ? { authorization: `Bearer ${secret}` } : {},
+    ...(options.signal ? { signal: options.signal } : {})
   }, HUB_REQUEST_TIMEOUT_MS);
   if (devicesResponse.ok) {
     const body = await devicesResponse.json();
@@ -2559,54 +1752,118 @@ async function renameDeviceOnHub(previousDeviceId, nextDeviceId) {
   const response = await fetchBufferedWithTimeout(fetch, `${base}/api/devices/${encodeURIComponent(previousDeviceId)}/rename`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+    ...(options.signal ? { signal: options.signal } : {}),
     body: JSON.stringify({ deviceId: nextDeviceId })
   }, HUB_REQUEST_TIMEOUT_MS);
   if (response.status === 404) return false;
   if (response.status === 403) {
     throw new Error('Hub device rename requires an admin credential; provision a token for the new Device ID on the Hub host before changing it here');
   }
-  if (!response.ok) throw new Error(`Hub device rename ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  if (!response.ok) {
+    const error = new Error(`Hub device rename failed (${response.status})`);
+    error.status = response.status;
+    error.code = stableSyncFailureCode(error, 'hub_rename_failed');
+    throw error;
+  }
   return true;
 }
 
-async function postToHub(summary) {
-  const { url: hubUrl, secret } = effectiveHubConfig();
-  if (!hubUrl) throw new Error('hub not configured');
+async function postToHub(summary, context = {}) {
+  const config = safeEffectiveHubConfig();
+  if (!config.ok) {
+    const error = new Error('Hub transport configuration is unavailable');
+    error.code = config.error?.code || 'hub_transport_unavailable';
+    throw error;
+  }
+  const { url: hubUrl, secret } = config;
+  if (!hubUrl) {
+    const error = new Error('Hub is not configured');
+    error.code = 'hub_not_configured';
+    throw error;
+  }
   const stale = settings.lastPostedDeviceId;
   if (stale && stale !== summary.deviceId) {
     // Move the ingest baseline and immutable ledger identity before posting the
     // new snapshot. Falling through after a conflict would merge two unrelated
     // installations or replay the full cumulative counter, so non-404 failures
     // deliberately block this upload.
-    await renameDeviceOnHub(stale, summary.deviceId);
+    await renameDeviceOnHub(stale, summary.deviceId, { signal: context.signal });
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/ingest`;
   const { response } = await postSyncPayload(fetch, url, {
     headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
     summary,
+    signal: context.signal,
+    timeoutMs: HUB_REQUEST_TIMEOUT_MS,
     logger: (message) => console.log(`[sync] ${message}`)
   });
-  if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  if (!response.ok) {
+    const error = new Error(`Hub ingest failed (${response.status})`);
+    error.status = response.status;
+    error.code = stableSyncFailureCode(error, 'hub_ingest_failed');
+    throw error;
+  }
   if (settings.lastPostedDeviceId !== summary.deviceId) {
     settings.lastPostedDeviceId = summary.deviceId;
     saveSettings();
   }
-  return response.json();
+  try {
+    return await response.json();
+  } catch (error) {
+    const invalid = new Error('Hub returned an invalid ingest response');
+    invalid.code = 'hub_invalid_response';
+    invalid.cause = error;
+    throw invalid;
+  }
 }
 
 function stopSyncCollector(options = {}) {
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
+  if (syncUploadSchedulerHandle) {
+    try { syncUploadSchedulerHandle.stop(); } catch (_) {}
+    syncUploadSchedulerHandle = null;
+  }
+  updateSyncHealth('upload', {
+    state: 'idle',
+    nextRetryAt: null,
+    pendingRevision: null,
+    inFlightAgeMs: 0
+  });
 }
 
 function startSyncCollector() {
   stopSyncCollector();
-  if (!effectiveHubConfig().url) return;
+  mode = 'sync';
+  updateSyncHealth('local', { state: 'collecting', failureCode: null });
   const syncUploadScheduler = createSyncUploadScheduler({
     intervalMs: syncUploadIntervalMs(),
-    upload: postToHub,
-    onError: (error) => console.log(`[sync-collector] post failed: ${error.message}`)
+    flushTimeoutMs: HUB_REQUEST_TIMEOUT_MS,
+    upload: async (summary, context) => {
+      updateSyncHealth('upload', { state: 'uploading', failureCode: null, status: null });
+      try {
+        const result = await postToHub(summary, context);
+        updateSyncHealth('upload', {
+          state: 'ok',
+          lastSuccessAt: new Date().toISOString(),
+          failureCode: null,
+          status: null,
+          consecutiveFailures: 0
+        });
+        return result;
+      } catch (error) {
+        updateSyncHealth('upload', {
+          state: stableSyncFailureCode(error) === 'aborted' ? 'aborted' : 'error',
+          lastFailureAt: new Date().toISOString(),
+          failureCode: stableSyncFailureCode(error),
+          status: Number.isInteger(Number(error?.status)) ? Number(error.status) : null
+        });
+        throw error;
+      }
+    },
+    onError: (error) => console.log(`[sync-collector] post failed (${stableSyncFailureCode(error)}): ${error.message}`)
   });
+  syncUploadSchedulerHandle = syncUploadScheduler;
   const sink = {
     async enqueue(summary, revision) {
       if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
@@ -2620,6 +1877,7 @@ function startSyncCollector() {
         updateDiscordRpc(displayStats, settings.currency);
         sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats: displayStats, at: new Date().toISOString() } });
       }
+      updateSyncHealth('local', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null });
       await syncUploadScheduler.enqueue(visibleSummary, revision);
     },
     flush: () => syncUploadScheduler.flush(),
@@ -2627,16 +1885,12 @@ function startSyncCollector() {
   };
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
-    initialLimits: lastCollectedDevice?.limits,
-    limitsOptions: electronLimitsConfig(),
     transformUsage: summaryWithArchivedClientUsage,
     usageOptions: electronUsageConfig('sync-collector'),
     sink,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
-  }, {
-    limitsDeps: { resolveConfigSnapshot: () => electronLimitsConfig() }
   });
-  drainPendingRuntimeActions(deviceRuntimeHandle);
+  publishSyncHealth();
 }
 
 // Host mode: this device's own usage goes straight into the embedded hub's store
@@ -2644,12 +1898,27 @@ function startSyncCollector() {
 // Monitor's own outbound connections can't zero out the widget's own usage (#17).
 function startHostCollector() {
   stopSyncCollector();
+  updateSyncHealth('local', { state: 'collecting', failureCode: null });
   const sink = {
     async enqueue(summary) {
       if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
       const visibleSummary = summary;
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
-      if (!embeddedHub) return;
+      updateSyncHealth('local', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null });
+      if (!embeddedHub) {
+        updateSyncHealth('upload', {
+          state: 'error',
+          lastFailureAt: new Date().toISOString(),
+          failureCode: 'hub_not_running'
+        });
+        return;
+      }
+      updateSyncHealth('upload', {
+        state: 'uploading',
+        lastAttemptAt: new Date().toISOString(),
+        failureCode: null,
+        status: null
+      });
       try {
         const stale = settings.lastPostedDeviceId;
         if (stale && stale !== visibleSummary.deviceId) {
@@ -2674,23 +1943,34 @@ function startHostCollector() {
           settings.lastPostedDeviceId = visibleSummary.deviceId;
           saveSettings();
         }
+        updateSyncHealth('upload', {
+          state: 'ok',
+          lastSuccessAt: new Date().toISOString(),
+          failureCode: null,
+          status: null,
+          consecutiveFailures: 0,
+          nextRetryAt: null,
+          pendingRevision: null,
+          inFlightAgeMs: 0
+        });
       } catch (error) {
+        updateSyncHealth('upload', {
+          state: 'error',
+          lastFailureAt: new Date().toISOString(),
+          failureCode: stableSyncFailureCode(error, 'hub_ingest_failed'),
+          status: Number.isInteger(Number(error?.status)) ? Number(error.status) : null
+        });
         console.log(`[host-ingest] failed: ${error.message}`);
       }
     }
   };
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
-    initialLimits: lastCollectedDevice?.limits,
-    limitsOptions: electronLimitsConfig(),
     transformUsage: summaryWithArchivedClientUsage,
     usageOptions: electronUsageConfig('host-collector'),
     sink,
     onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
-  }, {
-    limitsDeps: { resolveConfigSnapshot: () => electronLimitsConfig() }
   });
-  drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
 function stopHostStats() {
@@ -2814,7 +2094,6 @@ function sendPush(payload) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
     scheduleMacWidgetSnapshot(latestStats);
-    syncTrayCodexActiveAccount();
     updateTrayDisplay();
     if (settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
       lastExportAt = Date.now();
@@ -2914,7 +2193,14 @@ function updateTrayDisplay() {
 function sendStatus(connected, extra) {
   streamConnected = Boolean(connected);
   streamFailure = streamConnected ? null : ((extra && extra.reason) ? { reason: extra.reason, detail: extra.detail ?? null } : streamFailure);
-  sendPush({ event: 'status', data: { connected: streamConnected, mode, ...(extra || {}) } });
+  const streamApplicable = mode === 'sync' && settings?.hubMode === 'client';
+  syncHealth.stream = {
+    ...syncHealth.stream,
+    state: !streamApplicable ? 'not_applicable' : (streamConnected ? 'live' : (extra?.state || 'offline')),
+    failureCode: !streamApplicable || streamConnected ? null : (extra?.reason || syncHealth.stream.failureCode),
+    status: extra?.status ?? syncHealth.stream.status
+  };
+  sendPush({ event: 'status', data: { connected: streamConnected, mode, health: syncHealthSnapshot(), ...(extra || {}) } });
 }
 
 function stopLocalCollector(options = {}) {
@@ -2927,11 +2213,10 @@ function stopLocalCollector(options = {}) {
 function startLocalCollector() {
   stopLocalCollector();
   mode = 'local';
+  updateSyncHealth('local', { state: 'collecting', failureCode: null });
   sendStatus(false, { reason: 'collecting' });
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
-    initialLimits: lastCollectedDevice?.limits,
-    limitsOptions: electronLimitsConfig(),
     transformUsage: summaryWithArchivedClientUsage,
     usageOptions: electronUsageConfig('collector'),
     progressive: true,
@@ -2943,18 +2228,49 @@ function startLocalCollector() {
       localStats = withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]);
       updateDiscordRpc(localStats, settings.currency);
       sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } });
+      updateSyncHealth('local', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null });
       sendStatus(true, { reason });
     },
-    onError: (error, reason) => sendStatus(false, { reason: `${reason}:${error.message}` })
-  }, {
-    limitsDeps: { resolveConfigSnapshot: () => electronLimitsConfig() }
+    onError: (error, reason) => {
+      updateSyncHealth('local', {
+        state: 'error',
+        lastFailureAt: new Date().toISOString(),
+        failureCode: stableSyncFailureCode(error, reason || 'collection_failed')
+      });
+      sendStatus(false, { reason: 'network', detail: stableSyncFailureCode(error, reason || 'collection_failed'), state: 'collecting' });
+    }
   });
-  drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
-function scheduleStreamRetry(delayMs = 3000) {
-  if (sseRetryTimer) return;
-  sseRetryTimer = setTimeout(() => { sseRetryTimer = null; startStatsStream(); }, delayMs);
+function clearSyncRestPoll() {
+  if (syncRestPollTimer) clearTimeout(syncRestPollTimer);
+  syncRestPollTimer = null;
+}
+
+function scheduleStreamRetry(options = {}) {
+  if (sseRetryTimer || mode !== 'sync' || settings?.hubMode !== 'client') return;
+  const currentGeneration = options.generation ?? sseGeneration;
+  if (currentGeneration !== sseGeneration) return;
+  sseAttempt = Math.max(1, sseAttempt + 1);
+  const exponential = Math.min(SSE_RETRY_MAX_MS, SSE_RETRY_BASE_MS * (2 ** (sseAttempt - 1)));
+  const delayMs = Number.isFinite(Number(options.delayMs))
+    ? Math.max(0, Number(options.delayMs))
+    : Math.floor(Math.random() * exponential);
+  sseNextRetryAt = new Date(Date.now() + delayMs).toISOString();
+  syncHealth.stream = {
+    ...syncHealth.stream,
+    state: 'backoff',
+    attempt: sseAttempt,
+    nextRetryAt: sseNextRetryAt
+  };
+  sseRetryTimer = setTimeout(() => {
+    sseRetryTimer = null;
+    sseNextRetryAt = null;
+    if (currentGeneration !== sseGeneration || mode !== 'sync' || settings?.hubMode !== 'client') return;
+    void startStatsStream({ generation: currentGeneration }).catch(() => {});
+  }, delayMs);
+  sseRetryTimer.unref?.();
+  publishSyncHealth();
 }
 
 function clearSseIdleWatchdog(controller = null) {
@@ -2976,84 +2292,260 @@ function armSseIdleWatchdog(controller, onTimeout) {
 }
 
 function stopStatsStream() {
+  sseGeneration += 1;
   if (sseAbortController) { try { sseAbortController.abort(); } catch (_) {} }
   sseAbortController = null;
   clearSseIdleWatchdog();
   if (sseRetryTimer) { clearTimeout(sseRetryTimer); sseRetryTimer = null; }
+  clearSyncRestPoll();
+  sseNextRetryAt = null;
+  streamConnected = false;
+  syncHealth.stream = { ...syncHealth.stream, state: 'offline', nextRetryAt: null };
 }
 
 function parseSseChunk(chunk) {
   let event = 'message';
   const dataLines = [];
-  for (const line of chunk.split('\n')) {
-    if (!line || line.startsWith(':')) continue;
+  let comment = false;
+  for (const line of chunk.split(/\r?\n/)) {
+    if (!line) continue;
+    if (line.startsWith(':')) {
+      comment = true;
+      continue;
+    }
     if (line.startsWith('event:')) event = line.slice(6).trim();
     else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
   }
-  if (dataLines.length === 0) return null;
+  if (dataLines.length === 0) return comment ? { event: 'heartbeat', data: null } : null;
   try { return { event, data: JSON.parse(dataLines.join('\n')) }; } catch (_) { return null; }
+}
+
+async function fetchHubStatsSnapshot(options = {}) {
+  const isCurrent = typeof options.isCurrent === 'function' ? options.isCurrent : () => true;
+  if (settings.hubMode === 'host' && embeddedHub) {
+    const stats = injectLocalDeviceStatus(await embeddedHub.hub.getStats());
+    if (isCurrent()) {
+      updateSyncHealth('rest', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null, status: null });
+    }
+    return stats;
+  }
+  const config = safeEffectiveHubConfig();
+  if (!config.ok) {
+    const error = new Error('Hub transport configuration is unavailable');
+    error.code = config.error?.code || 'hub_transport_unavailable';
+    if (isCurrent()) {
+      updateSyncHealth('rest', { state: 'error', lastFailureAt: new Date().toISOString(), failureCode: error.code });
+    }
+    throw error;
+  }
+  const { url: hubUrl, secret } = config;
+  if (!hubUrl) {
+    const error = new Error('Hub is not configured');
+    error.code = 'hub_not_configured';
+    if (isCurrent()) {
+      updateSyncHealth('rest', { state: 'blocked', lastFailureAt: new Date().toISOString(), failureCode: error.code });
+    }
+    throw error;
+  }
+  const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
+  try {
+    const response = await fetchBufferedWithTimeout(fetch, url, {
+      headers: secret ? { authorization: `Bearer ${secret}` } : {},
+      ...(options.signal ? { signal: options.signal } : {})
+    }, HUB_REQUEST_TIMEOUT_MS);
+    if (!response.ok) {
+      const error = new Error(`Hub stats request failed (${response.status})`);
+      error.status = response.status;
+      error.code = stableSyncFailureCode(error, 'hub_read_failed');
+      throw error;
+    }
+    const stats = await response.json();
+    if (!isCurrent()) return null;
+    latestHubStats = stats;
+    updateSyncHealth('rest', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null, status: null });
+    return injectLocalDeviceStatus(composeLocalSyncStats(stats, lastCollectedDevice));
+  } catch (error) {
+    if (isCurrent()) {
+      updateSyncHealth('rest', {
+        state: 'error',
+        lastFailureAt: new Date().toISOString(),
+        failureCode: stableSyncFailureCode(error, 'hub_read_failed'),
+        status: Number.isInteger(Number(error?.status)) ? Number(error.status) : null
+      });
+    }
+    throw error;
+  }
+}
+
+function stopRestBootstrap() {
+  if (restBootstrapAbortController) {
+    try { restBootstrapAbortController.abort(); } catch (_) {}
+  }
+  restBootstrapAbortController = null;
+}
+
+function startClientRestBootstrap(generation) {
+  stopRestBootstrap();
+  const controller = new AbortController();
+  restBootstrapAbortController = controller;
+  const isCurrent = () => generation === modeGeneration
+    && settings?.hubMode === 'client'
+    && restBootstrapAbortController === controller;
+  void fetchHubStatsSnapshot({ signal: controller.signal, isCurrent }).then((stats) => {
+    if (!stats || !isCurrent()) return;
+    sendPush({ event: 'stats', data: { type: 'stats', reason: 'rest-bootstrap', transport: 'rest', mode, stats, at: new Date().toISOString() } });
+  }).catch((error) => {
+    if (!isCurrent() || stableSyncFailureCode(error) === 'aborted') return;
+    console.log(`[rest] startup bootstrap failed (${stableSyncFailureCode(error)})`);
+  }).finally(() => {
+    if (restBootstrapAbortController === controller) restBootstrapAbortController = null;
+  });
+}
+
+function scheduleRestFallbackPoll(generation = sseGeneration) {
+  if (syncRestPollTimer || mode !== 'sync' || settings?.hubMode !== 'client') return;
+  syncRestPollTimer = setTimeout(async () => {
+    syncRestPollTimer = null;
+    if (generation !== sseGeneration || streamConnected || mode !== 'sync') return;
+    try {
+      const stats = await fetchHubStatsSnapshot();
+      if (generation === sseGeneration && !streamConnected) {
+        sendPush({ event: 'stats', data: { type: 'stats', reason: 'rest-fallback', transport: 'rest', mode, stats, at: new Date().toISOString() } });
+      }
+    } catch (_) {
+      // Keep the fallback bounded and quiet; the stream retry remains the
+      // primary recovery path and owns the user-visible backoff diagnostics.
+    } finally {
+      if (generation === sseGeneration && !streamConnected) scheduleRestFallbackPoll(generation);
+    }
+  }, SYNC_REST_POLL_MS);
+  syncRestPollTimer.unref?.();
 }
 
 async function startStatsStream(options = {}) {
   stopStatsStream();
+  const currentGeneration = sseGeneration;
   if (options.resetSnapshot) latestHubStats = null;
-  const { url: hubUrl, secret } = effectiveHubConfig();
-  if (!hubUrl) return;
+  if (options.resetBackoff || options.resetSnapshot) sseAttempt = 0;
+  const config = safeEffectiveHubConfig();
+  if (!config.ok) {
+    mode = 'sync';
+    sendStatus(false, { reason: 'network', detail: config.error?.code || 'hub_transport_unavailable', state: 'blocked' });
+    scheduleRestFallbackPoll(currentGeneration);
+    return { ok: false, code: config.error?.code || 'hub_transport_unavailable' };
+  }
+  const { url: hubUrl, secret } = config;
+  if (!hubUrl) {
+    mode = 'sync';
+    sendStatus(false, { reason: 'network', detail: 'hub_not_configured', state: 'blocked' });
+    return { ok: false, code: 'hub_not_configured' };
+  }
   mode = 'sync';
+  clearSyncRestPoll();
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats/stream`;
   const controller = new AbortController();
   let idleTimedOut = false;
   sseAbortController = controller;
+  sseLastConnectAttemptAt = new Date().toISOString();
+  syncHealth.stream = {
+    ...syncHealth.stream,
+    state: 'connecting',
+    attempt: sseAttempt,
+    nextRetryAt: null
+  };
+  publishSyncHealth();
+  const isCurrent = () => currentGeneration === sseGeneration && sseAbortController === controller;
+  const timeoutStream = () => {
+    if (!isCurrent()) return;
+    idleTimedOut = true;
+    try { controller.abort(new Error('SSE idle timeout')); } catch (_) { controller.abort(); }
+  };
   try {
     const response = await fetchWithTimeout(fetch, url, {
       headers: { accept: 'text/event-stream', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
       signal: controller.signal
     }, HUB_REQUEST_TIMEOUT_MS);
+    if (!isCurrent()) return { ok: false, superseded: true };
     if (!response.ok || !response.body) {
-      sendStatus(false, classifyStreamFailure({ status: response.status }));
-      scheduleStreamRetry();
-      return;
+      const failure = classifyStreamFailure({ status: response.status });
+      sendStatus(false, { ...failure, status: response.status });
+      scheduleStreamRetry({ generation: currentGeneration });
+      scheduleRestFallbackPoll(currentGeneration);
+      return { ok: false, status: response.status };
     }
-    sendStatus(true);
-    armSseIdleWatchdog(controller, () => {
-      idleTimedOut = true;
-      try { controller.abort(); } catch (_) {}
-    });
+    // A successful connection is a recovery boundary. Do not carry a long
+    // outage's exponential delay into the next disconnect after the stream has
+    // already come back.
+    sseAttempt = 0;
+    sseNextRetryAt = null;
+    syncHealth.stream = {
+      ...syncHealth.stream,
+      attempt: 0,
+      nextRetryAt: null,
+      failureCode: null,
+      status: null
+    };
+    sendStatus(true, { state: 'live' });
+    armSseIdleWatchdog(controller, timeoutStream);
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     for (;;) {
       const { value, done } = await reader.read();
+      if (!isCurrent()) return { ok: false, superseded: true };
       if (done) break;
-      if (value) armSseIdleWatchdog(controller, () => {
-        idleTimedOut = true;
-        try { controller.abort(); } catch (_) {}
-      });
+      if (value) armSseIdleWatchdog(controller, timeoutStream);
       buffer += decoder.decode(value, { stream: true });
-      let idx;
-      while ((idx = buffer.indexOf('\n\n')) !== -1) {
-        const chunk = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
+      let frame;
+      while ((frame = buffer.match(/\r?\n\r?\n/)) !== null) {
+        const chunk = buffer.slice(0, frame.index);
+        buffer = buffer.slice(frame.index + frame[0].length);
         let parsed = parseSseChunk(chunk);
-        if (parsed) {
-          if (parsed.event === 'stats' && parsed.data?.stats) {
-            latestHubStats = parsed.data.stats;
-            const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
-            parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
-            updateDiscordRpc(displayStats, settings.currency);
-          }
-          sendPush(parsed);
+        if (!parsed) continue;
+        const eventAt = new Date().toISOString();
+        sseLastEventAt = eventAt;
+        if (parsed.event === 'heartbeat' || parsed.event === 'ping' || parsed.event === 'keepalive') {
+          sseLastHeartbeatAt = eventAt;
         }
+        syncHealth.stream = {
+          ...syncHealth.stream,
+          state: 'live',
+          lastEventAt: eventAt,
+          lastHeartbeatAt: sseLastHeartbeatAt,
+          failureCode: null,
+          status: null
+        };
+        if (parsed.event === 'heartbeat' || parsed.event === 'ping' || parsed.event === 'keepalive') {
+          publishSyncHealth();
+          continue;
+        }
+        if (parsed.event === 'stats' && parsed.data?.stats) {
+          latestHubStats = parsed.data.stats;
+          const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
+          parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
+          updateDiscordRpc(displayStats, settings.currency);
+        }
+        sendPush(parsed);
       }
     }
+    if (!isCurrent()) return { ok: false, superseded: true };
     sendStatus(false, classifyStreamFailure({ eof: true }));
-    scheduleStreamRetry();
+    scheduleStreamRetry({ generation: currentGeneration });
+    scheduleRestFallbackPoll(currentGeneration);
+    return { ok: false, code: 'disconnected' };
   } catch (error) {
-    if (controller.signal.aborted && !idleTimedOut) return;
-    sendStatus(false, classifyStreamFailure({ errorCode: error?.cause?.code || error?.code, message: error?.message }));
-    scheduleStreamRetry();
+    if (!isCurrent()) return { ok: false, superseded: true };
+    if (controller.signal.aborted && !idleTimedOut) return { ok: false, superseded: true };
+    const failure = idleTimedOut
+      ? { reason: 'idle_timeout', detail: null }
+      : classifyStreamFailure({ errorCode: error?.cause?.code || error?.code, message: error?.message });
+    sendStatus(false, { ...failure, state: idleTimedOut ? 'idle-timeout' : 'offline' });
+    scheduleStreamRetry({ generation: currentGeneration });
+    scheduleRestFallbackPoll(currentGeneration);
+    return { ok: false, code: failure.reason };
   } finally {
     clearSseIdleWatchdog(controller);
+    if (sseAbortController === controller) sseAbortController = null;
   }
 }
 
@@ -3118,134 +2610,22 @@ function currentWindowToggleShortcutStatus() {
   return windowToggleShortcutStatus(shortcut, registered);
 }
 
-// Strip OpenCode session cookies from a profiles map before it reaches the
-// renderer; the UI only needs the profile name and enabled flag, not the value.
-function redactOpencodeProfilesForRenderer(profiles) {
-  if (!profiles || typeof profiles !== 'object') return profiles;
-  const out = {};
-  for (const [name, profile] of Object.entries(profiles)) {
-    out[name] = { ...profile, cookie: profile && profile.cookie ? 'set' : '' };
-  }
-  return out;
-}
-
-function redactOpenRouterProfilesForRenderer(profiles) {
-  if (!profiles || typeof profiles !== 'object') return profiles;
-  const out = {};
-  for (const [name, profile] of Object.entries(profiles)) {
-    out[name] = { enabled: profile?.enabled !== false, apiKey: profile?.apiKey ? 'set' : '' };
-  }
-  return out;
-}
-
 function settingsForRenderer() {
-  const deepseekApiKeySource = settings?.deepseekApiKey
-    ? 'settings'
-    : deepseekToken(process.env)
-      ? 'env'
-      : '';
-  const minimaxApiKeySource = settings?.minimaxApiKey
-    ? 'settings'
-    : minimaxToken(process.env)
-      ? 'env'
-      : '';
-  const copilotApiTokenSource = settings?.copilotApiToken
-    ? 'settings'
-    : copilotToken(process.env)
-      ? 'env'
-      : '';
-  const zaiApiKeySource = settings?.zaiApiKey
-    ? 'settings'
-    : zaiToken(process.env)
-      ? 'env'
-      : '';
-  const zaiTeamApiKeySource = settings?.zaiTeamApiKey
-    ? 'settings'
-    : zaiTeamToken(process.env)
-      ? 'env'
-      : '';
-  const volcengineCredentialsSource = volcengineCredentials({}, settings || {})
-    ? 'settings'
-    : volcengineCredentials(process.env)
-      ? 'env'
-      : '';
-  const qoderCookieSource = settings?.qoderCookie
-    ? 'settings'
-    : qoderCookie(process.env)
-      ? 'env'
-      : '';
-  const ollamaCookieSource = settings?.ollamaCookie
-    ? 'settings'
-    : ollamaSessionCookie(process.env)
-      ? 'env'
-      : '';
-  const kimiApiKeySource = settings?.kimiApiKey
-    ? 'settings'
-    : kimiToken(process.env)
-      ? 'env'
-      : '';
-  const kimiWebAccessTokenSource = settings?.kimiWebAccessToken
-    ? 'settings'
-    : kimiWebToken(process.env)
-      ? 'env'
-      : '';
-  // Default-deny every credential field added to the canonical store. The two
-  // hub secrets remain explicit exceptions because the existing sync UI must
-  // prefill/copy them; provider credentials only cross as blank/configured state.
+  const safeSettings = stripLegacyLocalLimitSettings(settings);
   const redactedCredentials = credentialSettingsForRenderer(settings, {
     expose: ['hubHostSecret', 'secret']
   });
   return {
-    ...settings,
-    // Renderer CSS needs the same OS decision as BrowserWindow creation. Keep
-    // this derived and read-only; the legacy windowsBackdrop setting remains
-    // persisted only so older profiles can still be loaded safely.
+    ...safeSettings,
     windowsSurface: windowsSurfaceProfile({
       platform: process.platform,
       osRelease: os.release(),
       systemGlass: settings?.systemGlass !== false
     }).kind,
     ...redactedCredentials,
-    zaiApiRegion: normalizeZaiApiRegion(settings?.zaiApiRegion || 'global'),
-    zaiTeamOrganizationId: settings?.zaiTeamOrganizationId ? 'set' : '',
-    zaiTeamProjectId: settings?.zaiTeamProjectId ? 'set' : '',
-    volcengineAccessKeyId: settings?.volcengineAccessKeyId ? 'set' : '',
-    qoderCookie: settings?.qoderCookie ? 'set' : '',
-    ollamaCookie: settings?.ollamaCookie ? 'set' : '',
-    // Never ship OpenCode session cookies to the renderer; the UI only needs to
-    // know whether a cookie is configured, not its value.
-    opencodeCookie: settings?.opencodeCookie ? 'set' : '',
-    ...(settings?.opencodeProfiles
-      ? { opencodeProfiles: redactOpencodeProfilesForRenderer(settings.opencodeProfiles) }
-      : {}),
-    ...(settings?.openrouterProfiles
-      ? { openrouterProfiles: redactOpenRouterProfilesForRenderer(settings.openrouterProfiles) }
-      : {}),
-    openrouterEnvConfigured: Boolean(openrouterLimits.openrouterToken(process.env)),
-    codexManagedAccounts: codexAccountsForRenderer(),
-    mimoManagedAccounts: mimoAccountsForRenderer(),
-    deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()),
-    deepseekApiKeySource,
-    minimaxApiKeyConfigured: Boolean(currentMinimaxApiKey()),
-    minimaxApiKeySource,
-    copilotApiTokenConfigured: Boolean(currentCopilotApiToken()),
-    copilotApiTokenSource,
-    zaiApiKeyConfigured: Boolean(currentZaiApiKey()),
-    zaiApiKeySource,
-    zaiTeamApiKeyConfigured: Boolean(currentZaiTeamApiKey()),
-    zaiTeamApiKeySource,
-    volcengineCredentialsConfigured: Boolean(currentVolcengineCredentials()),
-    volcengineCredentialsSource,
-    qoderCookieConfigured: Boolean(currentQoderCookie()),
-    qoderCookieSource,
-    ollamaCookieConfigured: Boolean(currentOllamaCookie()),
-    ollamaCookieSource,
-    kimiApiKeyConfigured: Boolean(currentKimiApiKey()),
-    kimiApiKeySource,
-    kimiWebAccessTokenConfigured: Boolean(currentKimiWebAccessToken()),
-    kimiWebAccessTokenSource,
-    kimiCredentialConfigured: Boolean(currentKimiWebAccessToken() || currentKimiApiKey()),
-    kimiCredentialSource: kimiWebAccessTokenSource || kimiApiKeySource,
+    hubAdminConfigured: Boolean(settings?.hubAdminSecret || (settings?.hubMode === 'host' && settings?.hubHostAdminSecret)),
+    limitsAuthority: 'hub',
+    centralQuotaSync: true,
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
     macosGlassEffectiveStyle: macosGlassStyleFor(settings),
@@ -3269,11 +2649,6 @@ function pushSettingsToRenderer() {
   // Currency, compact-unit, locale, and theme settings are part of the native
   // Widget snapshot even when the usage counters themselves did not change.
   scheduleMacWidgetSnapshot(latestStats);
-}
-
-function sendMimoAccountsPush() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.webContents.send('mimo:accounts', mimoAccountsForRenderer()); } catch (_) {}
 }
 
 function unregisterWindowToggleShortcut() {
@@ -3388,48 +2763,6 @@ function openViewFromTray(viewId) {
   sendMainWindowEvent('view:open', normalized);
 }
 
-function enabledTrayCodexAccounts() {
-  return sortCodexAccountsForDisplay(
-    codexAccountsForRenderer().filter((account) => account.enabled !== false)
-  );
-}
-
-function syncTrayCodexActiveAccount() {
-  const accounts = enabledTrayCodexAccounts();
-  const localDeviceId = settings?.deviceId || '';
-  const liveProvider = localLiveCodexProvider(latestStats, localDeviceId);
-  const selection = reconcileCodexAccountSelection({
-    detectedAccountId: codexAccountIdForProvider(accounts, liveProvider),
-    detectedAt: liveProvider?.updatedAt,
-    pendingAccountId: trayCodexPendingAccountId,
-    pendingSince: trayCodexPendingSince
-  });
-  trayCodexActiveAccountId = selection.activeAccountId;
-  trayCodexPendingAccountId = selection.pendingAccountId;
-  if (!trayCodexPendingAccountId) trayCodexPendingSince = 0;
-}
-
-function trayCodexMenuState() {
-  syncTrayCodexActiveAccount();
-  const accounts = enabledTrayCodexAccounts();
-  return {
-    accounts,
-    activeAccountId: trayCodexPendingAccountId || trayCodexActiveAccountId,
-    switching: trayCodexSwitchInFlight
-  };
-}
-
-function showTrayCodexSwitchError(error) {
-  const locale = trayMenuLocale();
-  const title = translate(locale, 'trayMenu.codexSwitchFailedTitle');
-  const body = translate(locale, 'trayMenu.codexSwitchFailedBody', { error: String(error || '') });
-  if (Notification.isSupported()) {
-    new Notification({ title, body }).show();
-  } else {
-    dialog.showErrorBox(title, body);
-  }
-}
-
 function showTrayRefreshError(error) {
   const locale = trayMenuLocale();
   const title = translate(locale, 'trayMenu.refreshFailedTitle');
@@ -3438,28 +2771,6 @@ function showTrayRefreshError(error) {
     new Notification({ title, body }).show();
   } else {
     dialog.showErrorBox(title, body);
-  }
-}
-
-async function switchCodexAccountFromTray(accountId) {
-  if (trayCodexSwitchInFlight || !accountId) return;
-  const currentId = trayCodexPendingAccountId || trayCodexActiveAccountId;
-  if (accountId === currentId) return;
-  trayCodexSwitchInFlight = true;
-  try {
-    const result = await switchCodexSystemAccount(accountId);
-    if (!result?.ok) {
-      showTrayCodexSwitchError(result?.error);
-      return;
-    }
-    trayCodexActiveAccountId = result.activeAccountId || accountId;
-    trayCodexPendingAccountId = trayCodexActiveAccountId;
-    trayCodexPendingSince = Date.now();
-    pushSettingsToRenderer();
-  } catch (error) {
-    showTrayCodexSwitchError(error?.message || error);
-  } finally {
-    trayCodexSwitchInFlight = false;
   }
 }
 
@@ -3487,16 +2798,12 @@ function ensureTray() {
   if (tray && !tray.isDestroyed()) return;
   tray = createTray({
     getMenuState: () => {
-      const codex = trayCodexMenuState();
       return {
         appVersion: appVersion(),
         refreshing: trayRefreshInFlight,
         trayContent: settings?.trayContent || 'tokens',
         trayMode: Boolean(settings?.trayMode),
         windowBehavior: settings?.windowBehavior || 'floating',
-        codexAccounts: codex.accounts,
-        activeCodexAccountId: codex.activeAccountId,
-        codexSwitching: codex.switching,
         maskAccountEmails: Boolean(settings?.maskLimitAccountEmails),
         viewEnabled: {
           home: true,
@@ -3513,7 +2820,6 @@ function ensureTray() {
     onRefresh: () => { void refreshFromTray(); },
     onSetTrayContent: setTrayContentFromMenu,
     onSetWindowPresentation: setWindowPresentationFromMenu,
-    onSwitchCodexAccount: (accountId) => { void switchCodexAccountFromTray(accountId); },
     onOpenSettings: openSettingsFromTray,
     onQuit: requestAppQuit,
     translateMenu: (key, params) => translate(trayMenuLocale(), key, params)
@@ -3563,41 +2869,67 @@ function startMode() {
   // async reconciliation below is queued.
   stopLocalCollector();
   stopStatsStream();
+  stopRestBootstrap();
   stopHostStats();
   stopSyncCollector();
+  const requestedGeneration = ++modeGeneration;
   // Serialize the hub-side work so rapid UI events (mode change immediately
   // followed by a port edit or secret regenerate) reconcile in order rather
   // than racing — otherwise an in-flight start could finish with the old
   // port/secret after the UI already advertises the new ones.
   modeQueue = modeQueue.then(async () => {
+    if (requestedGeneration !== modeGeneration) {
+      return { ok: false, superseded: true, generation: requestedGeneration };
+    }
     if (settings.hubMode === 'host') {
       await stopEmbeddedHub();
       const handle = await startEmbeddedHub();
       if (settings.hubMode !== 'host') {
         await stopEmbeddedHub();
-        return;
+        return { ok: false, superseded: true, generation: requestedGeneration };
       }
       if (!handle) {
         // Bind failed (e.g. EADDRINUSE). The error is already surfaced via
         // hub:push; fall back to the local collector so the widget still
         // shows data while the user fixes the port.
         startLocalCollector();
-        return;
+        return {
+          ok: false,
+          mode: 'local-fallback',
+          code: embeddedHubError?.code || 'hub_start_failed',
+          generation: requestedGeneration
+        };
       }
       await startHostStats();
       startHostCollector();
-      return;
+      return { ok: true, mode: 'host', generation: requestedGeneration };
     }
     await stopEmbeddedHub();
-    if (effectiveHubConfig().url) {
-      startStatsStream({ resetSnapshot: true });
+    if (settings.hubMode === 'client') {
       startSyncCollector();
+      // The first REST snapshot and the long-lived SSE supervisor are both
+      // read-side startup work. Start them together; a stream that is blocked
+      // must not delay the initial snapshot or the local collector.
+      startClientRestBootstrap(requestedGeneration);
+      void startStatsStream({ resetSnapshot: true, resetBackoff: true }).catch((error) => {
+        console.log(`[stream] start failed (${stableSyncFailureCode(error)}): ${error.message}`);
+      });
+      const config = safeEffectiveHubConfig();
+      return {
+        ok: config.ok && Boolean(config.url),
+        mode: 'client',
+        code: config.ok ? (config.url ? null : 'hub_not_configured') : (config.error?.code || 'hub_transport_unavailable'),
+        generation: requestedGeneration
+      };
     } else {
       startLocalCollector();
+      return { ok: true, mode: 'local', generation: requestedGeneration };
     }
   }).catch((err) => {
-    console.log(`[mode] reconciliation failed: ${err?.message || err}`);
+    console.log(`[mode] reconciliation failed (${stableSyncFailureCode(err)}): ${err?.message || err}`);
+    return { ok: false, code: stableSyncFailureCode(err, 'mode_reconcile_failed'), generation: requestedGeneration };
   });
+  return modeQueue;
 }
 
 function restartDeviceRuntimeForMode() {
@@ -3609,7 +2941,7 @@ function restartDeviceRuntimeForMode() {
     startHostCollector();
     return;
   }
-  if (effectiveHubConfig().url) startSyncCollector();
+  if (settings.hubMode === 'client') startSyncCollector();
   else startLocalCollector();
 }
 
@@ -3620,6 +2952,7 @@ function stopAll() {
   // cannot deliver another collection tick while Electron exits.
   stopLocalCollector({ skipCloseWatchers: true });
   stopStatsStream();
+  stopRestBootstrap();
   stopHostStats();
   stopSyncCollector({ skipCloseWatchers: true });
   void stopEmbeddedHub();
@@ -3725,7 +3058,6 @@ async function fetchStats(options = {}) {
   if (force && deviceRuntimeHandle && canRefreshRuntime) {
     await runManualDeviceRefresh(deviceRuntimeHandle, {
       forceHistory: Boolean(options?.forceHistory),
-      onLimitsError: (error) => console.log(`[limits-runtime] manual refresh failed: ${error.message}`)
     });
   }
   if (mode === 'local') {
@@ -3735,13 +3067,153 @@ async function fetchStats(options = {}) {
   if (settings.hubMode === 'host' && embeddedHub) {
     return injectLocalDeviceStatus(await embeddedHub.hub.getStats());
   }
-  const { url: hubUrl, secret } = effectiveHubConfig();
-  if (!hubUrl) return withHistoryPreview(aggregateDevices([], 0), []);
-  const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
-  const response = await fetchBufferedWithTimeout(fetch, url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} }, HUB_REQUEST_TIMEOUT_MS);
-  if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-  latestHubStats = await response.json();
-  return injectLocalDeviceStatus(composeLocalSyncStats(latestHubStats, lastCollectedDevice));
+  try {
+    return await fetchHubStatsSnapshot();
+  } catch (error) {
+    // The local collector remains useful while a client-mode Hub is blocked or
+    // offline. Keep the read-side failure in syncHealth; do not turn it into a
+    // second collection lifecycle or replace the local snapshot with zeros.
+    if (lastCollectedDevice) {
+      return withHistoryPreview(aggregateDevices([lastCollectedDevice], 0), [lastCollectedDevice]);
+    }
+    if (error?.code === 'hub_not_configured') return withHistoryPreview(aggregateDevices([], 0), []);
+    throw error;
+  }
+}
+
+function boundedSyncTask(task, timeoutMs = SYNC_RECOVERY_TIMEOUT_MS) {
+  const deadline = Math.max(1, Number(timeoutMs) || SYNC_RECOVERY_TIMEOUT_MS);
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ ok: false, timedOut: true, code: 'recovery_timeout' }), deadline);
+    timer.unref?.();
+  });
+  const work = Promise.resolve().then(task);
+  work.catch(() => {});
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function recoverNow(options = {}) {
+  if (options?.forceStream === true) syncRecoveryForceStreamRequested = true;
+  if (syncRecoveryPromise) return syncRecoveryPromise;
+  syncRecoveryPromise = (async () => {
+    const recoveryDeadline = Date.now() + SYNC_RECOVERY_TIMEOUT_MS;
+    const remaining = () => Math.max(1, recoveryDeadline - Date.now());
+    const result = {
+      collection: { ok: false, code: 'not_started' },
+      upload: { ok: false, code: 'not_started' },
+      rest: { ok: false, code: 'not_started' },
+      stream: { ok: false, code: 'not_started' }
+    };
+    const takeStreamReconnectRequest = () => {
+      const forceStream = syncRecoveryForceStreamRequested;
+      syncRecoveryForceStreamRequested = false;
+      return mode === 'sync'
+        && settings?.hubMode === 'client'
+        && (forceStream || !streamConnected);
+    };
+    const startRecoveryStream = () => startStatsStream({ resetBackoff: true }).catch((error) => {
+      console.log(`[stream] recovery failed (${stableSyncFailureCode(error)}): ${error.message}`);
+      return { ok: false, code: stableSyncFailureCode(error) };
+    });
+    let streamStartPromise = takeStreamReconnectRequest()
+      ? startRecoveryStream()
+      : null;
+
+    const canRefreshRuntime = mode === 'local' || !isExternalAgentActive();
+    if (deviceRuntimeHandle && canRefreshRuntime) {
+      try {
+        const collection = await boundedSyncTask(
+          () => runManualDeviceRefresh(deviceRuntimeHandle, {
+            forceHistory: true,
+          }),
+          remaining()
+        );
+        result.collection = collection?.timedOut
+          ? collection
+          : { ok: true, ...(collection && typeof collection === 'object' ? collection : {}) };
+      } catch (error) {
+        result.collection = { ok: false, code: stableSyncFailureCode(error, 'collection_failed') };
+      }
+    } else if (isExternalAgentActive()) {
+      result.collection = { ok: false, code: 'external_agent_active' };
+    } else {
+      result.collection = { ok: false, code: 'collector_unavailable' };
+    }
+
+    if (syncUploadSchedulerHandle) {
+      try {
+        result.upload = await boundedSyncTask(
+          () => syncUploadSchedulerHandle.retryNow({ abortActive: true, timeoutMs: Math.min(HUB_REQUEST_TIMEOUT_MS, remaining()) }),
+          remaining()
+        );
+      } catch (error) {
+        result.upload = { ok: false, code: stableSyncFailureCode(error, 'upload_failed'), status: error?.status || null };
+      }
+    } else if (mode === 'local' || settings?.hubMode === 'host') {
+      result.upload = { ok: true, code: 'not_applicable' };
+    } else {
+      result.upload = { ok: false, code: 'upload_scheduler_unavailable' };
+    }
+
+    if (mode === 'sync' && settings?.hubMode === 'client') {
+      try {
+        const stats = await boundedSyncTask(() => fetchHubStatsSnapshot(), Math.min(HUB_REQUEST_TIMEOUT_MS, remaining()));
+        if (stats?.timedOut) result.rest = stats;
+        else {
+          result.rest = { ok: true };
+          sendPush({ event: 'stats', data: { type: 'stats', reason: 'recovery-rest', transport: 'rest', mode, stats, at: new Date().toISOString() } });
+        }
+      } catch (error) {
+        result.rest = { ok: false, code: stableSyncFailureCode(error, 'hub_read_failed'), status: error?.status || null };
+      }
+
+      // startStatsStream owns the long-lived reader. Do not await its EOF here;
+      // only wait for the bounded connection attempt to publish its status.
+      if (!streamStartPromise && takeStreamReconnectRequest()) {
+        streamStartPromise = startRecoveryStream();
+      }
+      void streamStartPromise;
+      while (!streamConnected && Date.now() < recoveryDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      result.stream = streamConnected
+        ? { ok: true, connected: true }
+        : { ok: false, code: syncHealth.stream.failureCode || 'stream_offline', timedOut: true };
+    } else {
+      result.rest = { ok: true, code: 'not_applicable' };
+      result.stream = { ok: true, code: 'not_applicable', connected: streamConnected };
+    }
+    result.ok = ['collection', 'upload', 'rest', 'stream'].every((channel) => result[channel]?.ok === true);
+    publishSyncHealth();
+    return result;
+  })().finally(() => {
+    syncRecoveryPromise = null;
+  });
+  return syncRecoveryPromise;
+}
+
+function checkSyncNetworkRecovery() {
+  if (settings?.hubMode !== 'client' || mode !== 'sync' || typeof net?.isOnline !== 'function') return;
+  let online;
+  try { online = Boolean(net.isOnline()); } catch (_) { return; }
+  if (lastNetworkOnline === false && online === true) {
+    void recoverNow({ forceStream: true }).catch((error) => console.log(`[sync] network recovery failed: ${error.message}`));
+  }
+  lastNetworkOnline = online;
+}
+
+function startSyncNetworkMonitor() {
+  if (syncNetworkPollTimer || typeof net?.isOnline !== 'function') return;
+  try { lastNetworkOnline = Boolean(net.isOnline()); } catch (_) { lastNetworkOnline = null; }
+  syncNetworkPollTimer = setInterval(checkSyncNetworkRecovery, 15 * 1000);
+  syncNetworkPollTimer.unref?.();
+}
+
+function stopSyncNetworkMonitor() {
+  if (syncNetworkPollTimer) clearInterval(syncNetworkPollTimer);
+  syncNetworkPollTimer = null;
+  lastNetworkOnline = null;
 }
 
 function managedPricingSidecarPath() {
@@ -4490,30 +3962,43 @@ async function getDashboardHistory() {
     // doesn't depend on a loopback fetch the local firewall/proxy might block.
     return embeddedHub.hub.getHistory();
   }
-  const { url: hubUrl, secret } = effectiveHubConfig();
-  if (!hubUrl) return aggregateHistory([]);
+  const config = safeEffectiveHubConfig();
+  if (!config.ok) {
+    const error = new Error('Hub history transport is unavailable');
+    error.code = config.error?.code || 'hub_history_transport_unavailable';
+    updateSyncHealth('rest', { state: 'error', lastFailureAt: new Date().toISOString(), failureCode: error.code });
+    throw error;
+  }
+  const { url: hubUrl, secret } = config;
+  if (!hubUrl) {
+    const error = new Error('Hub history is not configured');
+    error.code = 'hub_not_configured';
+    updateSyncHealth('rest', { state: 'blocked', lastFailureAt: new Date().toISOString(), failureCode: error.code });
+    return aggregateHistory([]);
+  }
   const url = `${hubUrl.replace(/\/$/, '')}/api/history`;
-  const response = await fetchBufferedWithTimeout(fetch, url, {
-    headers: secret ? { authorization: `Bearer ${secret}` } : {}
-  }, HUB_REQUEST_TIMEOUT_MS);
-  if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-  return response.json();
-}
-
-let cursorStatusCache = { value: null, at: 0 };
-let opencodeStatusCache = { value: null, at: 0 };
-const CURSOR_STATUS_TTL_MS = 30 * 1000;
-
-function normalizeManualCookie(input) {
-  let s = String(input || '').trim();
-  if (!s) return '';
-  if (s.toLowerCase().startsWith('cookie:')) s = s.slice(7).trim();
-  // If they pasted the full cookie header, extract the WorkosCursorSessionToken= value.
-  const match = s.match(/WorkosCursorSessionToken=([^;\s]+)/);
-  if (match) return match[1];
-  // Otherwise assume the whole string is the raw token value.
-  if (/\s/.test(s)) return '';
-  return s;
+  try {
+    const response = await fetchBufferedWithTimeout(fetch, url, {
+      headers: secret ? { authorization: `Bearer ${secret}` } : {}
+    }, HUB_REQUEST_TIMEOUT_MS);
+    if (!response.ok) {
+      const error = new Error('Hub history request failed');
+      error.status = response.status;
+      error.code = stableSyncFailureCode(error, 'hub_history_failed');
+      throw error;
+    }
+    const history = await response.json();
+    updateSyncHealth('rest', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null, status: null });
+    return history;
+  } catch (error) {
+    updateSyncHealth('rest', {
+      state: 'error',
+      lastFailureAt: new Date().toISOString(),
+      failureCode: stableSyncFailureCode(error, 'hub_history_failed'),
+      status: Number.isInteger(Number(error?.status)) ? Number(error.status) : null
+    });
+    throw error;
+  }
 }
 
 function rebuildWindow() {
@@ -4571,8 +4056,6 @@ app.whenReady().then(() => {
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
   ensureMacWidgetPublisher();
-  startMode();
-  void hydrateCodexManagedWorkspaceLabels();
   if (settings.discordRpcEnabled) startDiscordRpc();
   rateCache = readRateCache();
   applyEffectiveRates();                 // use cache/defaults immediately, avoid first-paint gap
@@ -4624,10 +4107,7 @@ app.whenReady().then(() => {
     const previousAutomaticAppUpdates = settings.automaticAppUpdates;
     const previousCustomModelPricing = JSON.stringify(settings.customModelPricing || []);
     const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
-    const normalizedPatch = { ...patch, currency: normalizedCurrency };
-    delete normalizedPatch.codexManagedAccounts;
-    delete normalizedPatch.mimoManagedAccounts;
-    delete normalizedPatch.openrouterProfiles;
+    const normalizedPatch = { ...stripLegacyLocalLimitSettings(patch), currency: normalizedCurrency };
     delete normalizedPatch.customModelPricing;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
     if (patch.hubUrl !== undefined) normalizedPatch.hubUrl = normalizeHubUrl(patch.hubUrl);
@@ -4642,23 +4122,10 @@ app.whenReady().then(() => {
     if (requestedHubMode === 'client' && requestedHubUrl) {
       requireSafeHubTransport(requestedHubUrl, { allowInsecureHttp: allowInsecureHubHttp === true });
     }
-    if (patch.deepseekApiKey !== undefined) normalizedPatch.deepseekApiKey = normalizeDeepSeekApiKey(patch.deepseekApiKey);
-    if (patch.minimaxApiKey !== undefined) normalizedPatch.minimaxApiKey = normalizeMinimaxApiKey(patch.minimaxApiKey);
-    if (patch.copilotApiToken !== undefined) normalizedPatch.copilotApiToken = normalizeCopilotApiToken(patch.copilotApiToken);
-    if (patch.copilotEnterpriseHost !== undefined) normalizedPatch.copilotEnterpriseHost = normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost);
-    if (patch.zaiApiKey !== undefined) normalizedPatch.zaiApiKey = normalizeZaiApiKey(patch.zaiApiKey);
-    if (patch.zaiApiRegion !== undefined) normalizedPatch.zaiApiRegion = normalizeZaiApiRegion(patch.zaiApiRegion);
-    if (patch.zaiTeamApiKey !== undefined) normalizedPatch.zaiTeamApiKey = normalizeZaiTeamApiKey(patch.zaiTeamApiKey);
-    if (patch.zaiTeamOrganizationId !== undefined) normalizedPatch.zaiTeamOrganizationId = normalizeZaiTeamId(patch.zaiTeamOrganizationId);
-    if (patch.zaiTeamProjectId !== undefined) normalizedPatch.zaiTeamProjectId = normalizeZaiTeamId(patch.zaiTeamProjectId);
-    if (patch.volcengineAccessKeyId !== undefined) normalizedPatch.volcengineAccessKeyId = normalizeSecretSetting(patch.volcengineAccessKeyId);
-    if (patch.volcengineSecretAccessKey !== undefined) normalizedPatch.volcengineSecretAccessKey = normalizeSecretSetting(patch.volcengineSecretAccessKey);
-    if (patch.volcengineRegion !== undefined) normalizedPatch.volcengineRegion = normalizeVolcengineRegion(patch.volcengineRegion);
-    if (patch.qoderCookie !== undefined) normalizedPatch.qoderCookie = normalizeQoderCookie(patch.qoderCookie);
-    if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
-    if (patch.kimiApiKey !== undefined) normalizedPatch.kimiApiKey = normalizeKimiApiKey(patch.kimiApiKey);
-    if (patch.kimiWebAccessToken !== undefined) normalizedPatch.kimiWebAccessToken = normalizeKimiWebAccessToken(patch.kimiWebAccessToken);
-    if (patch.ollamaCookie !== undefined) normalizedPatch.ollamaCookie = normalizeOllamaCookie(patch.ollamaCookie);
+    if (patch.hubAdminSecret !== undefined) normalizedPatch.hubAdminSecret = normalizeSecretSetting(patch.hubAdminSecret);
+    if (patch.hubHostAdminSecret !== undefined) normalizedPatch.hubHostAdminSecret = normalizeSecretSetting(patch.hubHostAdminSecret);
+    if (patch.hubHostSecret !== undefined) normalizedPatch.hubHostSecret = normalizeSecretSetting(patch.hubHostSecret);
+    delete normalizedPatch.hubAccountCredentialKey;
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
     if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
@@ -4669,7 +4136,9 @@ app.whenReady().then(() => {
       ...normalizedPatch,
       hubMode: patch.hubMode !== undefined ? normalizeHubMode(patch.hubMode, settings.hubMode) : settings.hubMode,
       hubHostPort: patch.hubHostPort !== undefined ? normalizeHubPort(patch.hubHostPort, settings.hubHostPort) : settings.hubHostPort,
-      hubHostSecret: patch.hubHostSecret !== undefined ? String(patch.hubHostSecret) : settings.hubHostSecret,
+      hubHostSecret: patch.hubHostSecret !== undefined ? normalizeSecretSetting(patch.hubHostSecret) : (settings.hubHostSecret || ''),
+      hubHostAdminSecret: patch.hubHostAdminSecret !== undefined ? normalizeSecretSetting(patch.hubHostAdminSecret) : (settings.hubHostAdminSecret || ''),
+      hubAdminSecret: patch.hubAdminSecret !== undefined ? normalizeSecretSetting(patch.hubAdminSecret) : (settings.hubAdminSecret || ''),
       deviceId: (patch.deviceId !== undefined ? String(patch.deviceId).trim() : settings.deviceId) || defaultDeviceId(),
       clients: patch.clients !== undefined ? clientsCsvForSetting(patch.clients, '') : clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS),
       refreshMs: Math.max(5000, Number(patch.refreshMs ?? settings.refreshMs ?? 15000)),
@@ -4711,7 +4180,6 @@ app.whenReady().then(() => {
       serviceProviderDisplayOrder: patch.serviceProviderDisplayOrder !== undefined ? String(patch.serviceProviderDisplayOrder || '') : (settings.serviceProviderDisplayOrder || ''),
       hiddenServiceProviders: patch.hiddenServiceProviders !== undefined ? String(patch.hiddenServiceProviders || '') : (settings.hiddenServiceProviders || ''),
       serviceStatusRefreshMs: normalizeServiceStatusRefreshMs(patch.serviceStatusRefreshMs ?? settings.serviceStatusRefreshMs),
-      limitsRefreshMs: normalizeLimitsRefreshMs(patch.limitsRefreshMs ?? settings.limitsRefreshMs),
       showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
@@ -4733,21 +4201,6 @@ app.whenReady().then(() => {
       language: patch.language !== undefined ? normalizeLanguageSetting(patch.language, settings.language) : normalizeLanguageSetting(settings.language),
       startAtLogin: loginItemEnabledHere() ? parseBoolean(patch.startAtLogin ?? settings.startAtLogin, false) : false,
       automaticAppUpdates: parseBoolean(patch.automaticAppUpdates ?? settings.automaticAppUpdates, false),
-      deepseekApiKey: patch.deepseekApiKey !== undefined ? normalizeDeepSeekApiKey(patch.deepseekApiKey) : (settings.deepseekApiKey || ''),
-      minimaxApiKey: patch.minimaxApiKey !== undefined ? normalizeMinimaxApiKey(patch.minimaxApiKey) : (settings.minimaxApiKey || ''),
-      copilotApiToken: patch.copilotApiToken !== undefined ? normalizeCopilotApiToken(patch.copilotApiToken) : (settings.copilotApiToken || ''),
-      copilotEnterpriseHost: patch.copilotEnterpriseHost !== undefined ? normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost) : (settings.copilotEnterpriseHost || ''),
-      zaiApiKey: patch.zaiApiKey !== undefined ? normalizeZaiApiKey(patch.zaiApiKey) : (settings.zaiApiKey || ''),
-      zaiApiRegion: patch.zaiApiRegion !== undefined ? normalizeZaiApiRegion(patch.zaiApiRegion) : normalizeZaiApiRegion(settings.zaiApiRegion || 'global'),
-      zaiTeamApiKey: patch.zaiTeamApiKey !== undefined ? normalizeZaiTeamApiKey(patch.zaiTeamApiKey) : (settings.zaiTeamApiKey || ''),
-      zaiTeamOrganizationId: patch.zaiTeamOrganizationId !== undefined ? normalizeZaiTeamId(patch.zaiTeamOrganizationId) : (settings.zaiTeamOrganizationId || ''),
-      zaiTeamProjectId: patch.zaiTeamProjectId !== undefined ? normalizeZaiTeamId(patch.zaiTeamProjectId) : (settings.zaiTeamProjectId || ''),
-      volcengineAccessKeyId: patch.volcengineAccessKeyId !== undefined ? normalizeSecretSetting(patch.volcengineAccessKeyId) : (settings.volcengineAccessKeyId || ''),
-      volcengineSecretAccessKey: patch.volcengineSecretAccessKey !== undefined ? normalizeSecretSetting(patch.volcengineSecretAccessKey) : (settings.volcengineSecretAccessKey || ''),
-      volcengineRegion: patch.volcengineRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineRegion) : (settings.volcengineRegion || ''),
-      qoderCookie: patch.qoderCookie !== undefined ? normalizeQoderCookie(patch.qoderCookie) : (settings.qoderCookie || ''),
-      qoderSite: patch.qoderSite !== undefined ? normalizeQoderSite(patch.qoderSite) : normalizeQoderSite(settings.qoderSite || 'global'),
-      ollamaCookie: patch.ollamaCookie !== undefined ? normalizeOllamaCookie(patch.ollamaCookie) : (settings.ollamaCookie || ''),
       customModelPricing: patch.customModelPricing !== undefined
         ? normalizeCustomPricingSetting(patch.customModelPricing)
         : normalizeCustomPricingSetting(settings.customModelPricing)
@@ -4801,24 +4254,9 @@ app.whenReady().then(() => {
     }
     const runtimeChange = classifySettingsChange(previousRuntimeSettings, settings);
     if (runtimeChange.modeStructural) {
-      for (const scope of runtimeChange.limitScopes) {
-        rememberPendingLimitInvalidation(scope, 'settings-change');
-      }
       startMode();
     } else if (runtimeChange.usageStructural || runtimeChange.sinkStructural) {
-      for (const scope of runtimeChange.limitScopes) {
-        rememberPendingLimitInvalidation(scope, 'settings-change');
-      }
       restartDeviceRuntimeForMode();
-    } else {
-      if (runtimeChange.limitsReconfigure && deviceRuntimeHandle) {
-        deviceRuntimeHandle.reconfigureLimits(electronLimitsConfig());
-      }
-      for (const scope of runtimeChange.limitScopes) {
-        void queueLimitInvalidation(scope, 'settings-change').catch((error) => {
-          console.log(`[limits-runtime] settings refresh failed: ${error.message}`);
-        });
-      }
     }
     if (settings.showTrayIcon !== previousShowTrayIcon) {
       if (settings.showTrayIcon) ensureTray();
@@ -5030,8 +4468,18 @@ app.whenReady().then(() => {
             endHour: range.endHour
           });
         } else {
-          const { url: hubUrl, secret } = effectiveHubConfig();
-          if (!hubUrl) throw new Error('hub not configured');
+          const config = safeEffectiveHubConfig();
+          if (!config.ok) {
+            const error = new Error('Hub usage-range transport is unavailable');
+            error.code = config.error?.code || 'hub_range_transport_unavailable';
+            throw error;
+          }
+          const { url: hubUrl, secret } = config;
+          if (!hubUrl) {
+            const error = new Error('Hub usage-range is not configured');
+            error.code = 'hub_not_configured';
+            throw error;
+          }
           const params = new URLSearchParams({
             startDate: range.startDate,
             endDate: range.endDate,
@@ -5041,10 +4489,14 @@ app.whenReady().then(() => {
           const url = `${hubUrl.replace(/\/$/, '')}/api/usage/range?${params}`;
           const response = await fetchBufferedWithTimeout(fetch, url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} }, HUB_REQUEST_TIMEOUT_MS);
           if (!response.ok) {
-            throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+            const error = new Error('Hub usage-range request failed');
+            error.status = response.status;
+            error.code = stableSyncFailureCode(error, 'hub_range_failed');
+            throw error;
           }
           body = await response.json();
         }
+        updateSyncHealth('rest', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null, status: null });
         const hubPeriod = {
           totalTokens: Math.round(Number(body.totalTokens) || 0),
           costUsd: Number(body.costUsd) || 0,
@@ -5093,6 +4545,12 @@ app.whenReady().then(() => {
         }
       } catch (error) {
         hubError = error;
+        updateSyncHealth('rest', {
+          state: 'error',
+          lastFailureAt: new Date().toISOString(),
+          failureCode: stableSyncFailureCode(error, 'hub_range_failed'),
+          status: Number.isInteger(Number(error?.status)) ? Number(error.status) : null
+        });
       }
 
       try {
@@ -5161,7 +4619,9 @@ app.whenReady().then(() => {
     const { client, sessionId, period, sessionCost } = args || {};
     return readSessionDetail({ client, sessionId, period, sessionCost, home: os.homedir() });
   });
-  ipcMain.handle('stream:status', () => ({ connected: streamConnected, mode, ...(streamFailure || {}) }));
+  ipcMain.handle('sync:recover', () => recoverNow());
+  ipcMain.handle('sync:health', () => syncHealthSnapshot());
+  ipcMain.handle('stream:status', () => ({ connected: streamConnected, mode, health: syncHealthSnapshot(), ...(streamFailure || {}) }));
   ipcMain.handle('serviceStatus:get', (_event, options) => serviceStatusClient.getServiceStatus({
     force: Boolean(options?.force),
     providerIds: Array.isArray(options?.providerIds) ? options.providerIds : null
@@ -5217,13 +4677,36 @@ app.whenReady().then(() => {
       .catch((error) => ({ ok: false, error: error.message }));
   });
   ipcMain.handle('app:openUserData', () => shell.openPath(app.getPath('userData')));
-  ipcMain.handle('mimo:accounts', () => mimoAccountsForRenderer());
-  ipcMain.handle('mimo:addAccount', (_event, cookieHeader) => addMimoManagedAccount(cookieHeader));
-  ipcMain.handle('mimo:openConsole', () => shell.openExternal(MIMO_PLATFORM_CONSOLE_URL)
-    .then(() => ({ ok: true }))
-    .catch((error) => ({ ok: false, error: error.message })));
-  ipcMain.handle('mimo:setAccountEnabled', (_event, id, enabled) => setMimoManagedAccountEnabled(id, enabled));
-  ipcMain.handle('mimo:removeAccount', async (_event, id) => removeMimoManagedAccount(id));
+  ipcMain.handle('hubAccounts:list', () => requestHubAccount('/api/accounts'));
+  ipcMain.handle('hubAccounts:add', (_event, request = {}) => requestHubAccount('/api/accounts', {
+    method: 'POST',
+    body: {
+      provider: request.provider,
+      name: request.name,
+      label: request.label,
+      credential: parseHubAccountCredential(request)
+    }
+  }));
+  ipcMain.handle('hubAccounts:update', (_event, id, patch = {}) => {
+    const body = {
+      name: patch.name,
+      label: patch.label,
+      enabled: patch.enabled
+    };
+    if (patch.credential !== undefined || patch.credentialText !== undefined) {
+      body.credential = parseHubAccountCredential(patch);
+    }
+    return requestHubAccount(`/api/accounts/${encodeURIComponent(String(id || '').trim())}`, {
+      method: 'PATCH',
+      body
+    });
+  });
+  ipcMain.handle('hubAccounts:remove', (_event, id) => requestHubAccount(`/api/accounts/${encodeURIComponent(String(id || '').trim())}`, {
+    method: 'DELETE'
+  }));
+  ipcMain.handle('hubAccounts:refresh', (_event, id) => requestHubAccount(`/api/accounts/${encodeURIComponent(String(id || '').trim())}/refresh`, {
+    method: 'POST'
+  }));
   ipcMain.handle('tokscale:getStatus', () => getTokscaleStatus());
   ipcMain.handle('tokscale:checkNpm', () => checkTokscaleNpm());
   ipcMain.handle('tokscale:downloadFromNpm', () => downloadTokscaleFromNpm());
@@ -5238,467 +4721,6 @@ app.whenReady().then(() => {
   ipcMain.handle('appUpdate:download', () => downloadAndPrepareAppUpdate());
   ipcMain.handle('appUpdate:install', () => installDownloadedAppUpdate());
   ipcMain.handle('appUpdate:dismiss', (_event, version) => dismissAppUpdateVersion(version));
-  ipcMain.handle('cursor:loginManual', async (_event, raw) => {
-    const token = normalizeManualCookie(raw);
-    if (!token) return { ok: false, error: 'Empty or malformed token' };
-    try {
-      const probeResult = await cursorProbe.probe(token);
-      if (!probeResult.ok) return { ok: false, error: probeResult.error?.message || 'Cursor rejected the token' };
-      await cursorAuth.runCursorLogin(token);
-      cursorStatusCache = { value: null, at: 0 };
-      void queueLimitInvalidation({ provider: 'cursor' }, 'login', { clear: true });
-      void refreshUsageClient('cursor', { forceSync: true });
-      return { ok: true, email: probeResult.user.email };
-    } catch (err) {
-      return { ok: false, error: err.message };
-    }
-  });
-  ipcMain.handle('ollama:validateCookie', async (_event, raw) => {
-    const cookie = normalizeOllamaCookie(raw);
-    if (!cookie) return { ok: false, status: 'notConfigured' };
-    const provider = await fetchOllamaLimits({ ollamaCookie: cookie }, { bypassValidationCache: true });
-    rememberOllamaValidation(cookie, provider);
-    return { ok: provider.status === 'ok', status: provider.status };
-  });
-  ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
-    const cookie = opencodeWeb.sanitizeCookieHeader(raw);
-    if (!cookie) {
-      settings.opencodeProfiles = {};
-      settings.opencodeCookie = '';
-      try {
-        saveSettings({ throwOnError: true });
-      } catch (error) {
-        return { ok: false, error: error?.message || 'Could not persist OpenCode credentials' };
-      }
-      opencodeStatusCache = { value: null, at: 0 };
-      void queueLimitInvalidation({ provider: 'opencode' }, 'logout', { clear: true });
-      return { ok: true, cleared: true };
-    }
-    try {
-      const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(cookie, {}),
-        opencodeWeb.fetchZen(cookie, {})
-      ]);
-      if (opencodeWeb.summarizeLink(go, zen).expired) {
-        return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
-      }
-      const profiles = settings.opencodeProfiles || {};
-      profiles.default = { cookie, enabled: true };
-      settings.opencodeProfiles = profiles;
-      settings.opencodeCookie = cookie;
-      saveSettings({ throwOnError: true });
-      opencodeStatusCache = { value: null, at: 0 };
-      void queueLimitInvalidation({ provider: 'opencode' }, 'credential-save', { clear: true });
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err.message };
-    }
-  });
-  ipcMain.handle('cursor:logout', async () => {
-    try {
-      await cursorAuth.runCursorLogout();
-      cursorStatusCache = { value: null, at: 0 };
-      void queueLimitInvalidation({ provider: 'cursor' }, 'logout', { clear: true });
-      void refreshUsageClient('cursor', { forceSync: true });
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err.message };
-    }
-  });
-  ipcMain.handle('opencode:logout', async () => {
-    try {
-      settings.opencodeProfiles = {};
-      settings.opencodeCookie = '';
-      saveSettings({ throwOnError: true });
-      opencodeStatusCache = { value: null, at: 0 };
-      void queueLimitInvalidation({ provider: 'opencode' }, 'logout', { clear: true });
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err.message };
-    }
-  });
-  ipcMain.handle('cursor:status', async () => {
-    const now = Date.now();
-    if (cursorStatusCache.value && now - cursorStatusCache.at < CURSOR_STATUS_TTL_MS) {
-      return cursorStatusCache.value;
-    }
-    const account = cursorAuth.readActiveAccount();
-    if (!account) {
-      const value = { loggedIn: false };
-      cursorStatusCache = { value, at: now };
-      return value;
-    }
-    const probeResult = await cursorProbe.probe(account.sessionToken);
-    const value = probeResult.ok
-      ? {
-          loggedIn: true,
-          email: probeResult.user.email,
-          membershipType: probeResult.usage.membershipType,
-          billingCycleEnd: probeResult.usage.billingCycleEnd,
-          expired: false
-        }
-      : { loggedIn: true, expired: probeResult.error?.kind === 'unauthorized', error: probeResult.error?.message };
-    cursorStatusCache = { value, at: now };
-    return value;
-  });
-  ipcMain.handle('opencode:status', async () => {
-    const now = Date.now();
-    if (opencodeStatusCache.value && now - opencodeStatusCache.at < CURSOR_STATUS_TTL_MS) {
-      return opencodeStatusCache.value;
-    }
-    const profiles = settings.opencodeProfiles || {};
-    const entries = Object.entries(profiles).filter(([, p]) => p.cookie && p.enabled);
-
-    // Query all profiles in parallel
-    const results = await Promise.all(
-      entries.map(async ([name, profile]) => {
-        const [go, zen] = await Promise.all([
-          opencodeWeb.fetchGoWeb(profile.cookie, {}),
-          opencodeWeb.fetchZen(profile.cookie, {})
-        ]);
-        return [name, { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd }];
-      })
-    );
-
-    const result = Object.fromEntries(results);
-
-    // Legacy env cookie. Skip it when it matches an enabled profile so the
-    // panel doesn't report an extra "connected" account that the collector
-    // dedupes away (otherwise it shows 2/2 while only one account is tracked).
-    const envCookie = process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '';
-    if (envCookie && !entries.some(([, p]) => p.cookie === envCookie)) {
-      const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(envCookie, {}),
-        opencodeWeb.fetchZen(envCookie, {})
-      ]);
-      let envKey = 'env';
-      for (let i = 1; Object.prototype.hasOwnProperty.call(profiles, envKey); i += 1) {
-        envKey = `env:${i}`;
-      }
-      result[envKey] = { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd, env: true };
-    }
-    const value = { profiles: result, linked: Object.values(result).some(s => s.linked) };
-    opencodeStatusCache = { value, at: now };
-    return value;
-  });
-  ipcMain.handle('opencode:getProfiles', async () => {
-    const profiles = settings.opencodeProfiles || {};
-    const hasEnvVar = Boolean(process.env.TOKEN_MONITOR_OPENCODE_COOKIE);
-    // Strip cookie values — renderer only needs name/enabled for display
-    const safe = {};
-    for (const [name, p] of Object.entries(profiles)) {
-      safe[name] = { enabled: p.enabled };
-    }
-    return { profiles: safe, hasEnvVar };
-  });
-  ipcMain.handle('opencode:saveProfile', async (_event, name, raw) => {
-    const cookie = opencodeWeb.sanitizeCookieHeader(raw);
-    if (!cookie || !name) return { ok: false, error: 'Empty name or cookie' };
-    try {
-      const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(cookie, {}),
-        opencodeWeb.fetchZen(cookie, {})
-      ]);
-      if (opencodeWeb.summarizeLink(go, zen).expired) {
-        return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
-      }
-      const profiles = settings.opencodeProfiles || {};
-      profiles[name] = { cookie, enabled: true };
-      settings.opencodeProfiles = profiles;
-      saveSettings({ throwOnError: true });
-      opencodeStatusCache = { value: null, at: 0 };
-      void queueLimitInvalidation({ provider: 'opencode', accountName: name }, 'profile-save');
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err.message };
-    }
-  });
-  ipcMain.handle('opencode:deleteProfile', async (_event, name) => {
-    const profiles = settings.opencodeProfiles || {};
-    const deletedProfile = profiles[name];
-    delete profiles[name];
-    if (deletedProfile?.cookie && settings.opencodeCookie === deletedProfile.cookie) {
-      settings.opencodeCookie = '';
-    }
-    settings.opencodeProfiles = profiles;
-    try {
-      saveSettings({ throwOnError: true });
-    } catch (error) {
-      return { ok: false, error: error?.message || 'Could not persist OpenCode profile deletion' };
-    }
-    opencodeStatusCache = { value: null, at: 0 };
-    void queueLimitInvalidation({ provider: 'opencode', accountName: name }, 'profile-delete', {
-      clear: true,
-      refresh: false
-    });
-    return { ok: true };
-  });
-  ipcMain.handle('opencode:renameProfile', async (_event, oldName, newName) => {
-    if (!newName || oldName === newName) return { ok: false, error: 'Invalid name' };
-    const profiles = settings.opencodeProfiles || {};
-    if (!profiles[oldName]) return { ok: false, error: 'Profile not found' };
-    if (profiles[newName]) return { ok: false, error: 'Profile name already exists' };
-    profiles[newName] = profiles[oldName];
-    delete profiles[oldName];
-    settings.opencodeProfiles = profiles;
-    try {
-      saveSettings({ throwOnError: true });
-    } catch (error) {
-      return { ok: false, error: error?.message || 'Could not persist OpenCode profile rename' };
-    }
-    opencodeStatusCache = { value: null, at: 0 };
-    void queueLimitInvalidation({ provider: 'opencode', accountName: oldName }, 'profile-rename', {
-      clear: true,
-      refresh: false
-    });
-    void queueLimitInvalidation({ provider: 'opencode', accountName: newName }, 'profile-rename');
-    return { ok: true };
-  });
-  ipcMain.handle('opencode:setProfileEnabled', async (_event, name, enabled) => {
-    const profiles = settings.opencodeProfiles || {};
-    if (!profiles[name]) return { ok: false, error: 'Profile not found' };
-    profiles[name].enabled = Boolean(enabled);
-    settings.opencodeProfiles = profiles;
-    try {
-      saveSettings({ throwOnError: true });
-    } catch (error) {
-      return { ok: false, error: error?.message || 'Could not persist OpenCode profile state' };
-    }
-    opencodeStatusCache = { value: null, at: 0 };
-    void queueLimitInvalidation({ provider: 'opencode', accountName: name }, 'profile-state', {
-      clear: !enabled,
-      refresh: Boolean(enabled)
-    });
-    return { ok: true };
-  });
-  ipcMain.handle('openrouter:getProfiles', async () => {
-    return {
-      profiles: redactOpenRouterProfilesForRenderer(settings.openrouterProfiles || {}),
-      hasEnvVar: Boolean(openrouterLimits.openrouterToken(process.env))
-    };
-  });
-  ipcMain.handle('openrouter:saveProfile', async (_event, rawName, rawApiKey) => {
-    const name = openrouterLimits.openrouterProfileName(rawName);
-    const apiKey = openrouterLimits.openrouterToken({}, rawApiKey);
-    if (!name) return { ok: false, errorCode: 'invalidName' };
-    if (!apiKey) return { ok: false, errorCode: 'missingApiKey' };
-    try {
-      const provider = await openrouterLimits.fetchOpenRouterAccount(name, apiKey, {
-        env: process.env,
-        signal: AbortSignal.timeout(15_000)
-      });
-      if (provider?.status !== 'ok') {
-        return { ok: false, error: provider?.status === 'unauthorized' ? 'OpenRouter rejected the API key' : 'Could not validate the OpenRouter API key' };
-      }
-      settings.openrouterProfiles = {
-        ...(settings.openrouterProfiles || {}),
-        [name]: { apiKey, enabled: true }
-      };
-      saveSettings({ throwOnError: true });
-      void queueLimitInvalidation({ provider: 'openrouter', accountName: name }, 'profile-save');
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, error: error?.message || 'Could not validate the OpenRouter API key' };
-    }
-  });
-  ipcMain.handle('openrouter:deleteProfile', async (_event, rawName) => {
-    const name = String(rawName || '').trim();
-    const profiles = { ...(settings.openrouterProfiles || {}) };
-    if (!profiles[name]) return { ok: false, error: 'Profile not found' };
-    delete profiles[name];
-    settings.openrouterProfiles = profiles;
-    try {
-      saveSettings({ throwOnError: true });
-    } catch (error) {
-      return { ok: false, error: error?.message || 'Could not persist OpenRouter profile deletion' };
-    }
-    void queueLimitInvalidation({ provider: 'openrouter', accountName: name }, 'profile-delete', {
-      clear: true,
-      refresh: false
-    });
-    return { ok: true };
-  });
-  ipcMain.handle('openrouter:renameProfile', async (_event, rawOldName, rawNewName) => {
-    const oldName = String(rawOldName || '').trim();
-    const newName = openrouterLimits.openrouterProfileName(rawNewName);
-    const profiles = { ...(settings.openrouterProfiles || {}) };
-    if (!newName || oldName === newName) return { ok: false, errorCode: 'invalidName' };
-    if (!profiles[oldName]) return { ok: false, error: 'Profile not found' };
-    if (profiles[newName]) return { ok: false, error: 'Profile name already exists' };
-    profiles[newName] = profiles[oldName];
-    delete profiles[oldName];
-    settings.openrouterProfiles = profiles;
-    try {
-      saveSettings({ throwOnError: true });
-    } catch (error) {
-      return { ok: false, error: error?.message || 'Could not persist OpenRouter profile rename' };
-    }
-    void queueLimitInvalidation({ provider: 'openrouter', accountName: oldName }, 'profile-rename', {
-      clear: true,
-      refresh: false
-    });
-    void queueLimitInvalidation({ provider: 'openrouter', accountName: newName }, 'profile-rename');
-    return { ok: true };
-  });
-  ipcMain.handle('openrouter:setProfileEnabled', async (_event, rawName, enabled) => {
-    const name = String(rawName || '').trim();
-    const profiles = { ...(settings.openrouterProfiles || {}) };
-    if (!profiles[name]) return { ok: false, error: 'Profile not found' };
-    profiles[name] = { ...profiles[name], enabled: Boolean(enabled) };
-    settings.openrouterProfiles = profiles;
-    try {
-      saveSettings({ throwOnError: true });
-    } catch (error) {
-      return { ok: false, error: error?.message || 'Could not persist OpenRouter profile state' };
-    }
-    void queueLimitInvalidation({ provider: 'openrouter', accountName: name }, 'profile-state', {
-      clear: !enabled,
-      refresh: Boolean(enabled)
-    });
-    return { ok: true };
-  });
-  ipcMain.handle('codex:accounts', () => codexAccountsForRenderer());
-  ipcMain.handle('codex:setAccountEnabled', (_event, id, enabled) => setCodexManagedAccountEnabled(id, enabled));
-  ipcMain.handle('codex:addAccount', async (event, request = {}) => {
-    const flowId = String(request?.flowId || '').trim();
-    if (codexLoginController) return { ok: false, error: 'A Codex sign-in is already in progress.', flowId };
-    const controller = new AbortController();
-    codexLoginController = controller;
-    codexLoginFlowId = flowId;
-    codexLoginCanCancel = true;
-    let streamed = '';
-    const sendStatus = (payload) => {
-      if (codexLoginController !== controller) return;
-      if (!event.sender.isDestroyed()) {
-        event.sender.send('codex:loginStatus', {
-          ...payload,
-          flowId
-        });
-      }
-    };
-    try {
-      const result = await addCodexManagedAccount((text) => {
-        streamed = (streamed + String(text || '')).slice(-8000);
-        sendStatus({
-          phase: 'output',
-          text: String(text || ''),
-          loginUrl: codexLoginUrlFromOutput(streamed)
-        });
-      }, {
-        signal: controller.signal,
-        selectWorkspace: ({ email, currentWorkspaceId, workspaces }) => new Promise((resolve) => {
-          const finish = (workspaceId) => {
-            if (codexWorkspaceSelection?.controller === controller) codexWorkspaceSelection = null;
-            controller.signal.removeEventListener('abort', onAbort);
-            resolve(workspaceId);
-          };
-          const onAbort = () => finish('');
-          codexWorkspaceSelection = {
-            controller,
-            flowId,
-            webContentsId: event.sender.id,
-            workspaceIds: new Set(workspaces.map((workspace) => workspace.id)),
-            finish
-          };
-          controller.signal.addEventListener('abort', onAbort, { once: true });
-          sendStatus({
-            phase: 'workspaceSelection',
-            email,
-            currentWorkspaceId,
-            workspaces: workspaces.map(({ id, label, workspaceKind }) => ({ id, label, workspaceKind }))
-          });
-        }),
-        onCommit: () => {
-          if (codexLoginController === controller) codexLoginCanCancel = false;
-        }
-      });
-      if (codexLoginController !== controller) {
-        return { ok: false, error: codexLoginErrorMessage({ outcome: 'cancelled' }), outcome: 'cancelled', flowId };
-      }
-      return { ...result, flowId };
-    } finally {
-      if (codexLoginController === controller) {
-        if (codexWorkspaceSelection?.controller === controller) codexWorkspaceSelection.finish('');
-        codexLoginController = null;
-        codexLoginFlowId = '';
-        codexLoginCanCancel = false;
-      }
-    }
-  });
-  ipcMain.handle('codex:selectWorkspace', (event, request = {}) => {
-    const flowId = String(request?.flowId || '').trim();
-    const workspaceId = normalizeWorkspaceId(request?.workspaceId);
-    const pending = codexWorkspaceSelection;
-    if (!pending || pending.webContentsId !== event.sender.id) return { ok: false, stale: true };
-    if (flowId && pending.flowId && flowId !== pending.flowId) return { ok: false, stale: true };
-    if (!workspaceId || !pending.workspaceIds.has(workspaceId)) {
-      return { ok: false, error: 'Unknown Codex workspace.' };
-    }
-    pending.finish(workspaceId);
-    return { ok: true };
-  });
-  ipcMain.handle('codex:cancelLogin', (_event, request = {}) => {
-    const flowId = String(request?.flowId || '').trim();
-    if (flowId && codexLoginFlowId && flowId !== codexLoginFlowId) return { ok: true, cancelled: false };
-    const controller = codexLoginController;
-    if (!controller) return { ok: true, cancelled: false };
-    if (!codexLoginCanCancel) return { ok: false, cancelled: false, tooLate: true };
-    controller?.abort();
-    return { ok: true, cancelled: true };
-  });
-  ipcMain.handle('codex:removeAccount', async (_event, id) => removeCodexManagedAccount(id));
-  ipcMain.handle('codex:switchSystemAccount', async (_event, id) => switchCodexSystemAccount(id));
-  ipcMain.handle('codex:refreshAccountLimits', async (_event, id) => refreshCodexManagedAccountLimits(id));
-  ipcMain.handle('copilot:signIn', async (event, request = {}) => {
-    if (copilotLoginController) return { ok: false, error: 'A GitHub Copilot sign-in is already in progress.', flowId: copilotLoginFlowId };
-    const controller = new AbortController();
-    const flowId = String(request?.flowId || '').trim();
-    copilotLoginController = controller;
-    copilotLoginFlowId = flowId;
-    const sendStatus = (payload) => {
-      if (copilotLoginController !== controller) return;
-      if (!event.sender.isDestroyed()) event.sender.send('copilot:loginStatus', { ...payload, flowId });
-    };
-    try {
-      const result = await runCopilotDeviceFlowLogin({
-        enterpriseHost: settings?.copilotEnterpriseHost || process.env.COPILOT_ENTERPRISE_HOST || process.env.GITHUB_ENTERPRISE_HOST || '',
-        signal: controller.signal,
-        onStatus: sendStatus
-      }, {
-        openExternal: (url) => shell.openExternal(url),
-        copyToClipboard: (text) => clipboard.writeText(String(text || '')),
-        fetch
-      });
-      if (copilotLoginController !== controller) {
-        return { ok: false, error: copilotLoginErrorMessage({ status: 'cancelled' }), flowId };
-      }
-      settings.copilotApiToken = normalizeCopilotApiToken(result.accessToken);
-      saveSettings({ throwOnError: true });
-      pushSettingsToRenderer();
-      void queueLimitInvalidation({ provider: 'copilot' }, 'login', { clear: true });
-      return { ok: true, flowId };
-    } catch (error) {
-      const message = copilotLoginErrorMessage(error);
-      sendStatus({ phase: 'error', error: message });
-      return { ok: false, error: message, flowId };
-    } finally {
-      if (copilotLoginController === controller) {
-        copilotLoginController = null;
-        copilotLoginFlowId = '';
-      }
-    }
-  });
-  ipcMain.handle('copilot:cancelSignIn', (_event, request = {}) => {
-    const flowId = String(request?.flowId || '').trim();
-    if (flowId && copilotLoginFlowId && flowId !== copilotLoginFlowId) return { ok: true };
-    const controller = copilotLoginController;
-    controller?.abort();
-    if (copilotLoginController === controller) {
-      copilotLoginController = null;
-      copilotLoginFlowId = '';
-    }
-    return { ok: true };
-  });
   ipcMain.on('window:minimize', () => {
     if (settings?.trayMode) hidePopover();
     else mainWindow?.minimize();
@@ -5718,6 +4740,20 @@ app.whenReady().then(() => {
   });
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
+  // Register the renderer/state surface before starting any collector. A fast
+  // local tick or REST bootstrap must never race the initial IPC handlers.
+  powerMonitor?.on?.('resume', () => {
+    if (settings?.hubMode === 'client') {
+      void recoverNow({ forceStream: true }).catch((error) => console.log(`[sync] resume recovery failed: ${error.message}`));
+    }
+  });
+  powerMonitor?.on?.('unlock-screen', () => {
+    if (settings?.hubMode === 'client') {
+      void recoverNow({ forceStream: true }).catch((error) => console.log(`[sync] unlock recovery failed: ${error.message}`));
+    }
+  });
+  startMode();
+  startSyncNetworkMonitor();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   if (pendingMacWidgetOpen) setImmediate(openMainWindowFromWidget);
   maybeRunBackgroundUpdateCheck();
@@ -5731,6 +4767,7 @@ app.on('before-quit', () => {
   macWidgetPublisher?.stop();
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
+  stopSyncNetworkMonitor();
   unregisterWindowToggleShortcut();
   // During a native update the updater owns the restart. Calling app.exit here
   // can pre-empt its hand-off; the watchdog releases this flag if the hand-off

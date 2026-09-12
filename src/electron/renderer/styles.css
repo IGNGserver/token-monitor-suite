@@ -1787,7 +1787,7 @@ span.settings-note.settings-item-desc {
 }
 .settings-panel .limit-provider-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
   margin: 0 -2px;
@@ -1817,6 +1817,17 @@ span.settings-note.settings-item-desc {
   min-width: 0;
   flex-wrap: wrap;
   gap: 3px;
+}
+.limit-provider-auto-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
+.limit-provider-auto-toggle input {
+  margin: 0;
 }
 .limit-provider-tag {
   max-width: 100%;
@@ -2185,6 +2196,8 @@ html.is-windows .settings-panel select option {
   backdrop-filter: none;
 }
 .label-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 11px; }
+.usage-estimate { color: var(--yellow); font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase; }
+.usage-estimate.hidden { display: none; }
 .total-number-row {
   display: flex;
   align-items: baseline;

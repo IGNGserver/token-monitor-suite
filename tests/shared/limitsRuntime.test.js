@@ -30,6 +30,7 @@ function providerRow(provider, accountKey, label, options = {}) {
     accountLabel: label,
     source: 'api',
     status: options.status || 'ok',
+    ...(options.credentialOrigin ? { credentialOrigin: options.credentialOrigin } : {}),
     updatedAt: options.updatedAt || '2026-07-21T00:00:00.000Z',
     windows: options.windows === undefined
       ? [{ kind: 'session', label: '5-hour', usedPercent: 20, resetsAt: options.resetsAt }]
@@ -522,6 +523,50 @@ test('reconfigure removes providers immediately, adds them with a scoped refresh
   assert.deepEqual(runtime.getSnapshot().providers.map((row) => row.provider).sort(), ['claude', 'kimi']);
   runtime.reconfigure({ limitsEnabled: false });
   assert.deepEqual(runtime.getSnapshot().providers, []);
+  runtime.stop();
+});
+
+test('manual-only source policy retains explicit rows, removes automatic rows, and hydrates safely', async () => {
+  const runtime = createLimitsRuntime({
+    limitProviders: ['kimi'],
+    limitProviderAutoDetectDisabled: 'kimi',
+    previousLimits: {
+      providers: [
+        providerRow('kimi', 'manual', 'Manual', { credentialOrigin: 'manual' }),
+        providerRow('kimi', 'automatic', 'Automatic', { credentialOrigin: 'automatic' })
+      ]
+    }
+  }, runtimeDeps());
+
+  assert.deepEqual(runtime.getSnapshot().providers.map((row) => row.accountKey), ['manual']);
+  assert.equal(runtime.getSnapshot().providers[0].credentialOrigin, 'manual');
+  runtime.stop();
+});
+
+test('source-policy changes form a generation boundary for in-flight automatic results', async () => {
+  const jobs = [];
+  const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, runtimeDeps({
+    probeProvider: () => {
+      const job = deferred();
+      jobs.push(job);
+      return job.promise;
+    }
+  }));
+
+  const first = runtime.refresh({ provider: 'kimi' }, 'startup');
+  await waitFor(() => jobs.length === 1, 'initial automatic dispatch');
+  runtime.reconfigure({ limitProviderAutoDetectDisabled: 'kimi' });
+  jobs[0].resolve([providerRow('kimi', 'automatic', 'Late automatic', { credentialOrigin: 'automatic' })]);
+  assert.equal((await first).superseded, true);
+
+  await waitFor(() => jobs.length === 2, 'manual-only refresh');
+  jobs[1].resolve([providerRow('kimi', 'automatic', 'Suppressed automatic', { credentialOrigin: 'automatic' })]);
+  await waitFor(() => runtime.getSnapshot().providers.length === 0, 'automatic row suppression');
+
+  runtime.reconfigure({ limitProviderAutoDetectDisabled: '' });
+  await waitFor(() => jobs.length === 3, 'automatic refresh after re-enable');
+  jobs[2].resolve([providerRow('kimi', 'automatic', 'Recovered automatic', { credentialOrigin: 'automatic' })]);
+  await waitFor(() => runtime.getSnapshot().providers[0]?.accountLabel === 'Recovered automatic', 'automatic row recovery');
   runtime.stop();
 });
 

@@ -79,9 +79,15 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 
 #### Qoder CN(로컬 어댑터)
 
-Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이스에서 읽습니다. Settings → tools에서 활성화합니다(옵트인, 기본 꺼짐). 데이터베이스는 플랫폼별로 자동 감지됩니다: macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`, Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`, Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — `TOKEN_MONITOR_QODER_CN_DB_PATH`로 재정의할 수 있습니다.
+Qoder CN의 설정 디렉터리를 옮겼다면 Qoder CN 자체의 `QODERCN_CONFIG_DIR`을 설정하세요. `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`을 지정하지 않으면 그 아래의 `projects`를 감시합니다.
 
-고급 로컬 통합입니다: 읽기에는 PATH의 `sqlite3` CLI 또는 플래그 없는 `node:sqlite`를 갖춘 Node 런타임(Node ≥ 23.4, Electron에서는 CLI가 필요할 수 있음)이 필요합니다. 읽기 실패는 로그에 기록되며, 완전한 기존 스냅샷이 있으면 0 사용량으로 덮어쓰지 않고 유지합니다. 비용은 매핑된 각 모델의 models.dev 카탈로그 요금에서 추정됩니다. Qoder가 데이터베이스 스키마를 변경하면 어댑터가 작동하지 않을 수 있습니다.
+Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이스에서 읽습니다. Settings → tools에서 활성화합니다(옵트인, 기본 꺼짐). 레거시 데이터베이스는 플랫폼별로 자동 감지됩니다: macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`, Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`, Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — `TOKEN_MONITOR_QODER_CN_DB_PATH`로 재정의할 수 있습니다. Qoder CN 0.1.x는 플랫폼 애플리케이션 지원 디렉터리의 `com.qoder.app.stable/main.sqlite`에도 대화 메시지를 저장하며, 필요하면 `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH`로 재정의할 수 있습니다. 또한 `~/.qoder-cn/projects/**/*.jsonl`에 transcript를 기록할 수 있고, 이 디렉터리는 실시간 업데이트를 위해 감시되며 `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`로 변경할 수 있습니다.
+
+고급 로컬 통합입니다: 읽기에는 PATH의 `sqlite3` CLI 또는 플래그 없는 `node:sqlite`를 갖춘 Node 런타임(Node ≥ 23.4, Electron에서는 CLI가 필요할 수 있음)이 필요합니다. 읽기 실패는 로그에 기록되며, 완전한 기존 스냅샷이 있으면 0 사용량으로 덮어쓰지 않고 유지합니다. Main SQLite와 Transcript 행은 CJK 문자 수 / 1.5와 기타 문자 수 / 4를 섞은 방식으로 추정합니다. 로컬 기록에는 제공자 청구 필드, 시스템 프롬프트와 도구 schema가 없으므로 이 사용량과 비용에는 `estimated`가 표시되며 정확한 청구 Token이 아닙니다. 비용은 매핑된 각 모델의 models.dev 카탈로그 요금에서 추정됩니다. Qoder가 데이터베이스 스키마를 변경하면 어댑터가 작동하지 않을 수 있습니다.
+
+#### Qoder 계정 한도
+
+`qoder` 한도 계정은 Hub에 수동으로 추가하며, 로컬 `qodercn` 사용량 어댑터와는 별개입니다. Hub는 입력한 자격 증명을 암호화해 저장하고 계정 한도를 자동 갱신한 뒤 정규화된 결과를 연결된 기기로 배포합니다. 기기 측에서는 로컬 Qoder 로그인, 브라우저 프로필, 환경 자격 증명, CLI 계정의 자동 탐지를 제거했으며 이런 자격 증명을 업로드하거나 한도 소스로 사용하지 않습니다.
 </details>
 
 ## 쇼케이스
@@ -89,7 +95,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 <table>
 <tr>
 <td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="홈 보기"><br><sub>커스터마이즈 가능한 대시보드 — 표시할 모듈과 순서를 선택</sub></td>
-<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="한도 보기"><br><sub>여러 계정을 나란히, Codex는 로컬 계정을 원클릭 전환</sub></td>
+<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="한도 보기"><br><sub>Hub가 관리하는 계정과 기기 전체에 배포되는 최신 한도</sub></td>
 <td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="도구 보기"><br><sub>도구를 클릭해 입력／출력과 캐시 히트 상세를 펼치기</sub></td>
 </tr>
 <tr>
@@ -123,7 +129,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 ### 한도·추세·내보내기
 
 - **AI 도구 한도 감지** — Claude Code, Codex, Cursor, OpenRouter, 서드파티 API, GLM, Kimi 등 19개 이상 공급자의 session/weekly/billing/credits, 여러 OpenRouter/서드파티 프로필, DeepSeek 선불 잔액과 사용액
-- **여러 계정과 Codex 전환** — 한 공급자에서 여러 계정을 추적하고 각각의 한도를 표시. 추적 중인 Codex 계정은 재인증 없이 로컬 계정으로 한 번에 전환 가능
+- **Hub 계정 한도 관리** — 공급자별 여러 계정을 수동으로 추가하고 자격 증명은 Hub에만 보관. Hub가 한도를 갱신해 연결된 모든 기기에 배포
 - **삭제된 세션 사용량 유지** — 많은 도구가 오래된 세션을 정리합니다(Claude Code는 기본적으로 30일 후 트랜스크립트 삭제). 켜면 Token Monitor가 관측한 일별 도구/모델 사용량을 로컬에 보관해, 원본 파일이 사라져도 히트맵과 추세를 유지합니다(아래 [세션 데이터 보존 기간](#세션-데이터-보존-기간) 참고)
 - **사용 추세 & 대시보드** — 홈 화면 활동 히트맵·추세 차트, 연속 일수·기기 전체 도구/모델별 누적 사용(막대·K선) 전용 대시보드 창
 - **상태 보기** (선택) — Claude, OpenAI, Cursor, DeepSeek 상태 페이지 수동/주기 확인
@@ -170,6 +176,8 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 모든 기기(및 headless agent)가 연결할 **hub 하나**를 고릅니다. 각 기기에서 위젯을 열고 **설정 → 멀티 디바이스 동기화**에서 모드를 선택합니다. 위젯이 이 기기 사용량을 자동으로 올리며, 위젯이 없는 기기에서만 `npm run agent`를 실행하면 됩니다.
 
 Hub 자격 증명은 권한별로 분리됩니다. viewer는 읽기 전용, device token은 바인딩된 Device ID만 업로드할 수 있고 admin만 변경을 수행합니다. 원격 연결은 기본적으로 HTTPS가 필요하며 Android 릴리스 빌드는 HTTP를 허용하지 않습니다.
+
+이전 설정이 로컬이 아닌 `http://` Hub를 가리켜도 업그레이드가 보안을 자동으로 약화하지 않습니다. 로컬 수집은 계속되지만 HTTPS로 바꾸거나 사용자가 신뢰할 수 있는 LAN 옵션을 명시적으로 켤 때까지 Hub 읽기／업로드／라이브 스트림은 blocked 상태로 유지됩니다. 동기화 설정은 각 채널을 따로 표시하며 설정 변경 후 같은 프로세스에서 복구할 수 있습니다.
 
 #### 옵션 A — 위젯에서 hub 호스트 (가장 쉬움, CLI 불필요)
 

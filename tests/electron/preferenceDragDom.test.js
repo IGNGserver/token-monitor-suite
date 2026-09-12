@@ -80,7 +80,7 @@ test('tool preference controls place compact actions beside the note without dup
 });
 
 test('tool preference rows include compact per-tool pin controls', () => {
-  const body = functionBody(readRendererFile('app.js'), 'renderToolPreferences', 'renderLimitProviderCheckboxes');
+  const body = functionBody(readRendererFile('app.js'), 'renderToolPreferences', 'onToolTrackingToggle');
   assert.match(body, /tool-pin-button/);
   assert.match(body, /settings\.tools\.pinClient/);
   assert.match(body, /settings\.tools\.unpinClient/);
@@ -398,4 +398,3 @@ test('renderer applies the first visible view on cold startup only', () => {
   const syncBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
   assert.match(syncBody, /applyInitialBreakdownPreference\(\)/);
 });
-

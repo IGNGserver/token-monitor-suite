@@ -5,6 +5,7 @@ const https = require('node:https');
 const fs = require('node:fs');
 const { URL } = require('node:url');
 const { aggregateDevices, aggregateHistory, mergeDeviceRecord } = require('../shared/usage');
+const { normalizeLimitsSummary } = require('../shared/limits');
 const { historyPreview, historyRevision } = require('../shared/history');
 const { deviceHistoryRevision } = require('../shared/history');
 const {
@@ -30,6 +31,7 @@ const { lookupModelPricing, normalizePromaPricing } = require('../shared/collect
 const { createMySqlPool, createRepository } = require('./repository');
 const { createCatalogPricingLookup, pricingNotFound } = require('./pricing-upstream');
 const { calculateUsageEventDeltas, summarizeSessions } = require('./usage-events');
+const { createHubAccountService } = require('./accountService');
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 const PRICE_FIELDS = [
@@ -52,6 +54,12 @@ function safeDynamicKey(value, fallback = 'unknown') {
 
 function mapNumber(map, key) {
   return hasOwn(map, key) ? number(map[key]) : 0;
+}
+
+function errorMessageForApi(error) {
+  return String(error?.message || 'request failed')
+    .slice(0, 512)
+    .replace(/cookie|token|secret|api[_ -]?key|authorization/gi, '[redacted]');
 }
 
 // Without a secret the hub cannot tell its own widget from any other caller, so it
@@ -261,6 +269,11 @@ function createHub({
   allowInsecureHttp = false,
   authFailureLimit = 30,
   ingestRateLimit = 240,
+  accountsEnabled = true,
+  accountCredentialKey = '',
+  accountRefreshMs = 5 * 60 * 1000,
+  accountConcurrency = 4,
+  accountProbe,
   logger = console
 } = {}) {
   const ownedPool = !repository && !pool;
@@ -274,7 +287,23 @@ function createHub({
     allowLegacyAdmin,
     allowLegacyIngest
   });
-  const capabilities = hubCapabilities('node-hub');
+  const resolvedAccountCredentialKey = String(
+    accountCredentialKey || process.env.TOKEN_MONITOR_HUB_CREDENTIAL_KEY || ''
+  ).trim();
+  const accountService = accountsEnabled !== false
+    && resolvedAccountCredentialKey
+    && typeof store.listHubAccounts === 'function'
+    ? createHubAccountService({
+      store,
+      credentialKey: resolvedAccountCredentialKey,
+      refreshMs: accountRefreshMs,
+      concurrency: accountConcurrency,
+      probe: accountProbe,
+      logger,
+      onUpdate: () => { void broadcastStats('account-update'); }
+    })
+    : null;
+  const capabilities = hubCapabilities('node-hub', { hubAccounts: Boolean(accountService) });
   const authFailures = createFixedWindowRateLimiter({ limit: authFailureLimit, windowMs: 60_000 });
   const ingestRequests = createFixedWindowRateLimiter({ limit: ingestRateLimit, windowMs: 60_000 });
   const bindHost = resolveBindHost(host, auth.configured ? 'configured' : '');
@@ -300,6 +329,12 @@ function createHub({
   async function getStats() {
     const records = await store.listDeviceRecords();
     const stats = aggregateDevices(records, staleAfterMs);
+    const centralLimits = accountService
+      ? await accountService.getLimitsSummary()
+      : normalizeLimitsSummary({});
+    for (const device of stats.devices) delete device.limits;
+    stats.limits = centralLimits;
+    stats.limitsAuthority = accountService ? 'hub' : 'none';
     stats.staleAfterMs = staleAfterMs;
     const history = aggregateHistory(records);
     stats.historyPreview = historyPreview(history);
@@ -614,11 +649,15 @@ function createHub({
     if (!payload || (!payload.deviceId && !payload.id)) {
       throw new Error('deviceId_required');
     }
-    validateDeviceRecordPayload(payload);
+    const usagePayload = { ...payload };
+    delete usagePayload.limits;
+    delete usagePayload.limitsOnly;
+    validateDeviceRecordPayload(usagePayload);
     const record = await store.transaction(async (connection) => {
-      const deviceId = String(payload.deviceId || payload.id);
+      const deviceId = String(usagePayload.deviceId || usagePayload.id);
       const existing = await store.getDeviceRecord(deviceId, connection);
-      const merged = mergeDeviceRecord(existing, { ...payload, receivedAt: new Date().toISOString() });
+      const merged = mergeDeviceRecord(existing, { ...usagePayload, receivedAt: new Date().toISOString() });
+      merged.limits = normalizeLimitsSummary({});
       const { candidates, events } = calculateUsageEventDeltas(existing, merged);
       const pricingByModel = await store.getPricing(events.map((event) => event.model), connection);
       const pricedEvents = events.map((event) => priceSnapshot(event, pricingByModel.get(event.model)));
@@ -634,6 +673,32 @@ function createHub({
       await broadcastStats('ingest', stats);
     }
     return includeStats ? { record, stats } : record;
+  }
+
+  async function recordAccountAudit(principal, action, accountId = '', details = null) {
+    logger.info?.(`[hub-audit] ${principal?.id || 'unknown'} ${action}${accountId ? ` ${accountId}` : ''}`);
+    if (typeof store.appendHubAccountAudit !== 'function') return;
+    try {
+      await store.appendHubAccountAudit(accountId, action, principal?.id || '', details);
+    } catch (error) {
+      logger.warn?.(`[hub-account-audit] ${error.message}`);
+    }
+  }
+
+  function accountErrorStatus(error) {
+    if (error?.code === 'account_duplicate') return 409;
+    if (error?.code === 'account_not_found') return 404;
+    if (['provider_unsupported', 'provider_manual_login_unavailable', 'credential_required', 'credential_invalid', 'credential_too_large'].includes(error?.code)) return 400;
+    if (['unauthorized', 'notConfigured', 'rateLimited', 'sourceRateLimited'].includes(error?.code)) return 422;
+    if (error?.code === 'unavailable') return 502;
+    return 400;
+  }
+
+  function accountUnavailable(res) {
+    return sendJson(res, 503, {
+      error: 'hub_accounts_not_configured',
+      message: 'Set TOKEN_MONITOR_HUB_CREDENTIAL_KEY and run the hub account migration first.'
+    });
   }
 
   async function deleteDevice(deviceId) {
@@ -776,6 +841,17 @@ function createHub({
         scopes: result.principal.scopes
       });
     }
+    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/api/accounts') {
+      const result = authorize(READ_SCOPE);
+      if (!result) return;
+      if (!accountService) return accountUnavailable(res);
+      return sendJson(res, 200, {
+        ok: true,
+        authority: 'hub',
+        providers: accountService.supportedProviders(),
+        accounts: await accountService.listAccounts()
+      });
+    }
     const readRoute = (req.method === 'GET' || req.method === 'HEAD') && (
       ['/api/stats', '/api/devices', '/api/history', '/api/subscriptions', '/api/usage/range', '/api/pricing', '/api/stats/stream'].includes(url.pathname)
     );
@@ -828,6 +904,93 @@ function createHub({
       }
     }
     if (req.method === 'GET' && url.pathname === '/api/pricing') return sendJson(res, 200, { pricing: await store.listPricing() });
+
+    if (req.method === 'POST' && url.pathname === '/api/accounts') {
+      const admin = authorize(ADMIN_SCOPE);
+      if (!admin) return;
+      if (!accountService) return accountUnavailable(res);
+      try {
+        const body = await readJsonBody(req);
+        const account = await accountService.addAccount({
+          provider: body?.provider,
+          name: body?.name,
+          label: body?.label,
+          credential: body?.credential
+        });
+        await recordAccountAudit(admin.principal, 'account.add', account.id, { provider: account.provider });
+        return sendJson(res, 201, { ok: true, account });
+      } catch (error) {
+        return sendJson(res, accountErrorStatus(error), {
+          error: error.code || 'account_add_failed',
+          message: errorMessageForApi(error)
+        });
+      }
+    }
+
+    if (url.pathname.startsWith('/api/accounts/')) {
+      const suffix = url.pathname.slice('/api/accounts/'.length);
+      const refreshSuffix = '/refresh';
+      const isRefresh = suffix.endsWith(refreshSuffix);
+      const accountId = decodeURIComponent(isRefresh ? suffix.slice(0, -refreshSuffix.length) : suffix);
+      if (!accountId) return sendJson(res, 400, { error: 'account_id_required' });
+      if (req.method === 'POST' && isRefresh) {
+        const admin = authorize(ADMIN_SCOPE);
+        if (!admin) return;
+        if (!accountService) return accountUnavailable(res);
+        try {
+          const account = await accountService.refreshAccount(accountId);
+          if (!account) return sendJson(res, 404, { error: 'account_not_found' });
+          await recordAccountAudit(admin.principal, 'account.refresh', accountId);
+          return sendJson(res, 200, { ok: true, account: (await accountService.listAccounts()).find((item) => item.id === accountId) || null });
+        } catch (error) {
+          return sendJson(res, accountErrorStatus(error), {
+            error: error.code || 'account_refresh_failed',
+            message: errorMessageForApi(error)
+          });
+        }
+      }
+      if (req.method === 'PATCH') {
+        const admin = authorize(ADMIN_SCOPE);
+        if (!admin) return;
+        if (!accountService) return accountUnavailable(res);
+        try {
+          const body = await readJsonBody(req);
+          const account = await accountService.updateAccount(accountId, {
+            name: body?.name,
+            label: body?.label,
+            enabled: body?.enabled,
+            ...(Object.prototype.hasOwnProperty.call(body || {}, 'credential') ? { credential: body.credential } : {})
+          });
+          if (!account) return sendJson(res, 404, { error: 'account_not_found' });
+          await recordAccountAudit(admin.principal, 'account.update', accountId, {
+            provider: account.provider,
+            credentialReplaced: Object.prototype.hasOwnProperty.call(body || {}, 'credential')
+          });
+          return sendJson(res, 200, { ok: true, account });
+        } catch (error) {
+          return sendJson(res, accountErrorStatus(error), {
+            error: error.code || 'account_update_failed',
+            message: errorMessageForApi(error)
+          });
+        }
+      }
+      if (req.method === 'DELETE') {
+        const admin = authorize(ADMIN_SCOPE);
+        if (!admin) return;
+        if (!accountService) return accountUnavailable(res);
+        try {
+          const deleted = await accountService.deleteAccount(accountId);
+          if (!deleted) return sendJson(res, 404, { error: 'account_not_found' });
+          await recordAccountAudit(admin.principal, 'account.delete', accountId);
+          return sendJson(res, 200, { ok: true, accountId });
+        } catch (error) {
+          return sendJson(res, accountErrorStatus(error), {
+            error: error.code || 'account_delete_failed',
+            message: errorMessageForApi(error)
+          });
+        }
+      }
+    }
 
     if (req.method === 'GET' && url.pathname === '/api/stats/stream') {
       const snapshot = await getStats();
@@ -974,9 +1137,14 @@ function createHub({
     // Fail before opening the listening socket when migrations have not run or
     // MySQL credentials are unusable. The Docker entrypoint runs migrations first.
     await store.countDevices();
+    if (accountService) await store.listHubAccounts();
     return new Promise((resolve, reject) => {
       const onError = (err) => { server.off('listening', onListening); reject(err); };
-      const onListening = () => { server.off('error', onError); resolve(); };
+      const onListening = () => {
+        server.off('error', onError);
+        accountService?.start();
+        resolve();
+      };
       server.once('error', onError);
       server.once('listening', onListening);
       server.listen(port, bindHost);
@@ -984,6 +1152,7 @@ function createHub({
   }
 
   async function stop() {
+    await accountService?.stop();
     for (const res of [...sseClients]) dropSseClient(res);
     sseClients.clear();
     for (const heartbeat of sseHeartbeats.values()) clearInterval(heartbeat);
@@ -1027,6 +1196,7 @@ function createHub({
     setSubscriptions,
     fetchUpstreamPricing,
     fetchAllUpstreamPricing,
+    accountService,
     replaceAuthPolicy,
     bindHost,
     protocol,
@@ -1053,6 +1223,18 @@ if (require.main === module) {
     ingestCredentials,
     allowLegacyAdmin: args.allowLegacyAdmin || process.env.TOKEN_MONITOR_ALLOW_LEGACY_ADMIN,
     allowLegacyIngest: args.allowLegacyIngest || process.env.TOKEN_MONITOR_ALLOW_LEGACY_INGEST,
+    accountCredentialKey: args.accountCredentialKey
+      || args['account-credential-key']
+      || process.env.TOKEN_MONITOR_HUB_CREDENTIAL_KEY
+      || '',
+    accountRefreshMs: Number(args.accountRefreshMs
+      || args['account-refresh-ms']
+      || process.env.TOKEN_MONITOR_HUB_REFRESH_MS
+      || 5 * 60 * 1000),
+    accountConcurrency: Number(args.accountConcurrency
+      || args['account-concurrency']
+      || process.env.TOKEN_MONITOR_HUB_ACCOUNT_CONCURRENCY
+      || 4),
     allowInsecureHttp: args.allowInsecureHttp || args['allow-insecure-http'] || process.env.TOKEN_MONITOR_ALLOW_INSECURE_HTTP,
     staleAfterMs
   });

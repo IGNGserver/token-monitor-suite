@@ -5,12 +5,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
-const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 
 const {
   antigravityQuotaWindow,
   apiKeyAccountStatus,
-  isCodexLiveAccount,
   limitProviderDisplayLabel,
   limitProviderCapabilityTags,
   limitProviderCompactWindowLabel,
@@ -21,29 +19,6 @@ const {
   limitResetRemainingMs,
   limitProviderSettingsTags
 } = require('../../src/electron/renderer/limitProviderPresentation');
-
-test('isCodexLiveAccount marks the live system login but not managed-added accounts', () => {
-  assert.equal(isCodexLiveAccount({ provider: 'codex', status: 'ok', sourceDetail: 'app' }), true);
-  assert.equal(isCodexLiveAccount({ provider: 'codex', status: 'ok', sourceDetail: 'cli' }), true);
-  assert.equal(isCodexLiveAccount({ provider: 'codex', status: 'ok', sourceDetail: 'managed' }), false);
-});
-
-test('isCodexLiveAccount is false for other providers and unconfigured codex rows', () => {
-  assert.equal(isCodexLiveAccount({ provider: 'claude', status: 'ok', sourceDetail: 'cli' }), false);
-  assert.equal(isCodexLiveAccount({ provider: 'codex', status: 'notConfigured', sourceDetail: 'app' }), false);
-  assert.equal(isCodexLiveAccount(null), false);
-});
-
-test('isCodexLiveAccount only marks the local live login, not a synced remote device\'s', () => {
-  const liveProvider = { provider: 'codex', status: 'ok', sourceDetail: 'app' };
-  assert.equal(isCodexLiveAccount(liveProvider, { selectedIsRemote: false }), true);
-  assert.equal(isCodexLiveAccount(liveProvider, { selectedIsRemote: true, hasLocalCandidate: false }), false);
-});
-
-test('isCodexLiveAccount stays marked when both devices are signed in but the remote record is selected', () => {
-  const liveProvider = { provider: 'codex', status: 'ok', sourceDetail: 'app' };
-  assert.equal(isCodexLiveAccount(liveProvider, { selectedIsRemote: true, hasLocalCandidate: true }), true);
-});
 
 test('limitProviderDisplayLabel normalizes short account labels without rewriting identifiers', () => {
   assert.equal(limitProviderDisplayLabel('plus'), 'Plus');
@@ -157,23 +132,6 @@ function functionBody(source, name, nextName) {
   const end = source.indexOf(`function ${nextName}(`, start);
   assert.notEqual(end, -1, `${nextName} function should follow ${name}`);
   return source.slice(start, end);
-}
-
-function runLocalProviderStatus(source, state, providerName) {
-  const localDeviceHelper = functionBody(source, 'localDeviceLimitsProviders', 'localProviderStatus');
-  const localProviderHelper = functionBody(source, 'localProviderStatus', 'deepseekAccountLinked');
-  return vm.runInNewContext(
-    `${localDeviceHelper}\n${localProviderHelper}\nlocalProviderStatus(${JSON.stringify(providerName)});`,
-    { accountIdentityApi, state }
-  );
-}
-
-function runLocalLiveCodexProvider(source, state) {
-  const liveHelper = functionBody(source, 'localLiveCodexProvider', 'codexActiveAccountFromStats');
-  return vm.runInNewContext(
-    `${liveHelper}\nlocalLiveCodexProvider();`,
-    { accountIdentityApi, state }
-  );
 }
 
 test('Limits and Home share reset expiry while preserving the existing reset copy', () => {
@@ -415,24 +373,6 @@ test('single local synced provider tags identify local provenance without main p
     ['Linked', 'Web', 'settings.limits.device.local']
   );
   assert.equal(limitProviderMainDeviceLabel(provenance), '');
-});
-
-test('capability tags are settings-only and do not alter the main Limits panel', () => {
-  const app = readRendererFile('app.js');
-  const styles = readRendererFile('styles.css');
-  const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  const renderHead = functionBody(app, 'renderLimitProviderHead', 'renderProviderWindows');
-  const renderMeta = functionBody(app, 'limitProviderMeta', 'limitProviderPlan');
-  const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'onToolTrackingToggle');
-
-  assert.doesNotMatch(renderLimits, /limitProviderCapabilityTags|limit-status|limitProviderStatus/);
-  assert.match(renderHead, /const provenance = limitProviderProvenance\(provider\);/);
-  assert.match(renderHead, /limitProviderMeta\(provider, provenance\)/);
-  assert.match(renderMeta, /limitProviderMainDeviceLabel\(provenance, \{ showSource: Boolean\(state\.settings\?\.showLimitSource\) \}\)/);
-  assert.doesNotMatch(renderLimits, /limitProviderSettingsTags/);
-  assert.match(renderHead, /head\.append\(titleBlock, plan\);/);
-  assert.match(renderSettings, /limitProviderSettingsTags\(provider, provenance/);
-  assert.doesNotMatch(styles, /\.limit-status\b/);
 });
 
 test('Codex limits render as one provider group with account subrows', () => {
@@ -706,7 +646,7 @@ test('Codex renders manual reset credits below session and weekly windows', () =
   assert.match(codexResetCreditsNode, /aria-label/);
   assert.match(limitDetailTooltipShouldHoldRender, /state\.limitDetailTooltipActive/);
   assert.match(renderLimits, /const holdLimitDetailTooltipRender = limitDetailTooltipShouldHoldRender\(\);/);
-  assert.match(renderLimits, /if \(holdLimitDetailTooltipRender \|\| holdCodexSwitchPopoverRender\)/);
+  assert.match(renderLimits, /if \(holdLimitDetailTooltipRender\)/);
   assert.match(styles, /\.limit-reset-credits\s*\{[^}]*min-height: 11px;[^}]*font-size: 9px;/s);
   assert.match(styles, /\.limit-reset-credits-line\s*\{[^}]*justify-content: space-between;/s);
   assert.match(styles, /\.limit-reset-credits-expiry-group\s*\{[^}]*flex: 0 0 auto;/s);
@@ -826,139 +766,21 @@ test('main Limits plan text shows failure status before account labels', () => {
   assert.match(planBody, /const label = String\(provider\?\.planLabel \|\| provider\?\.accountLabel \|\| ''\)\.trim\(\);/);
 });
 
-test('settings provider status waits for stats and refreshes when stats arrive', () => {
-  const app = readRendererFile('app.js');
-  const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'onToolTrackingToggle');
-  const refreshStats = functionBody(app, 'refreshStats', 'publishViewState');
-  const statsPush = app.match(/window\.tokenMonitor\.onStatsPush\?\.\(\(payload\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
-  const settingsPush = app.match(/window\.tokenMonitor\.onSettingsPush\?\.\(\(next\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
-  const syncSettings = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
-
-  assert.doesNotMatch(renderSettings, /state\.stats \? missingLimitProviderStatus\(\) : 'unavailable'/);
-  assert.match(refreshStats, /renderLimitProviderCheckboxes\(\);/);
-  assert.match(refreshStats, /applyCodexActiveAccountFromStats\(\);/);
-  assert.doesNotMatch(refreshStats, /state\.codexActiveAccount = codexActiveAccountFromStats\(\);/);
-  assert.match(statsPush, /applyCodexActiveAccountFromStats\(\);/);
-  assert.match(statsPush, /renderLimitProviderCheckboxes\(\);/);
-  // Account cards read state.stats, so every path that refreshes stats must
-  // re-render them. Grok is automatic and belongs only to the generic provider
-  // list, so it must not retain a separate account-card renderer.
-  // Settings pushes route through syncSettingsForm (which init() also calls), so
-  // the two cards are re-rendered there and
-  // onSettingsPush itself does not duplicate the calls.
-  for (const fn of ['renderDeepseekStatus', 'renderMinimaxStatus']) {
-    assert.match(refreshStats, new RegExp(`${fn}\\(\\);`), `${fn} missing from refreshStats`);
-    assert.match(statsPush, new RegExp(`${fn}\\(\\);`), `${fn} missing from onStatsPush`);
-    assert.match(syncSettings, new RegExp(`${fn}\\(\\);`), `${fn} missing from syncSettingsForm`);
-  }
-  for (const provider of ['zai', 'volcengine', 'qoder', 'kimi', 'ollama']) {
-    assert.match(refreshStats, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from refreshStats`);
-    assert.match(statsPush, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from onStatsPush`);
-    assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
-  }
-  for (const fn of ['renderDeepseekStatus', 'renderMinimaxStatus']) {
-    assert.doesNotMatch(settingsPush, new RegExp(`${fn}\\(\\);`), `${fn} should not be duplicated in onSettingsPush (syncSettingsForm covers it)`);
-  }
-  assert.doesNotMatch(app, /renderGrokStatus|grokAccountLinked|grokAccountExpanded/);
-});
-
-test('saving Ollama credentials enables its provider and always settles validation', () => {
-  const app = readRendererFile('app.js');
-  const renderExternalStatus = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
-  const selection = functionBody(app, 'limitProviderSelectionIncluding', 'missingLimitProviderStatus');
-  const setup = functionBody(app, 'setupCursorAccountUI', 'initSettingsAnimationWrappers');
-  const ollamaSetup = setup.slice(
-    setup.indexOf("document.getElementById('ollamaCookieSubmit')"),
-    setup.indexOf('const kimiToggle')
-  );
-  assert.match(selection, /selected\.add\(providerName\)/);
-  assert.match(selection, /\.filter\(\(id\) => selected\.has\(id\)\)/);
-  assert.match(ollamaSetup, /limitProviders: limitProviderSelectionIncluding\('ollama'\)/);
-  assert.match(ollamaSetup, /limitsEnabled: true/);
-  assert.match(ollamaSetup, /await window\.tokenMonitor\.ollama\.validateCookie\(input\.value\)/);
-  assert.match(ollamaSetup, /if \(!validation\?\.ok\)/);
-  assert.doesNotMatch(ollamaSetup, /await refreshStats\(\{ force: true \}\);/);
-  assert.match(ollamaSetup, /clearExternalProviderCheckPending\('ollama'\);/);
-  assert.match(renderExternalStatus, /pending \? t\('settings\.common\.checking'\)/);
-  assert.match(
-    renderExternalStatus,
-    /providerName === 'ollama' && wasPending && !pending && linked[\s\S]*?setExternalAccountExpanded\('ollama', false\)/,
-    'Ollama should collapse only after a fresh provider confirms the account is linked'
-  );
-  assert.doesNotMatch(
-    ollamaSetup,
-    /input\.value = '';[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?setExternalAccountExpanded\('ollama', false\);/,
-    'a successful save must stay pending until the collector publishes a fresh provider'
-  );
-  assert.doesNotMatch(
-    ollamaSetup,
-    /input\.value = '';[\s\S]*?setExternalAccountExpanded\('ollama', false\);/,
-    'the setup panel must remain open while validation is pending'
-  );
-  assert.match(ollamaSetup, /catch \(err\) \{[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?renderExternalProviderStatus\('ollama'\);/);
-  assert.match(ollamaSetup, /ollamaValidationError\(validation\)/);
-});
-
-test('account validation reads the local device raw limits, not the collapsed aggregate', () => {
-  const app = readRendererFile('app.js');
-  const rawHelper = functionBody(app, 'localDeviceLimitsProviders', 'localProviderStatus');
-  const helper = functionBody(app, 'localProviderStatus', 'deepseekAccountLinked');
-  // Sync-mode aggregateLimits() collapses a local `unauthorized` row out in favor
-  // of a remote `ok` (providerCollapseKey for deepseek/minimax/grok is just the
-  // provider name; pickBetterProvider keeps the higher statusRank). So the account
-  // card must read the LOCAL device's RAW limits from state.stats.devices, where
-  // the local unauthorized row still lives — not state.stats.limits.providers,
-  // where it has already been dropped. Searching the aggregate would miss the
-  // local row and fall back to the remote `ok`, falsely reporting an invalid
-  // local key as Linked.
-  assert.match(rawHelper, /accountIdentityApi\.localDeviceLimitsProviders/);
-  assert.match(rawHelper, /state\.stats/);
-  assert.match(rawHelper, /state\.settings\?\.deviceId/);
-  assert.match(helper, /localDeviceLimitsProviders\(\)/);
-  assert.match(helper, /localProviders !== null/);
-  // Falls back to the aggregate only for legacy/non-aggregated stats that do
-  // not expose raw device rows at all.
-  assert.match(helper, /state\.stats\?\.limits\?\.providers/);
-  assert.match(functionBody(app, 'deepseekProviderStatus', 'deepseekProviderForAccount'), /return localProviderStatus\('deepseek'\);/);
-  assert.match(functionBody(app, 'minimaxProviderStatus', 'minimaxAccountLinked'), /return localProviderStatus\('minimax'\);/);
-});
-
-test('account validation does not treat a sole remote synced device as local', () => {
-  const app = readRendererFile('app.js');
-  const remoteOk = { provider: 'deepseek', status: 'ok', sourceDeviceId: 'office-pc' };
-  const provider = runLocalProviderStatus(app, {
-    settings: { deviceId: 'this-mac', deepseekApiKeyConfigured: true },
-    stats: {
-      devices: [{ deviceId: 'office-pc', limits: { providers: [remoteOk] } }],
-      limits: { providers: [remoteOk] }
-    }
-  }, 'deepseek');
-
-  assert.equal(provider, null);
-});
-
-test('Grok is automatic provider UI, while env token remains documented for headless use', () => {
+test('renderer exposes Hub-managed account setup without local credential namespaces', () => {
   const html = readRendererFile('index.html');
   const app = readRendererFile('app.js');
-  const i18n = readRendererFile('i18n.js');
+  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  const envExample = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
-  const grokLimits = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'grokLimits.js'), 'utf8');
-  const rendererSettings = main.slice(
-    main.indexOf('function settingsForRenderer'),
-    main.indexOf('function pushSettingsToRenderer')
-  );
 
-  assert.doesNotMatch(html, /grokAccountGroup|grokSettingsToggle|settings\.grok\./);
-  assert.doesNotMatch(app, /grokAccountExpanded|renderGrokStatus|grokAccountLinked|grokCookieConfigured/);
-  assert.doesNotMatch(rendererSettings, /grokCookieConfigured|grokCookieSource|grokAuthJsonPath/);
-  assert.match(envExample, /GROK_BEARER_TOKEN=/);
-  assert.match(grokLimits, /GROK_BEARER_TOKEN/);
-  assert.match(app, /'Run grok login': 'settings\.limits\.status\.runGrokLogin'/);
-  assert.match(app, /'Re-login': 'settings\.limits\.status\.relogin'/);
-  assert.match(i18n, /'settings\.limits\.status\.runGrokLogin': 'Run grok login'/);
-  assert.match(i18n, /'settings\.limits\.status\.runGrokLogin': '執行 grok login'/);
-  assert.match(i18n, /'settings\.limits\.status\.runGrokLogin': '运行 grok login'/);
+  assert.match(html, /hubAccountsSettingsToggle/);
+  assert.match(html, /hubAccountCredential/);
+  assert.match(app, /window\.tokenMonitor\.hubAccounts\.add/);
+  assert.match(app, /window\.tokenMonitor\.hubAccounts\.list/);
+  assert.match(app, /window\.tokenMonitor\.hubAccounts\.remove/);
+  assert.match(preload, /hubAccounts: \{/);
+  assert.match(main, /limitsAuthority: 'hub'/);
+  assert.doesNotMatch(app, /accountIdentityApi|detect.*account|renderLimitProviderCheckboxes/);
+  assert.doesNotMatch(preload, /tokenMonitor\.(mimo|cursor|codex|openrouter|copilot)/);
 });
 
 test('Copilot env token is documented in env example, not the README overview', () => {
@@ -972,119 +794,6 @@ test('Copilot env token is documented in env example, not the README overview', 
   assert.doesNotMatch(readme, /COPILOT_API_TOKEN|GITHUB_COPILOT_TOKEN/);
   assert.doesNotMatch(readmeCn, /COPILOT_API_TOKEN|GITHUB_COPILOT_TOKEN/);
   assert.doesNotMatch(readmeTw, /COPILOT_API_TOKEN|GITHUB_COPILOT_TOKEN/);
-});
-
-test('Accounts summary counts all managed account groups including OpenRouter, MiMo, and Ollama', () => {
-  const app = readRendererFile('app.js');
-  const mimoLinkedBody = functionBody(app, 'mimoAccountLinked', 'renderMimoStatus');
-  const summaryBody = functionBody(app, 'settingsSectionSummary', 'renderSettingsSummaries');
-
-  assert.match(mimoLinkedBody, /return \(state\.settings\?\.mimoManagedAccounts \|\| \[\]\)\.length > 0;/);
-  assert.match(summaryBody, /const minimaxLinked = minimaxAccountLinked\(\);/);
-  assert.match(summaryBody, /const zaiLinked = externalProviderAccountLinked\('zai'\);/);
-  assert.match(summaryBody, /const zaiteamLinked = externalProviderAccountLinked\('zaiteam'\);/);
-  assert.match(summaryBody, /const volcengineLinked = externalProviderAccountLinked\('volcengine'\);/);
-  assert.match(summaryBody, /const qoderLinked = externalProviderAccountLinked\('qoder'\);/);
-  assert.match(summaryBody, /const kimiLinked = externalProviderAccountLinked\('kimi'\);/);
-  assert.match(summaryBody, /const ollamaLinked = externalProviderAccountLinked\('ollama'\);/);
-  assert.match(summaryBody, /const openrouterCount = state\.openrouterProfileCount \|\| 0;/);
-  assert.match(summaryBody, /const mimoLinked = mimoAccountLinked\(\);/);
-  assert.match(summaryBody, /const copilotLinked = copilotAccountLinked\(\);/);
-  assert.match(summaryBody, /\(minimaxLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /\(zaiLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /\(zaiteamLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /\(volcengineLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /\(qoderLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /\(kimiLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /\(ollamaLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /\(openrouterCount > 0 \? 1 : 0\)/);
-  assert.match(summaryBody, /\(mimoLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /\(copilotLinked \? 1 : 0\)/);
-  assert.match(summaryBody, /total: 14/);
-});
-
-test('account validation does not use a remote aggregate when the local device lacks the provider', () => {
-  const app = readRendererFile('app.js');
-  const remoteOk = { provider: 'minimax', status: 'ok', sourceDeviceId: 'office-pc' };
-  const provider = runLocalProviderStatus(app, {
-    settings: { deviceId: 'this-mac', minimaxApiKeyConfigured: true },
-    stats: {
-      devices: [
-        { deviceId: 'this-mac', limits: { providers: [] } },
-        { deviceId: 'office-pc', limits: { providers: [remoteOk] } }
-      ],
-      limits: { providers: [remoteOk] }
-    }
-  }, 'minimax');
-
-  assert.equal(provider, null);
-});
-
-test('active Codex account follows the local login, not a remote device signed into a different account', () => {
-  // Local machine is signed into account C (App) and only manages the other two.
-  // A synced device is signed into account A, so aggregateLimits() picks its live
-  // App record for the account A row — which sorts first. Reading the aggregate
-  // would move the ✓ onto account A; the marker must instead track this device's
-  // own live login (account C).
-  const app = readRendererFile('app.js');
-  const localProviders = [
-    { provider: 'codex', status: 'ok', sourceDetail: 'managed', accountKey: 'sha256:account-a', accountEmail: 'primary@example.com' },
-    { provider: 'codex', status: 'ok', sourceDetail: 'managed', accountKey: 'sha256:account-b', accountEmail: 'secondary@example.com' },
-    { provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'sha256:account-c', accountEmail: 'tertiary@example.com' }
-  ];
-  const remoteAccountALive = { provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'sha256:account-a', accountEmail: 'primary@example.com', sourceDeviceId: 'remote-device' };
-  const provider = runLocalLiveCodexProvider(app, {
-    settings: { deviceId: 'this-mac' },
-    stats: {
-      devices: [
-        { deviceId: 'this-mac', limits: { providers: localProviders } },
-        { deviceId: 'remote-device', limits: { providers: [remoteAccountALive] } }
-      ],
-      limits: { providers: [remoteAccountALive, localProviders[1], localProviders[2]] }
-    }
-  });
-
-  assert.equal(provider.accountKey, 'sha256:account-c');
-});
-
-test('no active Codex account when this device is signed out, even if a synced device is live', () => {
-  const app = readRendererFile('app.js');
-  const remoteLive = { provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'sha256:account-a', sourceDeviceId: 'remote-device' };
-  const provider = runLocalLiveCodexProvider(app, {
-    settings: { deviceId: 'this-mac' },
-    stats: {
-      devices: [
-        { deviceId: 'this-mac', limits: { providers: [{ provider: 'codex', status: 'ok', sourceDetail: 'managed', accountKey: 'sha256:account-a' }] } },
-        { deviceId: 'remote-device', limits: { providers: [remoteLive] } }
-      ],
-      limits: { providers: [remoteLive] }
-    }
-  });
-
-  assert.equal(provider, null);
-});
-
-test('active Codex account falls back to the aggregate for legacy stats without device rows', () => {
-  const app = readRendererFile('app.js');
-  const live = { provider: 'codex', status: 'ok', sourceDetail: 'app', accountKey: 'sha256:solo' };
-  const provider = runLocalLiveCodexProvider(app, {
-    settings: { deviceId: 'this-mac' },
-    stats: { limits: { providers: [live] } }
-  });
-
-  assert.equal(provider.accountKey, 'sha256:solo');
-});
-
-test('account validation keeps aggregate fallback for legacy stats without device rows', () => {
-  const app = readRendererFile('app.js');
-  const aggregateOk = { provider: 'deepseek', status: 'ok', sourceDeviceId: 'this-mac' };
-  const provider = runLocalProviderStatus(app, {
-    settings: { deviceId: 'this-mac', deepseekApiKeyConfigured: true },
-    stats: { limits: { providers: [aggregateOk] } }
-  }, 'deepseek');
-
-  assert.equal(provider.status, 'ok');
-  assert.equal(provider.sourceDeviceId, 'this-mac');
 });
 
 const presentation = require('../../src/electron/renderer/limitProviderPresentation');

@@ -22,19 +22,16 @@ function tempDataDir(t) {
   return dir;
 }
 
-test('stores credential settings in a versioned provider document', (t) => {
+test('stores only Hub and device credentials in a versioned document', (t) => {
   const dataDir = tempDataDir(t);
   const store = new CredentialStore(dataDir);
   store.replaceSettingsCredentials({
     hubHostSecret: 'host-secret',
     hubHostAdminSecret: 'admin-secret',
     secret: 'client-secret',
-    deepseekApiKey: 'deepseek-key',
-    kimiWebAccessToken: 'kimi-web-token',
-    opencodeProfiles: { work: { cookie: 'auth=secret', enabled: true } },
-    openrouterProfiles: { personal: { apiKey: 'sk-or-secret', enabled: true } },
-    zaiTeamOrganizationId: 'organization-id',
-    qoderCookie: ''
+    hubAdminSecret: 'remote-admin-secret',
+    hubAccountCredentialKey: 'account-key',
+    deepseekApiKey: 'legacy-provider-key'
   });
 
   const document = JSON.parse(fs.readFileSync(path.join(dataDir, 'credentials.json'), 'utf8'));
@@ -42,38 +39,31 @@ test('stores credential settings in a versioned provider document', (t) => {
   assert.equal(document.credentials.hub.hostSecret, 'host-secret');
   assert.equal(document.credentials.hub.adminSecret, 'admin-secret');
   assert.equal(document.credentials.hub.clientSecret, 'client-secret');
-  assert.equal(document.credentials.providers.deepseek.apiKey, 'deepseek-key');
-  assert.equal(document.credentials.providers.kimi.webAccessToken, 'kimi-web-token');
-  assert.equal(document.credentials.providers.opencode.profiles.work.cookie, 'auth=secret');
-  assert.equal(document.credentials.providers.openrouter.profiles.personal.apiKey, 'sk-or-secret');
-  assert.equal(document.credentials.providers.zaiTeam.organizationId, 'organization-id');
-  assert.equal(document.credentials.providers.qoder, undefined);
+  assert.equal(document.credentials.hub.remoteAdminSecret, 'remote-admin-secret');
+  assert.equal(document.credentials.hub.accountCredentialKey, 'account-key');
+  assert.equal(document.credentials.providers, undefined);
   assert.equal(document.migrations.settings, 1);
 
   assert.deepEqual(store.settingsCredentials(), {
     hubHostSecret: 'host-secret',
     hubHostAdminSecret: 'admin-secret',
     secret: 'client-secret',
-    opencodeProfiles: { work: { cookie: 'auth=secret', enabled: true } },
-    openrouterProfiles: { personal: { apiKey: 'sk-or-secret', enabled: true } },
-    deepseekApiKey: 'deepseek-key',
-    kimiWebAccessToken: 'kimi-web-token',
-    zaiTeamOrganizationId: 'organization-id'
+    hubAdminSecret: 'remote-admin-secret',
+    hubAccountCredentialKey: 'account-key'
   });
 });
 
 test('removes credential fields from settings without mutating runtime state', () => {
   const settings = {
     language: 'auto',
-    deepseekApiKey: 'secret',
-    opencodeProfiles: { a: { cookie: 'secret' } },
-    openrouterProfiles: { b: { apiKey: 'secret' } }
+    hubHostSecret: 'secret',
+    hubAdminSecret: 'admin-secret',
+    localProviderCredential: 'legacy-secret'
   };
   const clean = stripCredentialSettings(settings);
-  assert.deepEqual(clean, { language: 'auto' });
-  assert.equal(settings.deepseekApiKey, 'secret');
-  assert.equal(settings.opencodeProfiles.a.cookie, 'secret');
-  assert.equal(settings.openrouterProfiles.b.apiKey, 'secret');
+  assert.deepEqual(clean, { language: 'auto', localProviderCredential: 'legacy-secret' });
+  assert.equal(settings.hubHostSecret, 'secret');
+  assert.equal(settings.hubAdminSecret, 'admin-secret');
   assert.equal(hasCredentialSettings(settings), true);
   assert.equal(hasCredentialSettings(clean), false);
 });
@@ -82,45 +72,66 @@ test('renderer redaction defaults new credential fields to hidden with explicit 
   const settings = {
     hubHostSecret: 'host-secret',
     secret: 'client-secret',
-    deepseekApiKey: 'provider-secret',
-    opencodeProfiles: { work: { cookie: 'auth=secret' } },
-    openrouterProfiles: { personal: { apiKey: 'sk-or-secret' } }
+    hubAdminSecret: 'admin-secret',
+    hubAccountCredentialKey: 'account-key',
+    deepseekApiKey: 'provider-secret'
   };
   const redacted = credentialSettingsForRenderer(settings, { expose: ['hubHostSecret', 'secret'] });
   assert.equal(redacted.hubHostSecret, 'host-secret');
   assert.equal(redacted.secret, 'client-secret');
-  assert.equal(redacted.deepseekApiKey, '');
-  assert.equal(redacted.opencodeProfiles, '');
-  assert.equal(redacted.openrouterProfiles, '');
-  assert.equal(redacted.kimiApiKey, '');
-  assert.equal(redacted.kimiWebAccessToken, '');
+  assert.equal(redacted.hubAdminSecret, '');
+  assert.equal(redacted.hubAccountCredentialKey, '');
+  assert.equal(redacted.deepseekApiKey, undefined);
 });
 
 test('migrates legacy settings once and keeps an existing credential authoritative', (t) => {
   const store = new CredentialStore(tempDataDir(t));
   store.writeDocument({
     version: 1,
-    credentials: { providers: { deepseek: { apiKey: 'current-key' } } },
+    credentials: { hub: { hostSecret: 'current-key' } },
     migrations: {}
   });
 
-  const first = store.migrateLegacySettings({ deepseekApiKey: 'legacy-key', kimiApiKey: 'legacy-kimi' });
+  const first = store.migrateLegacySettings({ hubHostSecret: 'legacy-key', hubAdminSecret: 'legacy-admin' });
   assert.equal(first.migrated, true);
-  assert.equal(store.settingsCredentials().deepseekApiKey, 'current-key');
-  assert.equal(store.settingsCredentials().kimiApiKey, 'legacy-kimi');
+  assert.equal(store.settingsCredentials().hubHostSecret, 'current-key');
+  assert.equal(store.settingsCredentials().hubAdminSecret, 'legacy-admin');
 
-  const second = store.migrateLegacySettings({ kimiApiKey: 'stale-kimi' });
+  const second = store.migrateLegacySettings({ hubAdminSecret: 'stale-admin' });
   assert.equal(second.migrated, false);
-  assert.equal(store.settingsCredentials().kimiApiKey, 'legacy-kimi');
+  assert.equal(store.settingsCredentials().hubAdminSecret, 'legacy-admin');
 });
 
-test('clearing a runtime credential removes it without resurrecting legacy data', (t) => {
+test('clearing a Hub credential removes it without resurrecting legacy data', (t) => {
   const store = new CredentialStore(tempDataDir(t));
-  store.migrateLegacySettings({ kimiApiKey: 'legacy-kimi' });
-  store.replaceSettingsCredentials({ kimiApiKey: '' });
-  assert.equal(store.settingsCredentials().kimiApiKey, undefined);
-  assert.equal(store.migrateLegacySettings({ kimiApiKey: 'legacy-kimi' }).migrated, false);
-  assert.equal(store.settingsCredentials().kimiApiKey, undefined);
+  store.migrateLegacySettings({ hubAdminSecret: 'legacy-admin' });
+  store.replaceSettingsCredentials({ hubAdminSecret: '' });
+  assert.equal(store.settingsCredentials().hubAdminSecret, undefined);
+  assert.equal(store.migrateLegacySettings({ hubAdminSecret: 'legacy-admin' }).migrated, false);
+  assert.equal(store.settingsCredentials().hubAdminSecret, undefined);
+});
+
+test('clears all legacy local provider credentials and invalidates the migration once', (t) => {
+  const store = new CredentialStore(tempDataDir(t));
+  store.writeDocument({
+    version: 1,
+    credentials: {
+      hub: { hostSecret: 'keep-me' },
+      providers: {
+        deepseek: { apiKey: 'old-key' },
+        qoder: { cookie: 'old-cookie', autoCache: [{ cookie: 'old-cache' }] },
+        mimo: { accounts: [{ id: 'old-account', cookie: 'old-cookie' }] }
+      }
+    },
+    migrations: {}
+  });
+
+  const first = store.clearLegacyLocalLimitCredentials();
+  assert.equal(first.cleared, true);
+  assert.equal(store.settingsCredentials().hubHostSecret, 'keep-me');
+  assert.equal(store.readDocument().credentials.providers, undefined);
+  assert.equal(store.readDocument().migrations.localLimitCredentials, 1);
+  assert.equal(store.clearLegacyLocalLimitCredentials().cleared, false);
 });
 
 test('writes private JSON atomically with owner-only permissions', (t) => {
@@ -179,7 +190,7 @@ test('rolls back a credential clear when the settings write fails after commit',
   const dataDir = tempDataDir(t);
   const settingsPath = path.join(dataDir, 'settings.json');
   const store = new CredentialStore(dataDir);
-  const previousSettings = { language: 'en', kimiApiKey: 'old-key' };
+  const previousSettings = { language: 'en', hubAdminSecret: 'old-key' };
   store.replaceSettingsCredentials(previousSettings);
   writePrivateJsonAtomic(settingsPath, stripCredentialSettings(previousSettings));
 
@@ -197,27 +208,12 @@ test('rolls back a credential clear when the settings write fails after commit',
   assert.throws(() => persistSettingsAndCredentials({
     store,
     settingsPath,
-    settings: { language: 'zh-TW', kimiApiKey: '' },
+    settings: { language: 'zh-TW', hubAdminSecret: '' },
     previousSettings,
     writeSettings
   }), /settings write failed after rename/);
-  assert.equal(store.settingsCredentials().kimiApiKey, 'old-key');
+  assert.equal(store.settingsCredentials().hubAdminSecret, 'old-key');
   assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), { language: 'en' });
-});
-
-test('stores, migrates, and removes MiMo account cookies in the unified store', (t) => {
-  const store = new CredentialStore(tempDataDir(t));
-  const migration = store.migrateLegacyMimoCredentials([
-    { id: 'account-1', cookieHeader: 'serviceToken=legacy' }
-  ]);
-  assert.deepEqual(migration.migratedIds, ['account-1']);
-  assert.equal(store.readMimoCredential('account-1'), 'serviceToken=legacy');
-
-  assert.equal(store.writeMimoCredential('account-2', 'serviceToken=current'), true);
-  assert.equal(store.readMimoCredential('account-2'), 'serviceToken=current');
-  assert.equal(store.removeMimoCredential('account-1'), true);
-  assert.equal(store.readMimoCredential('account-1'), '');
-  assert.equal(store.writeMimoCredential('__proto__', 'serviceToken=unsafe'), false);
 });
 
 test('stores device-bound Hub credentials without exposing them as settings', (t) => {

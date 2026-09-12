@@ -496,6 +496,10 @@ function configuredAccounts(options = {}, deps = {}) {
     seen.add(identity);
   }
 
+  if (options.limitProviderAuthority === 'hub' || options.suppressAutoDetectedAccounts) {
+    return accounts;
+  }
+
   const env = deps.env || process.env;
   const baseUrl = newapiBaseUrl(env);
   const accessToken = newapiAccessToken(env);

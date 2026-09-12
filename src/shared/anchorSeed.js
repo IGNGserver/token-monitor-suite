@@ -1,6 +1,6 @@
 'use strict';
 
-const { collectorAnchorTrust, computePeriodWindows, qoderCnDbPathForClients } = require('./collector');
+const { collectorAnchorTrust, computePeriodWindows, qoderCnSourceFingerprintForClients } = require('./collector');
 const { mergePeriods } = require('./usage');
 const { filterReasonixSyntheticSessions } = require('./reasonixSessionGuard');
 
@@ -25,6 +25,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
     projectsEnabled = true,
     qoderCnDbPath: qoderCnDbPathOption,
     homeDir,
+    env = process.env,
     wslScanEnabled = true,
     wslSupported = false,
     hostname = '',
@@ -32,7 +33,13 @@ function deviceRecordFromAnchor(saved, options = {}) {
     now = new Date()
   } = options;
   const qoderCnDbPath = qoderCnDbPathOption === undefined
-    ? qoderCnDbPathForClients(clients, { homeDir })
+    ? qoderCnSourceFingerprintForClients(clients, {
+      homeDir,
+      // Callers commonly pass Electron's `darwin-arm64`/`win32-x64` value;
+      // qoderCnDataPaths resolves the host-family portion.
+      platform: String(platform || process.platform).split('-')[0],
+      env
+    })
     : qoderCnDbPathOption;
   const trust = collectorAnchorTrust(saved, { clients, allTimeSince, projectsEnabled, qoderCnDbPath, now });
   if (!trust) return null;

@@ -79,9 +79,15 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 
 #### Qoder CN（本地适配器）
 
-Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API —— 在 Settings → tools 中启用（可选，默认关闭）。数据库路径按平台自动探测：macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`、Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`、Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` —— 可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆盖。
+如果 Qoder CN 使用了迁移后的配置目录，请设置 Qoder CN 自带的 `QODERCN_CONFIG_DIR`；除非设置 `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`，Token Monitor 会监听该目录下的 `projects`。
 
-这是高级本地集成：读取需要 PATH 上的 `sqlite3` CLI，或内置无需 flag 即可用 `node:sqlite` 的 Node 运行时（Node ≥ 23.4；Electron 组件可能需要 CLI）。读取失败会写入日志；若已有完整快照，采集器会保留它而不是用零用量覆盖。成本按每个映射模型在 models.dev 目录中的价格估算；Qoder 若改变数据库 schema，适配器可能失效。
+Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API —— 在 Settings → tools 中启用（可选，默认关闭）。旧版数据库路径按平台自动探测：macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`、Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`、Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` —— 可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆盖。Qoder CN 0.1.x 还会把对话消息存入平台应用支持目录下的 `com.qoder.app.stable/main.sqlite`，必要时可用 `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH` 覆盖；也可能写入 `~/.qoder-cn/projects/**/*.jsonl`，该 transcript 目录会被监听以实时更新，也可用 `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` 覆盖。
+
+这是高级本地集成：读取需要 PATH 上的 `sqlite3` CLI，或内置无需 flag 即可用 `node:sqlite` 的 Node 运行时（Node ≥ 23.4；Electron 组件可能需要 CLI）。读取失败会写入日志；若已有完整快照，采集器会保留它而不是用零用量覆盖。Main SQLite 和 transcript 行使用 CJK 字符 / 1.5 与其他字符 / 4 的混合公式估算；请求输入是该 session 到当前请求的累计上下文，输出是该请求保存的内容。本地记录没有提供方计费字段、系统提示和工具 schema，因此这些来源的用量和成本会标记为 `estimated`，并不等于提供方的精确计费 Token。成本按每个映射模型在 models.dev 目录中的价格估算；Qoder 若改变数据库 schema，适配器可能失效。
+
+#### Qoder 账号额度
+
+`qoder` 额度账号必须手动添加到 Hub，与本地 `qodercn` 用量适配器分开。Hub 会加密保存用户提交的凭证、自动刷新账号额度，并把规范化结果分发给已连接设备。设备端已经移除对本地 Qoder 登录、浏览器 profile、环境凭据和 CLI 账号的自动探测；这些凭证不会被设备上报，也不会作为额度来源。
 </details>
 
 ## 界面展示
@@ -89,7 +95,7 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 <table>
 <tr>
 <td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="主页视图"><br><sub>可自定义仪表板：自选要显示的模块与排序</sub></td>
-<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="额度视图"><br><sub>多账号并列，Codex 可一键切换本机账号</sub></td>
+<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="额度视图"><br><sub>Hub 管理账号，额度刷新后同步到各设备</sub></td>
 <td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="工具视图"><br><sub>点任一工具展开输入／输出与缓存命中明细</sub></td>
 </tr>
 <tr>
@@ -123,7 +129,7 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 ### 额度、趋势与导出
 
 - **AI 工具额度检测**：涵盖 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、Kimi 等 19+ 家提供方的 session、每周、账单与 credits 窗口，支持多个 OpenRouter／第三方 profile，以及 DeepSeek 预付余额与消费
-- **多账号与 Codex 账号切换**：同一提供方可追踪多个账号、各自显示额度；已加入追踪的 Codex 账号还能一键切换为本机使用账号，免重新登录授权
+- **Hub 统一管理额度账号**：同一提供方可手动添加多个账号；凭证只保存在 Hub，由 Hub 统一刷新额度并同步到所有连接设备
 - **保留已删除会话用量**：许多工具会定期清除旧 session（Claude Code 默认清 30 天前的 transcript），一删就再也算不到。开启后，Token Monitor 会在本地不设期限地归档已观测到的每日工具／模型用量，让热力图与趋势即使在来源文件被清掉后仍然完整（详见下方[〈会话数据保留期〉](#会话数据保留期)）
 - **使用趋势与仪表板**：主页的活跃热力图与趋势图，加上独立的仪表板窗口，提供连续天数，以及跨所有设备、按工具／按模型堆叠的历史（柱状图与 K 线两种视图）
 - **可选的状态视图**：追踪 Claude、OpenAI、Cursor 与 DeepSeek status 页，支持手动或定时重新检查
@@ -170,6 +176,8 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 挑一个所有设备（与任何无头代理）都能连上的 hub 后端。在每台设备上打开小部件，在 设置 → 多设备同步 选一个模式。小部件会自动上报本机用量；只在没有小部件的机器上跑 `npm run agent`。
 
 Hub 凭据已分权：viewer 令牌只读，设备令牌可读取并仅上报绑定的 Device ID，admin 令牌才能执行变更。远程连接默认必须使用 HTTPS；桌面端/agent 需显式开启可信 LAN HTTP，Android 发行版始终要求 HTTPS。
+
+升级旧配置时，如果 Hub 是非本机的 `http://` 地址，不会静默降低安全性：本机采集会继续运行，但 Hub 读取／上报／实时流会保持 blocked，直到改用 HTTPS 或用户明确开启可信 LAN 选项。同步设置会分别显示这些通道，并在设置变更后于同一进程中恢复。
 
 #### 方案 A——直接在小部件内开 hub（最简单，无需命令行）
 

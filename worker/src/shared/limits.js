@@ -12,6 +12,8 @@ const VALID_STATUSES = new Set(['ok', 'disabled', 'notConfigured', 'unauthorized
 const VALID_SOURCES = new Set(['oauth', 'cli', 'web', 'rpc', 'local', 'api']);
 const VALID_LIMIT_WINDOW_SOURCES = new Set(['web', 'local']);
 const VALID_SOURCE_DETAILS = new Set(['app', 'cli', 'ide', 'managed', 'unknown']);
+const VALID_CREDENTIAL_ORIGINS = new Set(['manual', 'automatic', 'unknown']);
+const VALID_AUTHORITIES = new Set(['hub', 'device', 'none', 'unsupported']);
 const WINDOW_ORDER = ['session', 'weekly', 'billing'];
 const CODEX_TRANSIENT_WINDOW_RETENTION_MS = 10 * 60 * 1000;
 const CODEX_TRANSIENT_PROVIDER_STATUSES = new Set(['unavailable', 'error', 'rateLimited', 'sourceRateLimited']);
@@ -51,6 +53,16 @@ function normalizeSource(value) {
 function normalizeSourceDetail(value) {
   const raw = String(value || '').trim().toLowerCase();
   return VALID_SOURCE_DETAILS.has(raw) ? raw : '';
+}
+
+function normalizeCredentialOrigin(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return VALID_CREDENTIAL_ORIGINS.has(raw) ? raw : 'unknown';
+}
+
+function normalizeAuthority(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return VALID_AUTHORITIES.has(raw) ? raw : '';
 }
 
 function containsSensitiveAccountText(value) {
@@ -409,6 +421,8 @@ function normalizeLimitProvider(input) {
   return {
     provider,
     accountKey,
+    ...(normalizeAuthority(input.authority) ? { authority: normalizeAuthority(input.authority) } : {}),
+    ...(input.accountId ? { accountId: String(input.accountId).trim().slice(0, 128) } : {}),
     ...(provider === 'opencode' && input.webAccountKey
       ? { webAccountKey: String(input.webAccountKey) }
       : {}),
@@ -421,6 +435,7 @@ function normalizeLimitProvider(input) {
     status: normalizeStatus(input.status),
     source: normalizeSource(input.source),
     sourceDetail: normalizeSourceDetail(input.sourceDetail ?? input.source_detail),
+    credentialOrigin: normalizeCredentialOrigin(input.credentialOrigin ?? input.credential_origin),
     updatedAt: normalizeIsoTimestamp(input.updatedAt) || normalizeIsoTimestamp(input.checkedAt),
     windows,
     balanceUsd: numberOrNull(input.balanceUsd),
@@ -527,6 +542,7 @@ function retainedCodexProvider(previousProvider, currentProvider, windows) {
     accountEmail: currentProvider.accountEmail || previousProvider.accountEmail,
     source: currentProvider.source || previousProvider.source,
     sourceDetail: currentProvider.sourceDetail || previousProvider.sourceDetail,
+    credentialOrigin: currentProvider.credentialOrigin || previousProvider.credentialOrigin,
     status: 'ok',
     updatedAt: previousProvider.updatedAt || currentProvider.updatedAt,
     windows: cloneLimitWindows(windows),
@@ -913,6 +929,7 @@ module.exports = {
   aggregateLimits,
   mergeCodexTransientWindows,
   normalizeLimitProvider,
+  normalizeCredentialOrigin,
   normalizeLimitsSummary,
   normalizeLimitWindow,
   openCodeWindowKey,

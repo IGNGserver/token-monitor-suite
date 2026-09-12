@@ -690,6 +690,25 @@ test('environment configuration prefers account quota and falls back to token qu
   }]);
 });
 
+test('Hub-scoped third-party refresh never imports ambient environment credentials', () => {
+  const accounts = configuredAccounts({
+    limitProviderAuthority: 'hub',
+    thirdPartyProfiles: {
+      manual: {
+        adapter: NEWAPI_TOKEN_ADAPTER,
+        baseUrl: 'https://manual.example',
+        apiKey: 'manual-key'
+      }
+    }
+  }, {
+    env: {
+      TOKEN_MONITOR_THIRDPARTY_BASE_URL: 'https://ambient.example',
+      TOKEN_MONITOR_THIRDPARTY_API_KEY: 'ambient-key'
+    }
+  });
+  assert.deepEqual(accounts.map((account) => account.name), ['manual']);
+});
+
 test('scoped refresh fetches only the selected third-party profile', async () => {
   const calls = [];
   const [provider] = await fetchThirdPartyLimits({

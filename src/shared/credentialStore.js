@@ -6,32 +6,39 @@ const path = require('node:path');
 
 const CREDENTIALS_VERSION = 1;
 const SETTINGS_MIGRATION_VERSION = 1;
-const MIMO_MIGRATION_VERSION = 1;
+const LEGACY_LOCAL_LIMIT_CREDENTIALS_MIGRATION_VERSION = 1;
 
 const CREDENTIAL_SETTING_PATHS = Object.freeze({
   hubHostSecret: ['hub', 'hostSecret'],
   hubHostAdminSecret: ['hub', 'adminSecret'],
   secret: ['hub', 'clientSecret'],
-  claudeWebCookie: ['providers', 'claude', 'webCookie'],
-  opencodeCookie: ['providers', 'opencode', 'cookie'],
-  opencodeProfiles: ['providers', 'opencode', 'profiles'],
-  openrouterProfiles: ['providers', 'openrouter', 'profiles'],
-  deepseekApiKey: ['providers', 'deepseek', 'apiKey'],
-  minimaxApiKey: ['providers', 'minimax', 'apiKey'],
-  copilotApiToken: ['providers', 'copilot', 'apiToken'],
-  zaiApiKey: ['providers', 'zai', 'apiKey'],
-  zaiTeamApiKey: ['providers', 'zaiTeam', 'apiKey'],
-  zaiTeamOrganizationId: ['providers', 'zaiTeam', 'organizationId'],
-  zaiTeamProjectId: ['providers', 'zaiTeam', 'projectId'],
-  volcengineAccessKeyId: ['providers', 'volcengine', 'accessKeyId'],
-  volcengineSecretAccessKey: ['providers', 'volcengine', 'secretAccessKey'],
-  qoderCookie: ['providers', 'qoder', 'cookie'],
-  commandcodeCookie: ['providers', 'commandcode', 'cookie'],
-  kimiApiKey: ['providers', 'kimi', 'apiKey'],
-  kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
-  ollamaCookie: ['providers', 'ollama', 'cookie'],
-  thirdPartyProfiles: ['providers', 'thirdparty', 'profiles']
+  hubAdminSecret: ['hub', 'remoteAdminSecret'],
+  hubAccountCredentialKey: ['hub', 'accountCredentialKey']
 });
+
+const LEGACY_LOCAL_LIMIT_CREDENTIAL_PATHS = Object.freeze([
+  ['providers', 'claude', 'webCookie'],
+  ['providers', 'opencode', 'cookie'],
+  ['providers', 'opencode', 'profiles'],
+  ['providers', 'openrouter', 'profiles'],
+  ['providers', 'deepseek', 'apiKey'],
+  ['providers', 'minimax', 'apiKey'],
+  ['providers', 'copilot', 'apiToken'],
+  ['providers', 'zai', 'apiKey'],
+  ['providers', 'zaiTeam', 'apiKey'],
+  ['providers', 'zaiTeam', 'organizationId'],
+  ['providers', 'zaiTeam', 'projectId'],
+  ['providers', 'volcengine', 'accessKeyId'],
+  ['providers', 'volcengine', 'secretAccessKey'],
+  ['providers', 'qoder', 'cookie'],
+  ['providers', 'commandcode', 'cookie'],
+  ['providers', 'kimi', 'apiKey'],
+  ['providers', 'kimi', 'webAccessToken'],
+  ['providers', 'ollama', 'cookie'],
+  ['providers', 'thirdparty', 'profiles'],
+  ['providers', 'mimo', 'accounts'],
+  ['providers', 'qoder', 'autoCache']
+]);
 
 function emptyDocument() {
   return { version: CREDENTIALS_VERSION, credentials: {}, migrations: {} };
@@ -310,31 +317,6 @@ class CredentialStore {
     return this.writeDocument(document);
   }
 
-  readMimoCredential(id, document = this.readDocument()) {
-    const accountId = safeDynamicKey(id);
-    if (!accountId) return '';
-    const value = valueAt(document.credentials, ['providers', 'mimo', 'accounts', accountId, 'cookieHeader']);
-    return typeof value === 'string' ? value : '';
-  }
-
-  writeMimoCredential(id, cookieHeader) {
-    const accountId = safeDynamicKey(id);
-    if (!accountId || !credentialValuePresent(cookieHeader)) return false;
-    const document = this.readDocument();
-    setValueAt(document.credentials, ['providers', 'mimo', 'accounts', accountId, 'cookieHeader'], cookieHeader);
-    this.writeDocument(document);
-    return true;
-  }
-
-  removeMimoCredential(id) {
-    const accountId = safeDynamicKey(id);
-    if (!accountId) return false;
-    const document = this.readDocument();
-    deleteValueAt(document.credentials, ['providers', 'mimo', 'accounts', accountId]);
-    this.writeDocument(document);
-    return !this.readMimoCredential(accountId);
-  }
-
   readHubIngestCredentials(document = this.readDocument()) {
     const stored = valueAt(document.credentials, ['hub', 'ingestCredentials']);
     if (!isObject(stored)) return {};
@@ -391,24 +373,19 @@ class CredentialStore {
       && (previousDeviceId === nextDeviceId || !Object.hasOwn(persisted, previousDeviceId));
   }
 
-  migrateLegacyMimoCredentials(entries) {
+  clearLegacyLocalLimitCredentials() {
     const document = this.readDocument();
-    if (Number(document.migrations.mimoFiles || 0) >= MIMO_MIGRATION_VERSION) {
-      return { migratedIds: [], document };
+    if (
+      Number(document.migrations.localLimitCredentials || 0)
+      >= LEGACY_LOCAL_LIMIT_CREDENTIALS_MIGRATION_VERSION
+    ) {
+      return { cleared: false, document };
     }
-    const migratedIds = [];
-    for (const entry of entries || []) {
-      const id = safeDynamicKey(entry?.id);
-      const cookieHeader = String(entry?.cookieHeader || '').trim();
-      if (!id || !cookieHeader) continue;
-      if (!this.readMimoCredential(id, document)) {
-        setValueAt(document.credentials, ['providers', 'mimo', 'accounts', id, 'cookieHeader'], cookieHeader);
-      }
-      migratedIds.push(id);
+    for (const segments of LEGACY_LOCAL_LIMIT_CREDENTIAL_PATHS) {
+      deleteValueAt(document.credentials, segments);
     }
-    if (migratedIds.length === 0) return { migratedIds, document };
-    document.migrations.mimoFiles = MIMO_MIGRATION_VERSION;
-    return { migratedIds, document: this.writeDocument(document) };
+    document.migrations.localLimitCredentials = LEGACY_LOCAL_LIMIT_CREDENTIALS_MIGRATION_VERSION;
+    return { cleared: true, document: this.writeDocument(document) };
   }
 }
 

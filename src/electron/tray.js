@@ -8,7 +8,6 @@ const {
   pickUsageProviderId,
   pickWorstLimit
 } = require('../shared/trayText');
-const { codexAccountDisplayLabel } = require('./renderer/accountIdentity');
 const { translate: translateMessage } = require('./renderer/i18n');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
@@ -41,29 +40,6 @@ function pickUsageTrayIconId(stats, contentMode = 'tokens', availableIconIds = [
 
 function shouldUseTemplateTrayIcon(id, platform = process.platform, showProviderBadge = false) {
   return platform === 'darwin' && (isGeneratedTrayIconMode(id) || !showProviderBadge);
-}
-
-function sortCodexAccountsForDisplay(accounts) {
-  const label = (account) => String(
-    account?.email
-    || account?.accountName
-    || account?.accountLabel
-    || account?.accountKey
-    || account?.id
-    || ''
-  );
-  return [...(accounts || [])].sort((left, right) => label(left).localeCompare(label(right)));
-}
-
-function reconcileCodexAccountSelection({ detectedAccountId, detectedAt, pendingAccountId, pendingSince } = {}) {
-  const detected = String(detectedAccountId || '').trim();
-  const pending = String(pendingAccountId || '').trim();
-  if (!pending) return { activeAccountId: detected, pendingAccountId: '' };
-  const detectedTime = typeof detectedAt === 'number' ? detectedAt : Date.parse(detectedAt || '');
-  if (!detected || !Number.isFinite(detectedTime) || detectedTime < Number(pendingSince || 0)) {
-    return { activeAccountId: pending, pendingAccountId: pending };
-  }
-  return { activeAccountId: detected, pendingAccountId: '' };
 }
 
 const TRAY_CONTENT_MENU_ITEMS = [
@@ -106,31 +82,6 @@ function buildTrayMenuTemplate(options = {}) {
     const translated = typeof options.translate === 'function' ? options.translate(key, params) : '';
     return translated && translated !== key ? translated : translateMessage('en', key, params);
   };
-  const codexAccounts = Array.isArray(state.codexAccounts) ? state.codexAccounts : [];
-  const codexItem = codexAccounts.length >= 2 ? (() => {
-    const labelFor = (account, index) => {
-      return codexAccountDisplayLabel(account, codexAccounts, {
-        maskEmail: state.maskAccountEmails,
-        personalWorkspaceLabel: t('settings.codex.personalWorkspace')
-      }) || t('trayMenu.codexAccountFallback', { number: index + 1 });
-    };
-    const activeIndex = codexAccounts.findIndex((account) => account.id === state.activeCodexAccountId);
-    const label = activeIndex >= 0
-      ? t('trayMenu.codexAccountCurrent', { account: labelFor(codexAccounts[activeIndex], activeIndex) })
-      : t('trayMenu.codexAccount');
-    return {
-      label,
-      submenu: codexAccounts.map((account, index) => ({
-        label: labelFor(account, index),
-        type: 'radio',
-        checked: account.id === state.activeCodexAccountId,
-        enabled: !state.codexSwitching,
-        click: () => {
-          if (account.id !== state.activeCodexAccountId) callback('onSwitchCodexAccount')(account.id);
-        }
-      }))
-    };
-  })() : null;
   return [
     {
       label: t(state.refreshing ? 'trayMenu.refreshing' : 'trayMenu.refreshNow'),
@@ -145,7 +96,6 @@ function buildTrayMenuTemplate(options = {}) {
         click: () => callback('onOpenView')(value)
       }))
     },
-    ...(codexItem ? [codexItem] : []),
     { type: 'separator' },
     {
       label: t('trayMenu.trayDisplay'),
@@ -180,7 +130,6 @@ function createTray({
   onRefresh,
   onSetTrayContent,
   onSetWindowPresentation,
-  onSwitchCodexAccount,
   onToggle,
   translateMenu,
   platform = process.platform
@@ -197,7 +146,6 @@ function createTray({
     onRefresh,
     onSetTrayContent,
     onSetWindowPresentation,
-    onSwitchCodexAccount,
     translate: translateMenu
   }));
 
@@ -259,8 +207,6 @@ module.exports = {
   pickUsageTrayIconId,
   pickWorstLimit,
   popoverBounds,
-  reconcileCodexAccountSelection,
   refreshTrayMenu,
-  shouldUseTemplateTrayIcon,
-  sortCodexAccountsForDisplay
+  shouldUseTemplateTrayIcon
 };

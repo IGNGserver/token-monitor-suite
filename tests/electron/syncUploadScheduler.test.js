@@ -181,11 +181,14 @@ test('flush waits for an active upload and uploads the newest pending summary', 
   assert.equal(clock.timerCount(), 0);
 });
 
-test('a failed upload does not throttle the next summary', async () => {
+test('a retryable failure keeps backoff while newer data replaces the pending summary', async () => {
   const uploads = [];
   const clock = createManualClock();
   const scheduler = createSyncUploadScheduler({
     intervalMs: 600000,
+    retryBaseMs: 1000,
+    retryMaxMs: 1000,
+    random: () => 1,
     now: clock.now,
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
@@ -198,16 +201,157 @@ test('a failed upload does not throttle the next summary', async () => {
   await assert.rejects(scheduler.enqueue({ id: 'failed' }), /offline/);
   await scheduler.enqueue({ id: 'retry' });
 
+  assert.deepEqual(uploads, ['failed']);
+  assert.equal(clock.timerCount(), 1);
+  await clock.advance(999);
+  assert.deepEqual(uploads, ['failed']);
+  await clock.advance(1);
+  await Promise.resolve();
   assert.deepEqual(uploads, ['failed', 'retry']);
-  assert.equal(clock.timerCount(), 0);
+  scheduler.stop();
 });
 
-test('a failed in-flight upload immediately retries the newest pending summary', async () => {
+test('a failed upload retains the same summary and retries without a newer event', async () => {
+  const uploads = [];
+  const clock = createManualClock();
+  let attempts = 0;
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 0,
+    retryBaseMs: 1000,
+    retryMaxMs: 1000,
+    random: () => 1,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary) => {
+      uploads.push(summary.id);
+      attempts += 1;
+      if (attempts === 1) throw Object.assign(new Error('offline'), { code: 'ECONNRESET' });
+    }
+  });
+
+  await assert.rejects(scheduler.enqueue({ id: 'same-summary' }), /offline/);
+  assert.equal(clock.timerCount(), 1);
+  assert.equal(scheduler.getDiagnostics().pendingRevision, 1);
+  assert.equal(scheduler.getDiagnostics().state, 'waiting');
+
+  await clock.advance(999);
+  assert.deepEqual(uploads, ['same-summary']);
+  await clock.advance(1);
+  await Promise.resolve();
+
+  assert.deepEqual(uploads, ['same-summary', 'same-summary']);
+  assert.equal(scheduler.getDiagnostics().pendingRevision, null);
+  assert.equal(scheduler.getDiagnostics().failureCode, null);
+  scheduler.stop();
+});
+
+test('retry-after is respected and non-retryable failures remain failed until new data or manual retry', async () => {
+  const clock = createManualClock();
+  const uploads = [];
+  let attempts = 0;
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 0,
+    retryBaseMs: 1000,
+    retryMaxMs: 30_000,
+    random: () => 0,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary) => {
+      uploads.push(summary.id);
+      attempts += 1;
+      if (attempts === 1) throw Object.assign(new Error('busy'), { status: 429, retryAfterMs: 5000 });
+      if (attempts === 2) throw Object.assign(new Error('denied'), { status: 403 });
+    }
+  });
+
+  await assert.rejects(scheduler.enqueue({ id: 'retry-after' }), /busy/);
+  assert.equal(clock.timerCount(), 1);
+  await clock.advance(4999);
+  assert.deepEqual(uploads, ['retry-after']);
+  await clock.advance(1);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(uploads, ['retry-after', 'retry-after']);
+  assert.equal(scheduler.getDiagnostics().state, 'failed');
+  assert.equal(clock.timerCount(), 0);
+
+  await scheduler.retryNow();
+  assert.deepEqual(uploads, ['retry-after', 'retry-after', 'retry-after']);
+  assert.equal(scheduler.getDiagnostics().state, 'idle');
+  scheduler.stop();
+});
+
+test('a non-retryable failure does not quick-retry when newer data arrives', async () => {
+  const clock = createManualClock();
+  const uploads = [];
+  let attempts = 0;
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 0,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary) => {
+      uploads.push(summary.id);
+      attempts += 1;
+      if (attempts === 1) throw Object.assign(new Error('denied'), { status: 403 });
+    }
+  });
+
+  await assert.rejects(scheduler.enqueue({ id: 'first' }), /denied/);
+  const queued = await scheduler.enqueue({ id: 'newer' });
+
+  assert.deepEqual(uploads, ['first']);
+  assert.equal(queued.queued, true);
+  assert.equal(scheduler.getDiagnostics().state, 'failed');
+  assert.equal(scheduler.getDiagnostics().pendingRevision, 2);
+
+  const retried = await scheduler.retryNow();
+  assert.equal(retried.ok, true);
+  assert.deepEqual(uploads, ['first', 'newer']);
+  scheduler.stop();
+});
+
+test('Hub configuration failures stay blocked until an explicit retry', async () => {
+  const clock = createManualClock();
+  const uploads = [];
+  let attempts = 0;
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 0,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary) => {
+      uploads.push(summary.id);
+      attempts += 1;
+      if (attempts === 1) throw Object.assign(new Error('Hub is not configured'), { code: 'hub_not_configured' });
+    }
+  });
+
+  await assert.rejects(scheduler.enqueue({ id: 'blocked' }), /not configured/);
+  await scheduler.enqueue({ id: 'newer' });
+
+  assert.deepEqual(uploads, ['blocked']);
+  assert.equal(clock.timerCount(), 0);
+  assert.equal(scheduler.getDiagnostics().state, 'failed');
+  assert.equal(scheduler.getDiagnostics().failureCode, 'hub_not_configured');
+
+  const retried = await scheduler.retryNow();
+  assert.equal(retried.ok, true);
+  assert.deepEqual(uploads, ['blocked', 'newer']);
+  scheduler.stop();
+});
+
+test('a failed in-flight upload backs off before retrying the newest pending summary', async () => {
   const uploads = [];
   const clock = createManualClock();
   let rejectActive;
   const scheduler = createSyncUploadScheduler({
     intervalMs: 600000,
+    retryBaseMs: 1000,
+    retryMaxMs: 1000,
+    random: () => 1,
     now: clock.now,
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
@@ -229,11 +373,48 @@ test('a failed in-flight upload immediately retries the newest pending summary',
   await assert.rejects(failedUpload, /offline/);
   assert.equal(clock.timerCount(), 1);
 
-  await clock.advance(0);
+  await clock.advance(999);
+  assert.deepEqual(uploads, ['failed']);
+  await clock.advance(1);
   await Promise.resolve();
 
   assert.deepEqual(uploads, ['failed', 'newer']);
   assert.equal(clock.timerCount(), 0);
+});
+
+test('Retry-After remains a floor when a newer summary is already pending', async () => {
+  const clock = createManualClock();
+  const uploads = [];
+  let rejectActive;
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 0,
+    retryBaseMs: 1000,
+    retryMaxMs: 30_000,
+    random: () => 0,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary) => {
+      uploads.push(summary.id);
+      if (summary.id === 'failed') {
+        await new Promise((_, reject) => { rejectActive = () => reject(Object.assign(new Error('busy'), { status: 429, retryAfterMs: 5000 })); });
+      }
+    }
+  });
+
+  const failed = scheduler.enqueue({ id: 'failed' });
+  await Promise.resolve();
+  await scheduler.enqueue({ id: 'newer' });
+  rejectActive();
+  await assert.rejects(failed, /busy/);
+
+  await clock.advance(4999);
+  assert.deepEqual(uploads, ['failed']);
+  await clock.advance(1);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(uploads, ['failed', 'newer']);
+  scheduler.stop();
 });
 
 test('flush uploads the pending summary without waiting for the interval', async () => {
@@ -254,6 +435,65 @@ test('flush uploads the pending summary without waiting for the interval', async
 
   assert.deepEqual(uploads, ['initial', 'pending']);
   assert.equal(clock.timerCount(), 0);
+});
+
+test('manual retry aborts a half-open upload without losing its latest summary', async () => {
+  const uploads = [];
+  const clock = createManualClock();
+  let releaseFirst;
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 0,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary, context) => {
+      uploads.push(summary.id);
+      if (uploads.length === 1) {
+        await new Promise((resolve) => { releaseFirst = resolve; });
+        if (context.signal.aborted) throw Object.assign(new Error('aborted'), { code: 'ABORT_ERR' });
+      }
+    }
+  });
+
+  const first = scheduler.enqueue({ id: 'half-open' });
+  await Promise.resolve();
+  const retry = scheduler.retryNow({ abortActive: true });
+  releaseFirst();
+  await Promise.all([first, retry]);
+
+  assert.deepEqual(uploads, ['half-open', 'half-open']);
+  assert.equal(scheduler.getDiagnostics().pendingRevision, null);
+  assert.equal(scheduler.getDiagnostics().failureCode, null);
+  scheduler.stop();
+});
+
+test('manual retry clears an upload that resolves after abort and replays its summary', async () => {
+  const uploads = [];
+  const clock = createManualClock();
+  let releaseFirst;
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 0,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    upload: async (summary) => {
+      uploads.push(summary.id);
+      if (uploads.length === 1) await new Promise((resolve) => { releaseFirst = resolve; });
+      // Deliberately resolve after retryNow() aborts the signal. This models a
+      // fetch-compatible transport that cannot cancel its underlying request.
+    }
+  });
+
+  const first = scheduler.enqueue({ id: 'abort-then-resolve' });
+  await Promise.resolve();
+  const retry = scheduler.retryNow({ abortActive: true });
+  releaseFirst();
+  await Promise.all([first, retry]);
+
+  assert.deepEqual(uploads, ['abort-then-resolve', 'abort-then-resolve']);
+  assert.equal(scheduler.getDiagnostics().state, 'idle');
+  assert.equal(scheduler.getDiagnostics().pendingRevision, null);
+  scheduler.stop();
 });
 
 test('stop clears a pending interval upload', async () => {

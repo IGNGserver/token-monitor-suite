@@ -79,9 +79,15 @@ Token Monitor supports token usage, account-limit checks, and session details se
 
 #### Qoder CN (local adapter)
 
-Qoder CN token usage is read from the app's local SQLite database, not an API — enable it in Settings → tools (opt-in, off by default). The database is auto-detected per platform: macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`, Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`, Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — overridable with `TOKEN_MONITOR_QODER_CN_DB_PATH`.
+Set Qoder CN's own `QODERCN_CONFIG_DIR` when its profile is relocated; Token Monitor then watches `<that-dir>/projects` unless `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` is set.
 
-This is an advanced local integration: reading needs a `sqlite3` CLI on PATH or a Node runtime with unflagged `node:sqlite` (Node ≥ 23.4; the Electron widget may need the CLI). Read failures are logged, and an existing complete snapshot is retained instead of being replaced with zero usage. Costs are estimated from the models.dev catalog for each mapped model; the adapter may break if Qoder changes its database schema.
+Qoder CN token usage is read from the app's local SQLite database, not an API — enable it in Settings → tools (opt-in, off by default). The legacy database is auto-detected per platform: macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`, Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`, Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — overridable with `TOKEN_MONITOR_QODER_CN_DB_PATH`. Qoder CN 0.1.x also stores conversation messages in `com.qoder.app.stable/main.sqlite` under the platform application-support directory; override it with `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH` when needed. It may additionally write `~/.qoder-cn/projects/**/*.jsonl`; that transcript root is watched for live updates and can be changed with `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`.
+
+This is an advanced local integration: reading needs a `sqlite3` CLI on PATH or a Node runtime with unflagged `node:sqlite` (Node ≥ 23.4; the Electron widget may need the CLI). Read failures are logged, and an existing complete snapshot is retained instead of being replaced with zero usage. Main-database and transcript rows use a blended estimate of CJK characters / 1.5 and other characters / 4; request input is the cumulative session context and output is that request's stored content. Provider billing fields, system prompts, and tool schemas are not available in these local records, so those totals and costs are marked `estimated` and are not exact provider token billing. Costs are estimated from the models.dev catalog for each mapped model; the adapter may break if Qoder changes its database schema.
+
+#### Qoder account limits
+
+`qoder` quota accounts are added manually to the Hub, separate from the local `qodercn` usage adapter. The Hub encrypts the supplied credential, refreshes the account quota, and distributes the normalized result to connected devices. Device-side automatic discovery of local Qoder logins, browser profiles, environment credentials, and CLI accounts is removed; the device never uploads those credentials or treats them as quota sources.
 </details>
 
 ## Showcase
@@ -89,7 +95,7 @@ This is an advanced local integration: reading needs a `sqlite3` CLI on PATH or 
 <table>
 <tr>
 <td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="Home View"><br><sub>Customizable dashboard — choose which modules show and their order</sub></td>
-<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="Limits View"><br><sub>Multiple accounts side by side, one-click switch of the active Codex account</sub></td>
+<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="Limits View"><br><sub>Hub-managed accounts and refreshed quotas across devices</sub></td>
 <td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="Tools View"><br><sub>Click any tool to expand input / output and cache-hit detail</sub></td>
 </tr>
 <tr>
@@ -123,7 +129,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 ### Limits, trends & export
 
 - **AI Tool Limits detection** — provider-specific session, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 19+ providers, including multiple OpenRouter/third-party profiles and DeepSeek prepaid balance/spend
-- **Multiple accounts & Codex switching** — track several accounts per provider, each with its own limits; a tracked Codex account can be switched as the active local account in one click, without re-authenticating
+- **Hub-managed account quotas** — add multiple provider accounts manually, keep their credentials in the Hub, refresh quotas centrally, and distribute the results to every connected device
 - **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
 - **Usage Trends & Dashboard** — a home-screen activity heatmap and trend chart, plus a dedicated dashboard window with streaks and stacked per-tool/per-model history (bar and K-line views) across all your devices
 - **Optional Status view** — Claude, OpenAI, Cursor, and DeepSeek status pages, with manual or interval re-checks
@@ -170,6 +176,8 @@ Local mode is the default: launch the app and it starts tracking this device. No
 Pick ONE hub backend that all your devices (and any headless agents) connect to. On each device, open the widget and pick a mode under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget.
 
 Hub credentials are scoped: viewer tokens are read-only, device tokens can read and ingest only their bound Device ID, and admin tokens perform mutations. Remote connections require HTTPS by default; desktop/agent HTTP needs an explicit trusted-LAN opt-in, while Android release builds always require HTTPS.
+
+An older profile that points to a non-loopback `http://` Hub is not silently weakened during upgrade: local collection continues, while Hub read/upload/stream remain blocked until HTTPS is configured or the user explicitly enables the trusted-LAN option. The sync settings panel reports those channels separately and can recover them in the same process after the setting changes.
 
 #### Option A — Host the hub from the widget (easiest, no CLI)
 

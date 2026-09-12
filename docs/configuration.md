@@ -20,10 +20,33 @@ Click the `⚙` button in the bottom-right corner of the widget to open the sett
 | **Window** | Window behavior (float above other apps / normal / desktop-pinned), tray mode (macOS menu bar or Windows system tray, and what shows next to the icon), the floating bubble, and the global show/hide shortcut. |
 | **Appearance** | Interface theme (presets such as Default and Obsidian, a porcelain light mode, or custom colors), per-vendor tool colors, and system glass opacity / blur. |
 | **Collection** | Tracked tools (and hide / pin / drag-reorder for the main list), collection cadence, **Keep usage from deleted sessions**, custom pricing, data export, and — on Windows — the built-in WSL scan toggle. |
-| **AI Tool Limits** | Which providers to probe for session / weekly / billing / credit windows, how often to refresh, provider credentials and sign-in options, and multiple accounts per provider — including switching which tracked Codex account is the active local one. |
+| **AI Tool Limits** | View quota windows received from the Hub. Accounts and credentials are added manually to the Hub; the device does not discover local developer-tool accounts or switch a local provider login. |
 | **Multi-device Sync** | **Local only** (no hub), **Connect to a hub** (paste another machine's Hub URL + secret), or **Host hub on this device** (run a hub locally; the panel lists reachable LAN / Tailscale / ZeroTier addresses). |
 
 The `⇧` button in the title bar cycles the window behavior.
+
+### Central Hub accounts and quotas
+
+Quota accounts are a Hub-owned resource. Add an account from the widget's
+**AI Tool Limits** section while connected to a Node Hub, or call the Hub's
+`/api/accounts` admin API. The request contains a provider, display name, and
+the credential supplied by the user. The Hub encrypts the credential at rest,
+refreshes the provider on its own schedule, and publishes only normalized quota
+snapshots to connected devices. Account listing and quota responses never
+return the stored credential.
+
+The device and headless agent collect local usage only. They do not inspect
+developer-tool login files, browser profiles, environment credentials, or local
+CLI accounts, and they do not upload account credentials. Incoming device
+`limits` fields are ignored by the Hub; the `limits` object in `/api/stats` is
+the Hub's central result.
+
+The first version using this model intentionally invalidates old device-local
+provider credentials and removes the legacy local credential files/settings.
+There is no automatic secret migration: every account must be logged in again
+manually in the Hub after upgrading. Set a stable
+`TOKEN_MONITOR_HUB_CREDENTIAL_KEY` for a standalone Hub; changing that key also
+requires re-adding the affected accounts.
 
 ---
 
@@ -40,8 +63,12 @@ TOKEN_MONITOR_CLIENTS=               # optional — defaults to all supported to
 TOKEN_MONITOR_PROJECTS_ENABLED=      # optional — defaults off; 1 collects project metadata
 TOKEN_MONITOR_HISTORY_ENABLED=       # optional — defaults on; 0 skips trend history
 TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # optional — defaults on; 0 stops archiving deleted-session usage
-TOKEN_MONITOR_LIMITS_ENABLED=        # optional — defaults on; 0 skips CLI probing
-TOKEN_MONITOR_LIMIT_PROVIDERS=       # optional — defaults to all supported providers
+TOKEN_MONITOR_LIMITS_ENABLED=        # legacy compatibility; device quota probing is removed
+TOKEN_MONITOR_LIMIT_PROVIDERS=       # legacy compatibility; Hub accounts select providers
+TOKEN_MONITOR_HUB_CREDENTIAL_KEY=    # stable Hub account-encryption key for standalone Hub
+QODERCN_CONFIG_DIR=                   # Qoder CN's optional config root; transcript default is $QODERCN_CONFIG_DIR/projects
+TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR= # optional direct override for Qoder CN 0.1.x JSONL transcripts
+TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH=    # optional direct override for the Qoder 0.1.x main.sqlite store
 ```
 
 For a trusted LAN/VPN Hub that still uses `http://<lan-ip>:17321`, also set
@@ -49,7 +76,27 @@ For a trusted LAN/VPN Hub that still uses `http://<lan-ip>:17321`, also set
 rejected by default; prefer HTTPS whenever possible. The Hub's admin, viewer,
 legacy, and per-device tokens must all be generated independently.
 
-Provider credentials (Grok, DeepSeek, Minimax, Copilot, GLM / GLM Team, Volcengine, Qoder, Ollama, Kimi, …) and proxy settings live in the same file. **`.env.example` is the complete, authoritative list** — start from it rather than copying keys by hand, since it stays in sync with the code.
+Provider credentials for quota accounts are entered manually in the Hub and
+are not read from a device's local developer-tool installation. Proxy settings
+used by a Hub-side provider probe remain environment configuration. **`.env.example`
+is the complete, authoritative list** — start from it rather than copying keys
+by hand, since it stays in sync with the code.
+
+`qoder` quota accounts are manual Hub accounts. `qodercn` is a separate local
+usage integration: it reads local Qoder CN usage from its legacy SQLite database
+and, for 0.1.x installs, the `com.qoder.app.stable/main.sqlite` conversation
+store plus the transcript tree under `QODERCN_CONFIG_DIR/projects` (default
+`~/.qoder-cn/projects`). The main database is auto-detected under the platform
+application-support directory and can be overridden with
+`TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH`; `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`
+overrides the transcript tree directly. Main-database and transcript token
+counts and costs are content estimates and are marked `estimated` in the record;
+they do not include provider billing fields, system-prompt, or tool-schema
+overhead.
+
+For a target-machine Qoder CN check, run `QODERCN_VERSION=0.1.x npm run evidence:qodercn -- --require-version --require-data`. The command prints only platform/version, source presence, bounded read diagnostics, row counts, model names, and period totals; it never prints source paths, transcript content, cookies, account IDs, or session IDs. Use `--version-file <path>` when the installed app exposes its version in a local manifest. A result of `NOT RUN` means the machine has no readable source or no non-zero usage yet; a result of `FAIL` requires investigation before claiming the real-environment acceptance as complete.
+
+For a trusted LAN/VPN Hub that still uses non-loopback HTTP, keep the default blocked state until the user explicitly enables the trusted-LAN option in the widget (or sets `TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1` for the agent). Upgrading an old HTTP profile does not silently enable cleartext transport; the widget continues local collection while Hub read/write/stream status reports the blocked transport.
 
 The widget reads these as first-run defaults; the agent and hub take a CLI flag over an env var over the built-in default.
 

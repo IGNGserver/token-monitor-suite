@@ -14,7 +14,8 @@ const {
   KNOWN_CLIENTS,
   NEW_DEFAULT_CLIENTS,
   clientsCsvForSetting,
-  applyNewDefaultClientMigration
+  applyNewDefaultClientMigration,
+  shouldMigrateNewDefaultClients
 } = trackingApi;
 
 test('clientsCsvForSetting uses defaults only for missing settings', () => {
@@ -76,6 +77,19 @@ test('clientsCsvForSetting preserves explicit empty tracked-tool selection', () 
 
 test('clientsCsvForSetting normalizes saved client csv values', () => {
   assert.equal(clientsCsvForSetting(' Claude , Codex,,hermes '), 'claude,codex,hermes');
+});
+
+test('explicit environment client selection is not broadened by default migration', () => {
+  assert.equal(typeof shouldMigrateNewDefaultClients, 'function');
+  assert.equal(shouldMigrateNewDefaultClients({
+    hasExplicitEnvClients: true,
+    hasPersistedClientSelection: false
+  }), false);
+  assert.equal(shouldMigrateNewDefaultClients({
+    hasExplicitEnvClients: true,
+    hasPersistedClientSelection: true
+  }), false);
+  assert.equal(shouldMigrateNewDefaultClients(), true);
 });
 
 test('applyNewDefaultClientMigration appends newly introduced local clients once', () => {

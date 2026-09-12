@@ -87,6 +87,37 @@ function pricingRow(row) {
   };
 }
 
+function hubAccountRow(row) {
+  if (!row) return null;
+  return {
+    id: String(row.account_id || ''),
+    provider: String(row.provider || ''),
+    name: String(row.name || ''),
+    label: String(row.label || ''),
+    accountKey: String(row.account_key || ''),
+    accountEmail: String(row.account_email || ''),
+    accountLabel: String(row.account_label || ''),
+    enabled: Boolean(row.enabled),
+    status: String(row.status || 'pending'),
+    lastErrorCode: String(row.last_error_code || ''),
+    lastErrorMessage: String(row.last_error_message || ''),
+    lastAttemptAt: row.last_attempt_at ? iso(row.last_attempt_at) : null,
+    lastSuccessAt: row.last_success_at ? iso(row.last_success_at) : null,
+    nextRefreshAt: row.next_refresh_at ? iso(row.next_refresh_at) : null,
+    createdAt: row.created_at ? iso(row.created_at) : null,
+    updatedAt: row.updated_at ? iso(row.updated_at) : null
+  };
+}
+
+function hubAccountSnapshotRow(row) {
+  if (!row) return null;
+  return {
+    provider: parseJson(row.provider_snapshot, null),
+    lastGood: parseJson(row.last_good_snapshot, null),
+    updatedAt: row.updated_at ? iso(row.updated_at) : null
+  };
+}
+
 function allPeriodModels(record) {
   const models = new Set();
   for (const period of Object.values(record?.periods || {})) {
@@ -134,6 +165,9 @@ function createRepository(pool) {
   }
 
   async function saveDevice(record, executor = pool) {
+    const storedRecord = { ...record };
+    delete storedRecord.limits;
+    delete storedRecord.limitsOnly;
     await executor.execute(`INSERT INTO devices (
       device_id, hostname, platform, updated_at, received_at, agent_version, agent_runtime,
       tracked_clients, client_status, wsl_status, projects_enabled,
@@ -152,10 +186,10 @@ function createRepository(pool) {
       record.agentVersion || '', record.agentRuntime || '', json(record.trackedClients), json(record.clientStatus),
       json(record.wslStatus), record.projectsEnabled ?? null, record.allTimeProjectsOmitted ?? null,
       record.allTimeProjectsIncomplete ?? null, record.syncUploadIntervalMs ?? null, json(record.periodWindows),
-      json(record.limits), json(record.history)
+      null, json(record.history)
     ]);
     await executor.execute(`INSERT INTO device_ingest_state (device_id, snapshot_json)
-      VALUES (?, ?) ON DUPLICATE KEY UPDATE snapshot_json = VALUES(snapshot_json)`, [record.deviceId, JSON.stringify(record)]);
+      VALUES (?, ?) ON DUPLICATE KEY UPDATE snapshot_json = VALUES(snapshot_json)`, [record.deviceId, JSON.stringify(storedRecord)]);
   }
 
   async function countDevices(executor = pool) {
@@ -177,6 +211,171 @@ function createRepository(pool) {
   async function listPricing(executor = pool) {
     const [rows] = await executor.query('SELECT * FROM model_pricing ORDER BY model');
     return rows.map(pricingRow);
+  }
+
+  async function listHubAccounts(executor = pool) {
+    const [rows] = await executor.query(`SELECT * FROM hub_accounts
+      ORDER BY provider, name, account_id`);
+    return rows.map(hubAccountRow);
+  }
+
+  async function getHubAccount(accountId, executor = pool) {
+    const [rows] = await executor.execute(
+      'SELECT * FROM hub_accounts WHERE account_id = ?',
+      [String(accountId || '')]
+    );
+    return hubAccountRow(rows[0]);
+  }
+
+  async function findHubAccount(provider, accountKey = '', accountEmail = '', executor = pool) {
+    const normalizedProvider = String(provider || '').trim();
+    const normalizedKey = String(accountKey || '').trim();
+    const normalizedEmail = String(accountEmail || '').trim().toLowerCase();
+    if (!normalizedProvider || (!normalizedKey && !normalizedEmail)) return null;
+    const [rows] = await executor.execute(`SELECT * FROM hub_accounts
+      WHERE provider = ? AND (
+        (? <> '' AND account_key = ?)
+        OR (? <> '' AND account_email = ?)
+      )
+      ORDER BY account_id
+      LIMIT 1`, [normalizedProvider, normalizedKey, normalizedKey, normalizedEmail, normalizedEmail]);
+    return hubAccountRow(rows[0]);
+  }
+
+  async function createHubAccount(account, envelope, snapshot, executor = pool) {
+    const now = date(account.updatedAt || Date.now());
+    await executor.execute(`INSERT INTO hub_accounts (
+      account_id, provider, name, label, account_key, account_email, account_label,
+      enabled, status, last_error_code, last_error_message, last_attempt_at,
+      last_success_at, next_refresh_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+      account.id,
+      account.provider,
+      account.name || '',
+      account.label || '',
+      account.accountKey || '',
+      account.accountEmail || '',
+      account.accountLabel || '',
+      account.enabled === false ? 0 : 1,
+      account.status || 'pending',
+      account.lastErrorCode || '',
+      account.lastErrorMessage || '',
+      account.lastAttemptAt ? date(account.lastAttemptAt) : null,
+      account.lastSuccessAt ? date(account.lastSuccessAt) : null,
+      account.nextRefreshAt ? date(account.nextRefreshAt) : null,
+      account.createdAt ? date(account.createdAt) : now,
+      now
+    ]);
+    await executor.execute(`INSERT INTO hub_account_credentials (
+      account_id, credential_envelope, updated_at
+    ) VALUES (?, ?, ?)`, [account.id, json(envelope), now]);
+    await executor.execute(`INSERT INTO hub_account_limits (
+      account_id, provider_snapshot, last_good_snapshot, updated_at
+    ) VALUES (?, ?, ?, ?)`, [
+      account.id,
+      json(snapshot?.provider),
+      json(snapshot?.lastGood),
+      snapshot?.updatedAt ? date(snapshot.updatedAt) : now
+    ]);
+    return getHubAccount(account.id, executor);
+  }
+
+  async function updateHubAccount(accountId, patch, executor = pool) {
+    const allowed = {
+      name: 'name',
+      label: 'label',
+      accountKey: 'account_key',
+      accountEmail: 'account_email',
+      accountLabel: 'account_label',
+      enabled: 'enabled',
+      status: 'status',
+      lastErrorCode: 'last_error_code',
+      lastErrorMessage: 'last_error_message',
+      lastAttemptAt: 'last_attempt_at',
+      lastSuccessAt: 'last_success_at',
+      nextRefreshAt: 'next_refresh_at',
+      updatedAt: 'updated_at'
+    };
+    const entries = Object.entries(patch || {}).filter(([key, value]) => (
+      allowed[key] && value !== undefined
+    ));
+    if (!entries.length) return getHubAccount(accountId, executor);
+    const assignments = entries.map(([key]) => `${allowed[key]} = ?`);
+    const values = entries.map(([key, value]) => {
+      if (['lastAttemptAt', 'lastSuccessAt', 'nextRefreshAt', 'updatedAt'].includes(key)) {
+        return value === null ? null : date(value);
+      }
+      if (key === 'enabled') return value === false ? 0 : 1;
+      return value;
+    });
+    await executor.execute(
+      `UPDATE hub_accounts SET ${assignments.join(', ')} WHERE account_id = ?`,
+      [...values, String(accountId || '')]
+    );
+    return getHubAccount(accountId, executor);
+  }
+
+  async function deleteHubAccount(accountId, executor = pool) {
+    const [result] = await executor.execute(
+      'DELETE FROM hub_accounts WHERE account_id = ?',
+      [String(accountId || '')]
+    );
+    return Number(result.affectedRows || 0) > 0;
+  }
+
+  async function getHubAccountCredential(accountId, executor = pool) {
+    const [rows] = await executor.execute(
+      'SELECT credential_envelope FROM hub_account_credentials WHERE account_id = ?',
+      [String(accountId || '')]
+    );
+    return rows.length ? parseJson(rows[0].credential_envelope, null) : null;
+  }
+
+  async function replaceHubAccountCredential(accountId, envelope, executor = pool) {
+    await executor.execute(`INSERT INTO hub_account_credentials (
+      account_id, credential_envelope, updated_at
+    ) VALUES (?, ?, ?)
+    ON DUPLICATE KEY UPDATE credential_envelope = VALUES(credential_envelope), updated_at = VALUES(updated_at)`, [
+      String(accountId || ''),
+      json(envelope),
+      new Date()
+    ]);
+    return getHubAccountCredential(accountId, executor);
+  }
+
+  async function getHubAccountSnapshot(accountId, executor = pool) {
+    const [rows] = await executor.execute(
+      'SELECT provider_snapshot, last_good_snapshot, updated_at FROM hub_account_limits WHERE account_id = ?',
+      [String(accountId || '')]
+    );
+    return hubAccountSnapshotRow(rows[0]);
+  }
+
+  async function saveHubAccountSnapshot(accountId, snapshot, executor = pool) {
+    await executor.execute(`INSERT INTO hub_account_limits (
+      account_id, provider_snapshot, last_good_snapshot, updated_at
+    ) VALUES (?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      provider_snapshot = VALUES(provider_snapshot),
+      last_good_snapshot = VALUES(last_good_snapshot),
+      updated_at = VALUES(updated_at)`, [
+      String(accountId || ''),
+      json(snapshot?.provider),
+      json(snapshot?.lastGood),
+      snapshot?.updatedAt ? date(snapshot.updatedAt) : new Date()
+    ]);
+    return getHubAccountSnapshot(accountId, executor);
+  }
+
+  async function appendHubAccountAudit(accountId, action, actor = '', details = null, executor = pool) {
+    await executor.execute(`INSERT INTO hub_account_audit (
+      account_id, action, actor, details
+    ) VALUES (?, ?, ?, ?)`, [
+      accountId ? String(accountId) : null,
+      String(action || '').slice(0, 64),
+      String(actor || '').slice(0, 255),
+      json(details)
+    ]);
   }
 
   async function getSubscriptions(executor = pool) {
@@ -382,17 +581,28 @@ function createRepository(pool) {
     countDevices,
     deleteDevice,
     getDeviceRecord,
+    getHubAccount,
+    getHubAccountCredential,
+    getHubAccountSnapshot,
     getPricing,
     getSubscriptions,
     insertUsageEvents,
+    appendHubAccountAudit,
+    createHubAccount,
+    deleteHubAccount,
+    findHubAccount,
+    listHubAccounts,
     listDeviceRecords,
     listKnownModels,
     listPricing,
     renameDevice,
+    replaceHubAccountCredential,
     replaceSessions,
+    saveHubAccountSnapshot,
     saveDevice,
     setSubscriptions,
     transaction,
+    updateHubAccount,
     upsertPricing
   };
 }

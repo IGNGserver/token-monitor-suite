@@ -39,9 +39,12 @@ const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require(
 const {
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
+  collectQoderCnMainRows,
   collectQoderCnRows,
   collectQoderCnTranscriptRows,
+  mergeQoderCnRows,
   qoderCnDataPaths,
+  qoderCnSourceFingerprint,
   resolveQoderCnPricing
 } = require('./qoderCnUsage');
 const { REASONIX_SOURCE_CHECK_ID, resolveReasonixStatsDir } = require('./reasonixPaths');
@@ -1009,6 +1012,18 @@ function shouldIncludeHistory(nowMs, lastHistoryAtMs, historyIntervalMs, force, 
   if (force) return true;
   return nowMs - (lastHistoryAtMs || 0) >= historyIntervalMs;
 }
+
+function cloneQoderCnDiagnostics(value) {
+  if (!value || typeof value !== 'object') return null;
+  try {
+    const cloned = JSON.parse(JSON.stringify(value));
+    if (Array.isArray(cloned.usedSources)) cloned.usedSources = [...new Set(cloned.usedSources)];
+    return cloned;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function collectUsageOnce(options) {
   const { clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion = appVersion(), agentRuntime = '' } = options;
   // One snapshot, one instant: capture the clock before any tokscale scan and
@@ -1059,6 +1074,7 @@ async function collectUsageOnce(options) {
   if (qoderCnReadState) {
     qoderCnReadState.periodFailed = false;
     qoderCnReadState.fallbackUsed = false;
+    qoderCnReadState.diagnostics = null;
   }
   let today = emptyPeriod();
   let month = emptyPeriod();
@@ -1082,8 +1098,10 @@ async function collectUsageOnce(options) {
   let deepSeekHarnessPricing = null;
   let qoderCnPeriods = null;
   let qoderCnRows = null;
+  let qoderCnMainRows = null;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
+  let qoderCnDiagnostics = null;
   let antigravitySyncFailed = false;
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
@@ -1192,7 +1210,22 @@ async function collectUsageOnce(options) {
       }
     }
     if (includesQoderCn && (!targetRequested || targetClients.includes('qodercn'))) {
-      const qoderCnSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
+      // A history tick needs the full Qoder source set for its graph. Read that
+      // set once here and reuse it for both periods and history; an anchored
+      // watch tick without history still reads only today's source window.
+      const qoderCnSinceMs = anchorUsed && !options.includeHistory
+        ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime()
+        : undefined;
+      const transcriptDiagnostics = {};
+      qoderCnDiagnostics = {
+        source: 'none',
+        legacyDb: { configured: true, rows: 0, failed: false },
+        mainDb: { configured: true, rows: 0, failed: false },
+        transcript: transcriptDiagnostics,
+        estimated: false,
+        fallback: false,
+        failureCode: null
+      };
       // Legacy SQLite parsing and transcript scanning can each fail without
       // the other — e.g. a corrupted local.db must not suppress rows from
       // the transcript scan (and vice versa), so each is read in its own
@@ -1207,19 +1240,73 @@ async function collectUsageOnce(options) {
           logger: options.logger,
           sinceMs: qoderCnSinceMs
         });
+        qoderCnDiagnostics.legacyDb.rows = qoderCnRows.length;
       } catch (dbErr) {
         qoderCnLegacyReadFailed = true;
+        qoderCnDiagnostics.legacyDb.failed = true;
+        qoderCnDiagnostics.legacyDb.failureCode = dbErr.code || 'QODER_CN_DB_READ_FAILED';
+        qoderCnDiagnostics.failureCode = qoderCnDiagnostics.legacyDb.failureCode;
         if (typeof options.logger === 'function') options.logger(`qodercn legacy parse failed: ${dbErr.message}`);
       }
+      let qoderCnMainReadFailed = false;
       try {
-        const qoderCnTranscriptRows = collectQoderCnTranscriptRows({ homeDir: options.homeDir || os.homedir(), sinceMs: qoderCnSinceMs });
-        if (qoderCnTranscriptRows.length) qoderCnRows = (qoderCnRows || []).concat(qoderCnTranscriptRows);
+        qoderCnMainRows = await collectQoderCnMainRows({
+          homeDir: options.homeDir || os.homedir(),
+          platform: platformValue,
+          env: options.env || process.env,
+          logger: options.logger,
+          sinceMs: qoderCnSinceMs
+        });
+        qoderCnDiagnostics.mainDb.rows = qoderCnMainRows.length;
+      } catch (mainDbErr) {
+        qoderCnMainReadFailed = true;
+        qoderCnDiagnostics.mainDb.failed = true;
+        qoderCnDiagnostics.mainDb.failureCode = mainDbErr.code || 'QODER_CN_MAIN_DB_READ_FAILED';
+        qoderCnDiagnostics.failureCode = qoderCnDiagnostics.failureCode || qoderCnDiagnostics.mainDb.failureCode;
+        if (typeof options.logger === 'function') options.logger(`qodercn main sqlite parse failed: ${mainDbErr.message}`);
+      }
+      let qoderCnTranscriptRows = [];
+      try {
+        qoderCnTranscriptRows = collectQoderCnTranscriptRows({
+          homeDir: options.homeDir || os.homedir(),
+          platform: platformValue,
+          env: options.env || process.env,
+          sinceMs: qoderCnSinceMs,
+          diagnostics: transcriptDiagnostics,
+          maxFiles: options.qoderCnTranscriptMaxFiles,
+          maxTotalBytes: options.qoderCnTranscriptMaxBytes,
+          maxDepth: options.qoderCnTranscriptMaxDepth,
+          maxDurationMs: options.qoderCnTranscriptMaxDurationMs
+        });
       } catch (transcriptErr) {
+        qoderCnDiagnostics.failureCode = qoderCnDiagnostics.failureCode || transcriptErr.code || 'QODER_CN_TRANSCRIPT_READ_FAILED';
         if (typeof options.logger === 'function') options.logger(`qodercn transcript rows skipped: ${transcriptErr.message}`);
       }
+      const qoderCnDatabaseRows = [
+        ...(qoderCnRows || []),
+        ...(qoderCnMainRows || [])
+      ];
+      qoderCnRows = mergeQoderCnRows(qoderCnDatabaseRows, qoderCnTranscriptRows, qoderCnDiagnostics, {
+        databaseSources: {
+          legacy: (qoderCnRows || []).length > 0,
+          main: (qoderCnMainRows || []).length > 0
+        }
+      });
+      // A transcript scan can find rows that are all superseded by SQLite.
+      // Only mark the device estimate/fallback when transcript rows actually
+      // contributed to the merged periods; otherwise the UI would label an
+      // entirely authoritative SQLite result as estimated.
+      const transcriptWasUsed = qoderCnDiagnostics.usedSources.includes('transcript');
+      qoderCnDiagnostics.estimated = transcriptWasUsed || (qoderCnMainRows || []).length > 0;
+      qoderCnDiagnostics.fallback = qoderCnLegacyReadFailed
+        && qoderCnMainReadFailed
+        && transcriptWasUsed;
+      qoderCnDiagnostics.transcriptRows = qoderCnTranscriptRows.length;
+      if (qoderCnReadState) qoderCnReadState.diagnostics = qoderCnDiagnostics;
       try {
-        if (qoderCnLegacyReadFailed && !(qoderCnRows && qoderCnRows.length)) {
-          throw new Error('qodercn read failed: legacy db unreadable and no transcript rows');
+        const qoderCnDbReadFailed = qoderCnLegacyReadFailed || qoderCnMainReadFailed;
+        if (qoderCnDbReadFailed && !(qoderCnRows && qoderCnRows.length)) {
+          throw new Error('qodercn read failed: sqlite source unreadable and no transcript rows');
         }
         qoderCnPricing = await resolveQoderCnPricing(qoderCnRows, {
           lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
@@ -1232,8 +1319,12 @@ async function collectUsageOnce(options) {
           month: extractUsageFromTokscale(qoderCnJson.month),
           allTime: extractUsageFromTokscale(qoderCnJson.allTime)
         };
+        if (!qoderCnLegacyReadFailed && !qoderCnMainReadFailed && !qoderCnDiagnostics.transcript?.failureCode) {
+          qoderCnDiagnostics.failureCode = null;
+        }
       } catch (err) {
         if (typeof options.logger === 'function') options.logger(`qodercn parse failed: ${err.message}`);
+        qoderCnDiagnostics.failureCode = qoderCnDiagnostics.failureCode || err.code || 'QODER_CN_PARSE_FAILED';
         qoderCnPeriodReadFailed = true;
         if (qoderCnReadState) {
           qoderCnReadState.periodFailed = true;
@@ -1460,7 +1551,12 @@ async function collectUsageOnce(options) {
   // record below. Probing twice cost a second pass over every client's roots —
   // including the per-workspace walk Copilot needs — and let one snapshot report
   // a directory as both present and absent when it appeared between the two.
-  const sourceChecks = clientSourceChecks(normalizedClients, { wslDetected: wslStatus?.detected });
+  const sourceChecks = clientSourceChecks(normalizedClients, {
+    homeDir: options.homeDir,
+    platform: platformValue,
+    env: options.env || process.env,
+    wslDetected: wslStatus?.detected
+  });
 
   const summary = {
     deviceId,
@@ -1481,6 +1577,7 @@ async function collectUsageOnce(options) {
     month,
     allTime
   };
+  if (qoderCnDiagnostics) summary.qoderCnDiagnostics = cloneQoderCnDiagnostics(qoderCnDiagnostics);
   if (options.reasonixNativeSessionsEnabled === true && trackedClientSet.has('reasonix')) {
     try {
       const nativeCache = options.reasonixNativeSessionCache || createReasonixNativeSessionCache({
@@ -1514,34 +1611,53 @@ async function collectUsageOnce(options) {
   if (options.historyEnabled === false) {
     summary.history = null;
   } else if (options.includeHistory) {
-    // The history graph needs the full Qoder CN row set: anchored (watch/interval)
-    // ticks collect Qoder CN rows only since local midnight for the period delta,
-    // so reusing qoderCnRows here would truncate the history panel to today and
-    // archive that truncated graph. Read full rows for the graph only — this
-    // block is gated by includeHistory (historyIntervalMs), mirroring the proma
-    // full-read pattern; resolveQoderCnPricing is cached (6h TTL) so the second
-    // pass is cheap when the scan already priced the same models.
+    // The history graph needs the full Qoder CN row set. When includeHistory is
+    // true, the period read above already disables the anchored since-midnight
+    // filter, so reuse that result instead of scanning the transcript tree twice.
     let qoderCnGraph = null;
     let qoderCnHistoryReadFailed = false;
     if (includesQoderCn) {
-      let qoderCnTranscriptAllRows = [];
       try {
-        qoderCnTranscriptAllRows = collectQoderCnTranscriptRows({ homeDir: options.homeDir });
-      } catch (err) {
-        qoderCnHistoryReadFailed = true;
-        if (typeof options.logger === 'function') options.logger(`qodercn transcript rows skipped: ${err.message}`);
-      }
-      try {
-        // Reuse the scan's full rows on non-anchored ticks; anchored ticks read
-        // only since local midnight, so the graph needs its own full read there.
-        // resolveQoderCnPricing is cached (6h TTL), so the second pass is cheap.
-        let rows = (!anchorUsed && qoderCnRows) ? qoderCnRows : await collectQoderCnRows({ homeDir: options.homeDir, logger: options.logger });
-        // Non-anchored ticks already carry transcript rows via qoderCnRows;
-        // anchored ticks need the full transcript set appended, and transcript
-        // rows are not delta-based — appending them twice would double-count.
-        if (anchorUsed && qoderCnTranscriptAllRows.length) {
-          rows = rows.concat(qoderCnTranscriptAllRows);
+        // qoderCnRows is full whenever includeHistory caused this source to be
+        // selected above. Reusing it is important: scanning the transcript tree
+        // a second time in the history branch used to block the Electron main
+        // process and, on non-anchored ticks, discarded the second result.
+        let rows = qoderCnRows;
+        if (!rows) {
+          const qoderCnOptions = {
+            homeDir: options.homeDir,
+            platform: platformValue,
+            env: options.env || process.env,
+            logger: options.logger
+          };
+          let databaseRows = [];
+          let databaseError = null;
+          try {
+            databaseRows = await collectQoderCnRows(qoderCnOptions);
+          } catch (error) {
+            databaseError = error;
+          }
+          let mainDatabaseRows = [];
+          try {
+            mainDatabaseRows = await collectQoderCnMainRows(qoderCnOptions);
+          } catch (error) {
+            databaseError = databaseError || error;
+          }
+          let transcriptRows = [];
+          try {
+            transcriptRows = collectQoderCnTranscriptRows({ ...qoderCnOptions, diagnostics: {} });
+          } catch (error) {
+            if (!databaseError) databaseError = error;
+          }
+          if (databaseError && databaseRows.length === 0 && mainDatabaseRows.length === 0 && transcriptRows.length === 0) throw databaseError;
+          rows = mergeQoderCnRows([...databaseRows, ...mainDatabaseRows], transcriptRows, null, {
+            databaseSources: {
+              legacy: databaseRows.length > 0,
+              main: mainDatabaseRows.length > 0
+            }
+          });
         }
+        if (!rows) rows = [];
         const pricing = (!anchorUsed && qoderCnPricing) ? qoderCnPricing : await resolveQoderCnPricing(rows, {
           lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
           commandTimeoutMs: options.pricingTimeoutMs,
@@ -1604,6 +1720,23 @@ function dirExists(dir) {
 
 function fileExists(file) {
   try { return fs.statSync(file).isFile(); } catch (_) { return false; }
+}
+
+// A source can be created after Token Monitor starts (Qoder CN creates its
+// transcript tree on the first session). Watch the nearest existing ancestor
+// in that case so the creation event can open the path below it; returning the
+// filesystem root would turn a missing, malformed configuration into a broad
+// recursive watch, so the root itself is never used as a fallback.
+function nearestExistingDirectory(dir) {
+  const raw = String(dir || '').trim();
+  if (!raw) return null;
+  let candidate = path.resolve(raw);
+  for (;;) {
+    if (dirExists(candidate)) return candidate;
+    const parent = path.dirname(candidate);
+    if (parent === candidate || parent === path.parse(candidate).root) return null;
+    candidate = parent;
+  }
 }
 
 function nonBlankEnvPath(name, fallback) {
@@ -1692,8 +1825,10 @@ function hasCopilotChatSessions(workspaceRoot) {
 // The watched roots are tagged with a stable id for local detection and tests.
 // One id may cover several equivalent paths: Copilot's workspaceStorage has a
 // variant per platform and Kiro's IDE globalStorage has four.
-function clientSourceRoots(clientsCsv) {
-  const home = os.homedir();
+function clientSourceRoots(clientsCsv, options = {}) {
+  const home = options.homeDir || os.homedir();
+  const platform = options.platform || process.platform;
+  const env = options.env || process.env;
   const enabled = new Set(String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean));
   const byClient = {};
   const add = (client, ...roots) => {
@@ -1861,9 +1996,16 @@ function clientSourceRoots(clientsCsv) {
   // sessions directory under DSH_HOME when the upstream override is set.
   add('deepseek-harness', ['deepseek-harness-sessions', deepseekHarnessSessionsDir({ homeDir: home, env: process.env })]);
   add('claude-desktop', ...desktopSessionWatchDirs({ homeDir: home, includeMissing: true }).map((dir) => ['claude-desktop-sessions', dir]));
-  // Qoder CN — SQLite DB under the platform Application Support dir.
-  const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform: process.platform, env: process.env });
-  add('qodercn', ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]));
+  // Qoder CN — legacy SQLite, the 0.1.x main.sqlite conversation store, and
+  // the transcript tree. Each exact-file source carries its own sourcePath so
+  // an unrelated cache file cannot target the qodercn refresh lane.
+  const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform, env });
+  add(
+    'qodercn',
+    ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]),
+    ...(qoderCnPaths.mainDbPaths || []).map((dbPath) => ['qodercn-main-db', path.dirname(dbPath), dbPath]),
+    ...(qoderCnPaths.transcriptRoots || []).map((root) => ['qodercn-transcripts', root])
+  );
   add('reasonix', [
     REASONIX_SOURCE_CHECK_ID,
     resolveReasonixStatsDir({ env: process.env, homeDir: home, platform: process.platform, cwdDir: process.cwd() })
@@ -1912,6 +2054,37 @@ function clientSourceRoots(clientsCsv) {
   return byClient;
 }
 
+// Qoder CN is the one local source whose transcript root may not exist yet but
+// must still become live without waiting for the periodic full scan. Keep the
+// real source root for attribution and pair it with the nearest existing watch
+// ancestor. The ignore policy below allows only the path toward that source,
+// so watching a home-level ancestor does not turn into a broad recursive scan.
+function qoderCnWatchPairs(clientsCsv, options = {}) {
+  const roots = clientSourceRoots(clientsCsv, options).qodercn || [];
+  const pairs = [];
+  for (const root of roots) {
+    // The DB descriptor watches its parent directory but identifies the exact
+    // file as `sourcePath`. Treating `dir` as the source makes every unrelated
+    // file in Qoder CN's cache directory a Qoder event, while using only the
+    // file path would lose the ability to notice a DB created after startup.
+    const sourcePath = root.sourcePath ? path.resolve(root.sourcePath) : null;
+    const source = sourcePath || path.resolve(root.dir);
+    const watchCandidate = path.resolve(root.dir);
+    const watch = dirExists(watchCandidate)
+      ? watchCandidate
+      : nearestExistingDirectory(path.dirname(source));
+    if (!watch) continue;
+    pairs.push({ source, sourcePath, watch });
+  }
+  const seen = new Set();
+  return pairs.filter((pair) => {
+    const key = `${pair.source}\0${pair.watch}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 // Sources that remain part of collection, health, and diagnostics but are too
 // broad for a persistent recursive watcher. Kiro globalStorage accepts every
 // `.chat`, `.json`, and extensionless file at any depth in tokscale, so a real
@@ -1923,9 +2096,9 @@ const INTERVAL_ONLY_SOURCE_CHECK_IDS = new Set(['kiro-ide-globalstorage']);
 
 // The watcher only ever wants paths, so it keeps its original shape rather than
 // learning about check ids it would immediately discard.
-function clientWatchCandidates(clientsCsv) {
+function clientWatchCandidates(clientsCsv, options = {}) {
   const byClient = {};
-  for (const [client, roots] of Object.entries(clientSourceRoots(clientsCsv))) {
+  for (const [client, roots] of Object.entries(clientSourceRoots(clientsCsv, options))) {
     // The Copilot data root already keeps its `otel/` child through the
     // matcher below. Keep that child as a diagnostic/source check, but do not
     // hand both nested paths to chokidar or it may install two native watches
@@ -1974,14 +2147,19 @@ function selfSyncSourceRootsForClients(clientsCsv) {
   return rootsByClient;
 }
 
-function watchClientRootsForClients(clientsCsv) {
+function watchClientRootsForClients(clientsCsv, options = {}) {
   const rootsByClient = {};
-  for (const [client, dirs] of Object.entries(clientWatchCandidates(clientsCsv))) {
+  const qoderPairs = qoderCnWatchPairs(clientsCsv, options);
+  for (const [client, dirs] of Object.entries(clientWatchCandidates(clientsCsv, options))) {
+    if (client === 'qodercn') continue;
     if (SELF_SYNCED_CLIENTS.has(client)) continue;
     const existing = [...new Set(dirs.filter(dirExists))];
     if (existing.length > 0) rootsByClient[client] = existing;
   }
-  for (const [client, dirs] of Object.entries(selfSyncSourceRootsForClients(clientsCsv))) {
+  if (qoderPairs.length > 0) {
+    rootsByClient.qodercn = [...new Set(qoderPairs.map((pair) => pair.watch))];
+  }
+  for (const [client, dirs] of Object.entries(selfSyncSourceRootsForClients(clientsCsv, options))) {
     rootsByClient[client] = [...new Set([...(rootsByClient[client] || []), ...dirs])];
   }
   // The Antigravity CLI writes parse-local SQLite that tokscale reads directly,
@@ -2002,8 +2180,8 @@ function watchClientRootsForClients(clientsCsv) {
   return rootsByClient;
 }
 
-function watchPathsForClients(clientsCsv) {
-  return [...new Set(Object.values(watchClientRootsForClients(clientsCsv)).flat())];
+function watchPathsForClients(clientsCsv, options = {}) {
+  return [...new Set(Object.values(watchClientRootsForClients(clientsCsv, options)).flat())];
 }
 
 // The same roots, but as attribution prefixes rather than watch targets. The two
@@ -2018,20 +2196,31 @@ function watchPathsForClients(clientsCsv) {
 // both maps from one probe, and deriving them from two separate dirExists sweeps
 // would let a directory created between the two land in one map and not the
 // other — the same "two derivations of one thing" trap the exporter had.
-function watchAttributionRootsForClients(clientsCsv, watchRoots = null) {
-  const rootsByClient = watchRoots || watchClientRootsForClients(clientsCsv);
-  const exporter = copilotExporterWatch(os.homedir());
-  if (!exporter || !rootsByClient.copilot) return rootsByClient;
+function watchAttributionRootsForClients(clientsCsv, watchRoots = null, options = {}) {
+  const rootsByClient = watchRoots || watchClientRootsForClients(clientsCsv, options);
+  const qoderSources = [...new Set(qoderCnWatchPairs(clientsCsv, options).flatMap((pair) => {
+    if (!pair.sourcePath) return [pair.source];
+    // The DB parent is intentionally not an attribution prefix: the watcher
+    // keeps only the exact DB and its SQLite sidecars, so unrelated cache files
+    // must not target Qoder CN.
+    const source = canonicalWatchFilePath(pair.sourcePath);
+    return [source, `${source}-wal`, `${source}-shm`];
+  }))];
+  const attributionRoots = qoderSources.length
+    ? { ...rootsByClient, qodercn: qoderSources }
+    : rootsByClient;
+  const exporter = copilotExporterWatch(options.homeDir || os.homedir());
+  if (!exporter || !attributionRoots.copilot) return attributionRoots;
   const exporterDir = path.resolve(exporter.dir);
   const ownedByOtherSource = new Set(
-    (clientSourceRoots(clientsCsv).copilot || [])
+    (clientSourceRoots(clientsCsv, options).copilot || [])
       .filter((root) => root.id !== 'copilot-otel-exporter')
       .map((root) => path.resolve(root.dir))
   );
   const copilot = rootsByClient.copilot
     .filter((root) => path.resolve(root) !== exporterDir || ownedByOtherSource.has(exporterDir));
   copilot.push(exporter.canonicalFile);
-  return { ...rootsByClient, copilot: [...new Set(copilot)] };
+  return { ...attributionRoots, copilot: [...new Set(copilot)] };
 }
 
 function clientsForWatchPath(filePath, rootsByClient) {
@@ -2135,8 +2324,9 @@ function directChildOnly(isSource) {
 // Every source root of every tracked client, paired with its policy. Bounded
 // roots are counted so a client set with nothing to prune can skip the matcher
 // entirely rather than hand chokidar a predicate that always answers false.
-function watchPolicyEntries(clientsCsv) {
-  const candidates = clientWatchCandidates(clientsCsv);
+function watchPolicyEntries(clientsCsv, options = {}) {
+  const candidates = clientWatchCandidates(clientsCsv, options);
+  const qoderPairs = qoderCnWatchPairs(clientsCsv, options);
   // canonicalWatchPath must be applied here too: chokidar reports events under
   // whatever root it was handed, so a matcher built on the uncanonicalised path
   // would stop matching on Windows and silently un-prune the Hermes runtime
@@ -2260,6 +2450,41 @@ function watchPolicyEntries(clientsCsv) {
   bound('zed', withBasename('zed', 'threads'), directChildOnly((name) => ZED_DB_WATCH_PATTERN.test(name)));
   bound('codebuddy', withBasename('codebuddy', 'Logs'), (parts) => !CODEBUDDY_EXTENSION_SOURCE_DIRS.has(parts[0]));
 
+  // If a Qoder CN source was absent at startup, its watch root is an ancestor
+  // rather than the source itself. Keep only the ancestor chain and the source
+  // subtree; every sibling remains ignored. When the source already exists the
+  // same policy reduces to KEEP_EVERYTHING for that source root. An exact DB
+  // source also keeps SQLite's WAL/SHM sidecars; the event handler drops SHM
+  // writes caused by our own read-only opens, while WAL writes remain a live
+  // data signal.
+  for (const pair of qoderPairs) {
+    const root = canonicalRoot(pair.watch);
+    const source = pair.sourcePath
+      ? canonicalWatchFilePath(pair.sourcePath)
+      : canonicalRoot(pair.source);
+    const sourceSidecars = pair.sourcePath
+      ? new Set([
+        source,
+        `${source}-wal`,
+        `${source}-shm`
+      ])
+      : null;
+    entries.push({
+      root,
+      prefix: root + path.sep,
+      policy: (_parts, resolved) => {
+        const current = path.resolve(canonicalWatchPath(resolved));
+        return !(
+          sourceSidecars?.has(current)
+          || current === source
+          || current.startsWith(source + path.sep)
+          || source.startsWith(current + path.sep)
+        );
+      }
+    });
+    boundedCount += 1;
+  }
+
   // Everything left is a recursive transcript tree: tokscale walks it, so every
   // path inside it is a potential source. Copilot is excluded wholesale because
   // each of its roots is bounded above, and the self-synced cache roots are
@@ -2268,7 +2493,7 @@ function watchPolicyEntries(clientsCsv) {
   // written by `agy`, not by our sync.
   const recursive = [
     ...Object.entries(candidates)
-      .filter(([client]) => client !== 'copilot' && !SELF_SYNCED_CLIENTS.has(client))
+      .filter(([client]) => client !== 'copilot' && client !== 'qodercn' && !SELF_SYNCED_CLIENTS.has(client))
       .flatMap(([client, dirs]) => dirs.filter((dir) => !(claimed.get(client) || EMPTY_SET).has(dir))),
     ...(antigravityEnabled && dirExists(antigravityCliDataDir()) ? [antigravityCliDataDir()] : [])
   ];
@@ -2278,8 +2503,8 @@ function watchPolicyEntries(clientsCsv) {
   return { entries, boundedCount };
 }
 
-function watchIgnoreMatcher(clientsCsv) {
-  const { entries, boundedCount } = watchPolicyEntries(clientsCsv);
+function watchIgnoreMatcher(clientsCsv, options = {}) {
+  const { entries, boundedCount } = watchPolicyEntries(clientsCsv, options);
   if (boundedCount === 0) return undefined;
   return (target) => {
     const resolved = path.resolve(target);
@@ -2315,8 +2540,8 @@ function sourceRootExists(root) {
 // watch root stays available to the watcher through clientWatchCandidates(),
 // which reads clientSourceRoots() directly; `sourcePath` rides along so a reveal
 // can tell a file from a directory without stat-ing it again.
-function evaluatedClientSourceRoots(clientsCsv) {
-  return Object.fromEntries(Object.entries(clientSourceRoots(clientsCsv)).map(([client, roots]) => [
+function evaluatedClientSourceRoots(clientsCsv, options = {}) {
+  return Object.fromEntries(Object.entries(clientSourceRoots(clientsCsv, options)).map(([client, roots]) => [
     client,
     roots.map((root) => ({
       id: root.id,
@@ -2336,7 +2561,7 @@ function clientSourceChecks(clientsCsv, options = {}) {
     if (found) found.exists = found.exists || exists;
     else list.push({ id, exists });
   };
-  for (const [client, roots] of Object.entries(evaluatedClientSourceRoots(clientsCsv))) {
+  for (const [client, roots] of Object.entries(evaluatedClientSourceRoots(clientsCsv, options))) {
     checks[client] = checks[client] || [];
     for (const { id, exists } of roots) push(client, id, exists);
   }
@@ -2383,15 +2608,15 @@ function clientSourceChecks(clientsCsv, options = {}) {
 //
 // clientDiagnosticRoots() stays faithful for callers that want every probed
 // root — the reveal handler picks from it and selects on `exists` itself.
-function visibleDiagnosticRoots(clientsCsv) {
-  return Object.fromEntries(Object.entries(clientDiagnosticRoots(clientsCsv)).map(([client, roots]) => [
+function visibleDiagnosticRoots(clientsCsv, options = {}) {
+  return Object.fromEntries(Object.entries(clientDiagnosticRoots(clientsCsv, options)).map(([client, roots]) => [
     client,
     roots.filter((root) => !(root.optional === true && root.exists !== true))
   ]));
 }
 
-function clientDiagnosticRoots(clientsCsv) {
-  const byClient = evaluatedClientSourceRoots(clientsCsv);
+function clientDiagnosticRoots(clientsCsv, options = {}) {
+  const byClient = evaluatedClientSourceRoots(clientsCsv, options);
   if (byClient.antigravity) {
     byClient.antigravity.unshift(
       ...antigravityDataRoots().map((dir) => ({ id: 'antigravity-ide-source', dir, exists: dirExists(dir) })),
@@ -2485,7 +2710,9 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qod
   // Deterministic string that captures the config inputs anchor correctness
   // depends on. When this changes, the persisted anchor is invalidated.
   const qoderCn = String(qoderCnDbPath || '').trim();
-  const qoderCnPart = qoderCn ? `|qodercn:${path.resolve(qoderCn)}` : '';
+  const qoderCnPart = qoderCn
+    ? `|qodercn:${qoderCn.startsWith('db:') ? qoderCn : path.resolve(qoderCn)}`
+    : '';
   return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}`;
 }
 
@@ -2496,6 +2723,15 @@ function qoderCnDbPathForClients(clientsCsv, options = {}) {
     platform: options.platform || process.platform,
     env: options.env || process.env
   }).dbPaths[0] || '';
+}
+
+function qoderCnSourceFingerprintForClients(clientsCsv, options = {}) {
+  if (!normalizeClientsCsv(clientsCsv).split(',').includes('qodercn')) return '';
+  return qoderCnSourceFingerprint({
+    homeDir: options.homeDir,
+    platform: options.platform || process.platform,
+    env: options.env || process.env
+  });
 }
 
 // The one place that decides whether a persisted anchor may be reused, shared by
@@ -2598,7 +2834,9 @@ function watcherOptions(usePolling, ignored) {
 }
 
 function isQoderCnSelfWatchEvent(filePath, rootsByClient = {}) {
-  if (!filePath || !path.basename(filePath).endsWith('.db-shm')) return false;
+  // Both legacy local.db and the 0.1.x main.sqlite use the SQLite `-shm`
+  // sidecar suffix. Read-only opens can recreate it, so it is not a data event.
+  if (!filePath || !path.basename(filePath).toLowerCase().endsWith('-shm')) return false;
   const resolved = path.resolve(filePath);
   return (rootsByClient.qodercn || [])
     .some((root) => resolved.startsWith(path.resolve(root) + path.sep));
@@ -2638,10 +2876,16 @@ function startCollector(options) {
     : normalizeOsInfo(options.osInfo);
   const log = logger || (() => {});
   const normalizedClients = normalizeClientsCsv(clients);
-  const qoderCnDbPath = qoderCnDbPathForClients(normalizedClients, {
+  const qoderCnSourceOptions = {
     homeDir: options.homeDir,
-    platform: process.platform,
-    env: process.env
+    platform: options.platform || process.platform,
+    env: options.env || process.env
+  };
+  const qoderCnDbPath = qoderCnDbPathForClients(normalizedClients, {
+    ...qoderCnSourceOptions
+  });
+  const qoderCnSourceKey = qoderCnSourceFingerprintForClients(normalizedClients, {
+    ...qoderCnSourceOptions
   });
   let tickInFlight = false;
   let tickPending = false;
@@ -2773,7 +3017,7 @@ function startCollector(options) {
         clients,
         allTimeSince,
         projectsEnabled: options.projectsEnabled,
-        qoderCnDbPath
+        qoderCnDbPath: qoderCnSourceKey || qoderCnDbPath
       });
       if (trust) {
         anchor = {
@@ -2996,7 +3240,12 @@ function startCollector(options) {
               wslStatus: wslStatusAnchor,
               ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
               ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
-              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath),
+              configFingerprint: configFingerprint(
+                clients,
+                allTimeSince,
+                options.projectsEnabled,
+                qoderCnSourceKey || qoderCnDbPath
+              ),
               fullScanAt: new Date(lastFullScanAt).toISOString()
             }));
           } catch (_) {}
@@ -3257,7 +3506,7 @@ function startCollector(options) {
     // One dirExists sweep feeds both maps: probing twice would let a directory
     // created between the sweeps land in the watch list and not the attribution
     // list, or the reverse.
-    const watchRoots = watchClientRootsForClients(clients);
+    const watchRoots = watchClientRootsForClients(clients, qoderCnSourceOptions);
     const rootsByClient = Object.fromEntries(
       Object.entries(watchRoots)
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
@@ -3267,7 +3516,7 @@ function startCollector(options) {
     // copilot prefix. Canonicalised through the same function so both still
     // compare equal to the paths chokidar reports.
     const attributionRootsByClient = Object.fromEntries(
-      Object.entries(watchAttributionRootsForClients(clients, watchRoots))
+      Object.entries(watchAttributionRootsForClients(clients, watchRoots, qoderCnSourceOptions))
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
     );
     // A subset of the same roots, matched separately so a write to a client's
@@ -3288,7 +3537,7 @@ function startCollector(options) {
     }
     const usePolling = watchUsePolling || watchDescriptorFallback;
     try {
-      const ignored = watchIgnoreMatcher(clients);
+      const ignored = watchIgnoreMatcher(clients, qoderCnSourceOptions);
       const watcher = chokidar.watch(dirs, watcherOptions(usePolling, ignored));
       watcher.on('all', (event, filePath) => {
         // The quit path leaves the watcher open (see stop), so events can still
@@ -3606,6 +3855,7 @@ module.exports = {
   collectorAnchorTrust,
   configFingerprint,
   qoderCnDbPathForClients,
+  qoderCnSourceFingerprintForClients,
   deriveClientStatus,
   selfSyncSourceRootsForClients,
   watchAttributionRootsForClients,

@@ -10,6 +10,7 @@ const {
   probeLimitProvider,
   providerPhysicalBoundMs
 } = require('./limitCollector');
+const { parseLimitProviderAutoDetectDisabled } = require('./limitProviderSources');
 const { normalizeLimitProvider, normalizeLimitsSummary } = require('./limits');
 const {
   nextLimitsResetBoundary,
@@ -179,6 +180,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     ? LIMITS_ADAPTIVE_BASE_MS
     : normalizeLimitsRefreshMs(config.limitsRefreshMs ?? config.refreshMs);
   let configuredProviders = new Set(parseLimitProviders(config.limitProviders ?? config.providers));
+  let disabledAutoProviders = new Set(parseLimitProviderAutoDetectDisabled(config.limitProviderAutoDetectDisabled));
   let runtimeEpoch = 1;
   let stopped = false;
   let started = false;
@@ -319,7 +321,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
             updatedAt: attempt.at,
             windows: []
           });
-      if (row) rows.push(row);
+      if (row && (!disabledAutoProviders.has(provider) || row.credentialOrigin === 'manual')) rows.push(row);
     }
     return rows;
   }
@@ -494,7 +496,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     const attemptAt = new Date(now()).toISOString();
     const normalizedRows = (Array.isArray(rawRows) ? rawRows : rawRows?.providers || [])
       .map((row) => normalizeLimitProvider({ ...row, provider: lane.provider }))
-      .filter(Boolean);
+      .filter((row) => row && (!disabledAutoProviders.has(lane.provider) || row.credentialOrigin === 'manual'));
     const expected = new Set(dispatch.expectedIdentityKeys);
     const represented = new Set();
 
@@ -718,6 +720,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     const previousRefreshMode = refreshMode;
     const previousRefreshMs = refreshMs;
     const previousProviders = configuredProviders;
+    const previousDisabledAutoProviders = disabledAutoProviders;
     config = { ...config, ...cloneValue(nextOptions) };
     enabled = parseBoolean(config.limitsEnabled ?? config.enabled, true);
     refreshMode = normalizeLimitsRefreshMode(config.limitsRefreshMode);
@@ -725,6 +728,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       ? LIMITS_ADAPTIVE_BASE_MS
       : normalizeLimitsRefreshMs(config.limitsRefreshMs ?? config.refreshMs);
     configuredProviders = new Set(parseLimitProviders(config.limitProviders ?? config.providers));
+    disabledAutoProviders = new Set(parseLimitProviderAutoDetectDisabled(config.limitProviderAutoDetectDisabled));
 
     for (const provider of previousProviders) {
       if (configuredProviders.has(provider)) continue;
@@ -735,6 +739,29 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         lane.identities.clear();
       }
       lanes.delete(provider);
+    }
+
+    // A source-policy change is a generation boundary for that provider. Clear
+    // disallowed cached identities before queueing the next probe; otherwise a
+    // late result or a transient status would let the previous automatic
+    // lastGood row reappear in a manual-only view.
+    const sourcePolicyProviders = new Set([
+      ...previousDisabledAutoProviders,
+      ...disabledAutoProviders
+    ]);
+    for (const provider of sourcePolicyProviders) {
+      if (previousDisabledAutoProviders.has(provider) === disabledAutoProviders.has(provider)) continue;
+      const lane = lanes.get(provider);
+      if (!lane) continue;
+      cancelLane(lane, 'source policy changed');
+      resetRetryPolicy(lane);
+      if (disabledAutoProviders.has(provider)) {
+        for (const [identityKey, state] of lane.identities) {
+          const row = state.lastGood || state.lastAttempt?.row;
+          if (row?.credentialOrigin !== 'manual') lane.identities.delete(identityKey);
+        }
+      }
+      if (enabled && configuredProviders.has(provider)) void queueScope({ provider }, 'settings-change');
     }
 
     if (!enabled) {
@@ -827,6 +854,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
 
   for (const row of normalizeLimitsSummary(config.previousLimits || {}).providers) {
     if (!configuredProviders.has(row.provider)) continue;
+    if (disabledAutoProviders.has(row.provider) && row.credentialOrigin !== 'manual') continue;
     const lane = laneFor(row.provider);
     const identityKey = rowIdentityKey(row);
     const at = row.updatedAt || new Date(now()).toISOString();

@@ -1,7 +1,7 @@
 {
   "name": "token-monitor",
   "productName": "Token Monitor",
-  "version": "0.45.0-rev.21",
+  "version": "0.45.0-rev.22",
   "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
   "main": "src/electron/main.js",
   "scripts": {
@@ -9,6 +9,7 @@
     "hub": "node src/hub/server.js",
     "agent": "node src/agent/agent.js",
     "agent:once": "node src/agent/agent.js --once",
+    "evidence:qodercn": "node scripts/collect-qoder-cn-evidence.js",
     "migrate": "node migrations/run.js",
     "test:mysql": "node scripts/run-mysql-tests.js",
     "widget": "electron .",

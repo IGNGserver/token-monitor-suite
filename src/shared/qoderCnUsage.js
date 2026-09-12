@@ -5,10 +5,17 @@ const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { StringDecoder } = require('node:string_decoder');
 const { promisify } = require('node:util');
 const execFileAsync = promisify(execFile);
 const { customPricingPath } = require('./tokscaleConfig');
 const QODER_CN_DB_SUFFIX = path.join('SharedClientCache', 'cache', 'db', 'local.db');
+// Qoder 0.1.x moved its persisted conversation records out of the legacy
+// QoderCN cache. The desktop build currently observed in the target machine
+// stores them in the Electron app-support database below. Keep this as a
+// separate source: the legacy database has exact token fields, while this
+// message store only permits bounded content-based estimates.
+const QODER_CN_MAIN_DB_SUFFIX = path.join('com.qoder.app.stable', 'main.sqlite');
 // Qoder CN stores internal model codes (model_info.model_key) instead of real
 // model names. Official display names come from the app's bundled i18n keys
 // `modelSelector.item.<code>` (Qoder CN.app, 2026-07 build); the codes change
@@ -48,6 +55,7 @@ const QODER_CN_READ_MAX_BYTES = 50 * 1024 * 1024;
 const QODER_CN_READ_MAX_ROWS = 100_000;
 const QODER_CN_NEGATIVE_SCHEMA_CACHE_TTL_MS = 5 * 60 * 1000;
 const QODER_CN_READ_BUDGET_ERROR = 'QODER_CN_READ_BUDGET_EXCEEDED';
+const QODER_CN_SQLITE_BACKEND_UNAVAILABLE = 'QODER_CN_SQLITE_BACKEND_UNAVAILABLE';
 const QODER_CN_USAGE_SQL = `
 SELECT rowid AS row_id, id, session_id, request_id, token_info, model_info, gmt_create,
   (SELECT cs.project_name FROM chat_session cs WHERE cs.session_id = chat_message.session_id LIMIT 1) AS project_name
@@ -105,6 +113,22 @@ WHERE role = 'assistant'
   AND (typeof(gmt_create) != 'text' AND (${QODER_CN_NORMALIZED_TIMESTAMP_SQL}) >= ?
     OR typeof(gmt_create) = 'text' AND (${QODER_CN_NORMALIZED_TIMESTAMP_SQL}) >= ? - 86400000)
 ORDER BY gmt_create, rowid
+`;
+const QODER_CN_MAIN_USAGE_SQL = `
+SELECT m.session_id, m.message_id, m.sequence, m.payload_json, m.created_at,
+  s.model AS session_model
+FROM chat_session_messages AS m
+LEFT JOIN chat_sessions AS s ON s.session_id = m.session_id
+ORDER BY m.session_id, m.created_at, m.sequence, m.message_id
+`;
+// A partially migrated 0.1.x database may not have the session catalog yet.
+// The conversation rows remain useful without the optional model join, so
+// retain a strict no-session fallback instead of turning that version into a
+// false zero-usage result.
+const QODER_CN_MAIN_USAGE_SQL_NO_SESSION = `
+SELECT m.session_id, m.message_id, m.sequence, m.payload_json, m.created_at
+FROM chat_session_messages AS m
+ORDER BY m.session_id, m.created_at, m.sequence, m.message_id
 `;
 const QODER_CN_CHAT_SESSION_PROBE_SQL = `SELECT 1 FROM sqlite_master
 WHERE type = 'table' AND name = 'chat_session'
@@ -276,7 +300,7 @@ function normalizeQoderCnDbRow(row, source = 'local') {
   const displayName = Object.prototype.hasOwnProperty.call(QODER_CN_MODEL_DISPLAY_NAMES, modelKey)
     ? QODER_CN_MODEL_DISPLAY_NAMES[modelKey]
     : null;
-  return {
+  const normalized = {
     sessionId: `qodercn:${source}:${session}`,
     messageId: `qodercn:${source}:${session}:${message}`,
     model: displayName || modelKey,
@@ -288,12 +312,19 @@ function normalizeQoderCnDbRow(row, source = 'local') {
     createdAt: timestampMs(row?.gmt_create),
     messages: 1
   };
+  const stableIdentity = String(row?.request_id || row?.requestId || row?.id || '').trim();
+  if (stableIdentity) defineTranscriptIdentity(normalized, [stableIdentity]);
+  return normalized;
 }
 
 function qoderCnDataPaths(options = {}) {
   const home = options.homeDir || os.homedir();
   const env = options.env || process.env;
-  const platform = options.platform || process.platform;
+  // Electron callers may provide a host-plus-architecture label (for example
+  // `darwin-arm64`) while Node's platform APIs use the host family alone.
+  // Normalize at the shared descriptor boundary so parser, watcher, and anchor
+  // callers cannot silently resolve different roots.
+  const platform = String(options.platform || process.platform).split('-')[0];
   let appSupport;
   if (platform === 'darwin') appSupport = path.join(home, 'Library', 'Application Support');
   else if (platform === 'win32') appSupport = (typeof env.APPDATA === 'string' && env.APPDATA.length > 0) ? env.APPDATA : path.join(home, 'AppData', 'Roaming');
@@ -303,11 +334,39 @@ function qoderCnDataPaths(options = {}) {
   }
 
   const explicitDb = String(env.TOKEN_MONITOR_QODER_CN_DB_PATH || '').trim();
+  const explicitMainDb = String(env.TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH || '').trim();
+  const configuredHome = String(env.QODERCN_CONFIG_DIR || '').trim();
+  const qoderCnHome = configuredHome ? path.resolve(configuredHome) : path.join(home, '.qoder-cn');
+  const explicitTranscripts = String(
+    env.TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR
+      || env.TOKEN_MONITOR_QODERCN_TRANSCRIPTS_DIR
+      || env.TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_PATH
+      || ''
+  ).trim();
+  const transcriptRoot = explicitTranscripts
+    ? path.resolve(explicitTranscripts)
+    : path.join(qoderCnHome, 'projects');
   return {
     dbPaths: explicitDb
       ? [path.resolve(explicitDb)]
-      : [path.join(appSupport, 'QoderCN', QODER_CN_DB_SUFFIX)]
+      : [path.join(appSupport, 'QoderCN', QODER_CN_DB_SUFFIX)],
+    mainDbPaths: explicitMainDb
+      ? [path.resolve(explicitMainDb)]
+      : [path.join(appSupport, QODER_CN_MAIN_DB_SUFFIX)],
+    // The legacy SQLite source and the 0.1.x transcript source are separate
+    // roots, but they are one adapter from the collector's point of view. Keep
+    // both in this descriptor so source status, watcher attribution and anchor
+    // invalidation cannot drift apart again.
+    transcriptRoots: [transcriptRoot]
   };
+}
+
+function qoderCnSourceFingerprint(options = {}) {
+  const paths = qoderCnDataPaths(options);
+  const dbs = paths.dbPaths.map((value) => path.resolve(value)).join(',');
+  const mainDbs = (paths.mainDbPaths || []).map((value) => path.resolve(value)).join(',');
+  const transcripts = (paths.transcriptRoots || []).map((value) => path.resolve(value)).join(',');
+  return `db:${dbs}|mainDb:${mainDbs}|transcripts:${transcripts}`;
 }
 
 function positiveInteger(value, fallback) {
@@ -329,6 +388,16 @@ function readBudgetError(kind, limit, cause) {
 function isReadBudgetError(error) {
   return error?.code === QODER_CN_READ_BUDGET_ERROR
     || error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
+}
+
+function isMissingSqliteCli(error) {
+  return error?.code === 'ENOENT'
+    || /(?:sqlite3|spawn).*\b(?:enoent|not found|cannot find)\b/i.test(String(error?.message || error));
+}
+
+function isMissingNodeSqlite(error) {
+  return error?.code === 'MODULE_NOT_FOUND'
+    || /node:sqlite.*(?:not available|cannot find|unknown built-in|module)/i.test(String(error?.message || error));
 }
 
 function boundedRows(iterable, { maxReadBytes, maxReadRows, countBytes }) {
@@ -410,9 +479,206 @@ async function readQoderCnDbRows(dbPath, options = {}) {
       // logs the error and retains its last complete snapshot when available.
       const message = `qodercn sqlite read failed: sqlite3 CLI: ${cliError.message}; node:sqlite: ${nodeError.message}`;
       if (typeof options.logger === 'function') options.logger(message);
-      throw new Error(message, { cause: nodeError });
+      const wrapped = new Error(message, { cause: nodeError });
+      if (isMissingSqliteCli(cliError) && isMissingNodeSqlite(nodeError)) {
+        wrapped.code = QODER_CN_SQLITE_BACKEND_UNAVAILABLE;
+      }
+      throw wrapped;
     }
   }
+}
+
+async function readQoderCnMainDbRows(dbPath, options = {}) {
+  const run = options.execFile || execFileAsync;
+  const maxReadBytes = positiveInteger(options.maxReadBytes, QODER_CN_READ_MAX_BYTES);
+  const maxReadRows = positiveInteger(options.maxReadRows, QODER_CN_READ_MAX_ROWS);
+  const queries = [QODER_CN_MAIN_USAGE_SQL, QODER_CN_MAIN_USAGE_SQL_NO_SESSION];
+  const cliErrors = [];
+
+  for (const sql of queries) {
+    try {
+      const result = await run('sqlite3', ['-readonly', '-json', '-cmd', '.timeout 3000', dbPath, sql], {
+        encoding: 'utf8', maxBuffer: maxReadBytes, timeout: 30_000, windowsHide: true
+      });
+      const stdout = String(result?.stdout || '').trim();
+      if (Buffer.byteLength(stdout, 'utf8') > maxReadBytes) throw readBudgetError('bytes', maxReadBytes);
+      const parsed = JSON.parse(stdout || '[]');
+      return boundedRows(Array.isArray(parsed) ? parsed : [], { maxReadBytes, maxReadRows, countBytes: false });
+    } catch (cliError) {
+      if (isReadBudgetError(cliError)) {
+        const error = cliError.code === QODER_CN_READ_BUDGET_ERROR
+          ? cliError
+          : readBudgetError('bytes', maxReadBytes, cliError);
+        if (typeof options.logger === 'function') options.logger(error.message);
+        throw error;
+      }
+      cliErrors.push(cliError);
+    }
+  }
+
+  const nodeErrors = [];
+  try {
+    const requireFn = options.requireFn || require;
+    const { DatabaseSync } = requireFn('node:sqlite');
+    const database = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      database.exec('PRAGMA busy_timeout = 250');
+      for (const sql of queries) {
+        try {
+          return boundedRows(database.prepare(sql).iterate(), {
+            maxReadBytes, maxReadRows, countBytes: true
+          });
+        } catch (nodeError) {
+          if (isReadBudgetError(nodeError)) {
+            if (typeof options.logger === 'function') options.logger(nodeError.message);
+            throw nodeError;
+          }
+          nodeErrors.push(nodeError);
+        }
+      }
+    } finally {
+      database.close();
+    }
+  } catch (nodeError) {
+    if (isReadBudgetError(nodeError)) throw nodeError;
+    nodeErrors.push(nodeError);
+  }
+
+  const cliError = cliErrors.at(-1) || new Error('sqlite3 query failed');
+  const nodeError = nodeErrors.at(-1) || new Error('node:sqlite query failed');
+  const message = `qodercn main sqlite read failed: sqlite3 CLI: ${cliError.message}; node:sqlite: ${nodeError.message}`;
+  if (typeof options.logger === 'function') options.logger(message);
+  const wrapped = new Error(message, { cause: nodeError });
+  if (cliErrors.length > 0 && cliErrors.every(isMissingSqliteCli) && isMissingNodeSqlite(nodeError)) {
+    wrapped.code = QODER_CN_SQLITE_BACKEND_UNAVAILABLE;
+  }
+  throw wrapped;
+}
+
+function estimateQoderCnValueTokens(value) {
+  if (value === undefined || value === null) return 0;
+  if (typeof value === 'string') return estimateQoderCnContentTokens({ content: value });
+  return estimateQoderCnContentTokens({ content: [{ content: value }] });
+}
+
+function estimateQoderCnMainPayloadTokens(payload) {
+  if (!payload || typeof payload !== 'object') return 0;
+  const role = String(payload.role || '').trim().toLowerCase();
+  const parts = Array.isArray(payload.parts) ? payload.parts : [];
+  const topText = typeof payload.text === 'string' ? payload.text : '';
+  let tokens = role === 'user'
+    ? estimateQoderCnValueTokens(topText)
+    : role === 'assistant' ? estimateQoderCnValueTokens(topText) : 0;
+
+  // In main.sqlite the top-level text is the assembled visible response. Its
+  // `type: text` parts are fragments of that same response (their lengths differ
+  // slightly because the app inserts separators), so count one representation
+  // only. If a future build omits the assembled field, fall back to the parts.
+  if (role === 'user' && !topText) {
+    for (const part of parts) {
+      if (typeof part?.text === 'string') tokens += estimateQoderCnValueTokens(part.text);
+    }
+  }
+  if (role !== 'assistant') return tokens;
+
+  let hasAssembledText = Boolean(topText);
+  for (const part of parts) {
+    if (!part || typeof part !== 'object') continue;
+    const type = String(part.type || '').trim().toLowerCase();
+    if (type === 'text' && hasAssembledText) continue;
+    if (typeof part.text === 'string') tokens += estimateQoderCnValueTokens(part.text);
+    if (type !== 'tool' || !part.tool || typeof part.tool !== 'object') continue;
+    // Tool input is model output; tool response and explicit question answers
+    // become context for later requests in the same turn. The three fields are
+    // all bounded by the SQLite result budget before this function sees them.
+    tokens += estimateQoderCnValueTokens(part.tool.input);
+    tokens += estimateQoderCnValueTokens(part.tool.response);
+    tokens += estimateQoderCnValueTokens(part.tool.userQuestionAnswers);
+  }
+  return tokens;
+}
+
+function qoderCnMainHash(value) {
+  return createHash('sha256').update(String(value || '')).digest('hex').slice(0, 12);
+}
+
+function normalizeQoderCnMainMessage(row, source, state, contentTokens) {
+  const payload = jsonObject(row?.payload_json ?? row?.payload);
+  if (!payload) return null;
+  const rawSession = String(row?.session_id || row?.sessionId || 'unknown');
+  const rawMessage = String(row?.message_id || row?.messageId || '').trim();
+  const sequence = String(row?.sequence ?? '').trim();
+  const messageKey = rawMessage || `${sequence || 'message'}:${timestampMs(row?.created_at)}`;
+  const sessionId = `qodercn:main:${source}:${qoderCnMainHash(rawSession)}`;
+  const modelKey = String(
+    row?.session_model || payload.model || payload.modelName || payload.model_name || 'qoder-agent'
+  ).trim() || 'qoder-agent';
+  const model = Object.prototype.hasOwnProperty.call(QODER_CN_MODEL_DISPLAY_NAMES, modelKey)
+    ? QODER_CN_MODEL_DISPLAY_NAMES[modelKey]
+    : modelKey;
+  const createdAt = timestampMs(
+    payload.timestamp ?? payload.createdAt ?? payload.created_at ?? row?.created_at
+  );
+  const normalized = {
+    sessionId,
+    messageId: `${sessionId}:${qoderCnMainHash(messageKey)}`,
+    model,
+    projectLabel: normalizeQoderCnProjectLabel(row?.project_name || row?.projectLabel),
+    input: Math.max(0, Math.trunc(Number(state.cumulativeTokens) || 0)),
+    output: Math.max(0, Math.trunc(Number(contentTokens) || 0)),
+    cacheRead: 0,
+    cacheWrite: 0,
+    createdAt,
+    messages: 1,
+    estimated: true
+  };
+  if (rawMessage) defineTranscriptIdentity(normalized, [rawMessage]);
+  return normalized;
+}
+
+async function collectQoderCnMainRows(options = {}) {
+  const paths = options.dataPaths || qoderCnDataPaths({
+    homeDir: options.homeDir,
+    platform: options.platform,
+    env: options.env
+  });
+  const mainDbPaths = Array.isArray(options.mainDbPaths)
+    ? options.mainDbPaths
+    : (paths.mainDbPaths || []);
+  const readMainDbRows = options.readMainDbRows || readQoderCnMainDbRows;
+  const sinceMs = options.sinceMs;
+  const rows = [];
+
+  for (const dbPath of mainDbPaths) {
+    if (!options.readMainDbRows && !fs.existsSync(dbPath)) continue;
+    const source = sourceId(`main:${dbPath}`);
+    const dbRows = await readMainDbRows(dbPath, { ...options });
+    const sessions = new Map();
+    for (const dbRow of dbRows) {
+      const payload = jsonObject(dbRow?.payload_json ?? dbRow?.payload);
+      if (!payload) continue;
+      const role = String(payload.role || '').trim().toLowerCase();
+      if (role !== 'user' && role !== 'assistant') continue;
+      const sessionKey = `${source}\0${String(dbRow?.session_id || dbRow?.sessionId || 'unknown')}`;
+      const state = sessions.get(sessionKey) || { cumulativeTokens: 0 };
+      const contentTokens = estimateQoderCnMainPayloadTokens(payload);
+      if (role === 'assistant') {
+        const createdAt = timestampMs(
+          payload.timestamp ?? payload.createdAt ?? payload.created_at ?? dbRow?.created_at
+        );
+        if (sinceMs === undefined || createdAt >= sinceMs) {
+          const normalized = normalizeQoderCnMainMessage(dbRow, source, state, contentTokens);
+          if (normalized) rows.push(normalized);
+        }
+      }
+      state.cumulativeTokens += contentTokens;
+      sessions.set(sessionKey, state);
+    }
+  }
+
+  const unique = new Map();
+  for (const row of rows) unique.set(row.messageId, row);
+  return unique.size === rows.length ? rows : [...unique.values()];
 }
 
 async function collectQoderCnRows(options = {}) {
@@ -463,13 +729,15 @@ function buildTokscaleJson(startMs, rows, pricingByModel, includeUndated = false
     reasoning: 0, messageCount: row.messages, cost: row.cost,
     startedAt: row.startedAt ? new Date(row.startedAt).toISOString() : '',
     lastUsedAt: row.lastUsedAt ? new Date(row.lastUsedAt).toISOString() : '',
-    projectLabel: row.projectLabel || '', performance: null
+    projectLabel: row.projectLabel || '', performance: null,
+    ...(row.estimated === true ? { estimated: true } : {})
   }));
   const sum = (key) => entries.reduce((total, row) => total + row[key], 0);
   return {
     groupBy: 'client,session,model', entries,
     totalInput: sum('input'), totalOutput: sum('output'), totalCacheRead: sum('cacheRead'),
-    totalCacheWrite: sum('cacheWrite'), totalMessages: sum('messageCount'), totalCost: sum('cost'), processingTimeMs: 0
+    totalCacheWrite: sum('cacheWrite'), totalMessages: sum('messageCount'), totalCost: sum('cost'), processingTimeMs: 0,
+    ...(entries.some((entry) => entry.estimated === true) ? { estimated: true } : {})
   };
 }
 
@@ -519,14 +787,27 @@ function buildQoderCnHistoryGraph(options = {}) {
 const QODER_CN_TRANSCRIPTS_PROJECTS_DIR = path.join('.qoder-cn', 'projects');
 const QODER_CN_TRANSCRIPT_MAX_BYTES = 64 * 1024 * 1024;
 const QODER_CN_TRANSCRIPT_MAX_LINE_BYTES = 256 * 1024;
+const QODER_CN_TRANSCRIPT_READ_CHUNK_BYTES = 64 * 1024;
+const QODER_CN_TRANSCRIPT_MAX_FILES = 2_000;
+const QODER_CN_TRANSCRIPT_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+const QODER_CN_TRANSCRIPT_MAX_DEPTH = 8;
+const QODER_CN_TRANSCRIPT_MAX_DURATION_MS = 2_000;
 const QODER_CN_CJK_RE = /[\u{1100}-\u{11FF}\u{2E80}-\u{9FFF}\u{A960}-\u{A97F}\u{AC00}-\u{D7FF}\u{F900}-\u{FAFF}\u{FF00}-\u{FF60}\u{FF66}-\u{FF9D}\u{20000}-\u{3FFFD}]/u;
+const QODER_CN_TRANSCRIPT_BUDGET_CODES = Object.freeze({
+  files: 'QODER_CN_TRANSCRIPT_FILE_LIMIT',
+  bytes: 'QODER_CN_TRANSCRIPT_BYTE_LIMIT',
+  depth: 'QODER_CN_TRANSCRIPT_DEPTH_LIMIT',
+  duration: 'QODER_CN_TRANSCRIPT_TIME_LIMIT'
+});
 
 // Since the 0.1.x rewrite the desktop client's agent runtime appends one JSON
 // line per event to ~/.qoder-cn/projects/<project>/<session>.jsonl
-// (Claude-Code-style transcripts). Assistant rows carry message.usage.credits
-// — the exact credits billed for that request — plus message.model in Qoder's
-// internal code. The cloud quota API only exposes cumulative totals, so these
-// transcripts are the only per-model usage source.
+// (Claude-Code-style transcripts). Complete assistant events represent one
+// model request. Their message.usage.credits field is optional for backwards
+// compatibility, so it must never be used as the request-count gate; the
+// cumulative total on a Result event is deliberately ignored. The cloud quota
+// API only exposes cumulative totals, so these transcripts are the only
+// per-model usage source.
 //
 // The client zeroes every token field in usage (input_tokens, output_tokens,
 // cache_* are 0 across all rows, main.sqlite context snapshots also report
@@ -567,111 +848,522 @@ function estimateQoderCnContentTokens(message) {
   return Math.ceil((cjk / 1.5) + (other / 4));
 }
 
-function listTranscriptFiles(dir) {
+function transcriptScanNow(options = {}) {
+  if (typeof options.now === 'function') {
+    const value = Number(options.now());
+    if (Number.isFinite(value)) return value;
+  }
+  if (Number.isFinite(Number(options.now))) return Number(options.now);
+  return Date.now();
+}
+
+function transcriptScanLimit(value, fallback) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function transcriptDiagnostics(options = {}) {
+  const diagnostics = {
+    rootExists: false,
+    rootsFound: 0,
+    candidateFiles: 0,
+    readFiles: 0,
+    readBytes: 0,
+    recognizedEvents: 0,
+    ignoredEvents: 0,
+    badJsonLines: 0,
+    oversizedFiles: 0,
+    oversizedLines: 0,
+    readErrors: 0,
+    duplicateRows: 0,
+    lastDataAt: null,
+    source: 'none',
+    usedSources: [],
+    estimated: false,
+    truncated: false,
+    failureCode: null,
+    maxFiles: transcriptScanLimit(options.maxFiles, QODER_CN_TRANSCRIPT_MAX_FILES),
+    maxTotalBytes: transcriptScanLimit(options.maxTotalBytes ?? options.maxBytes, QODER_CN_TRANSCRIPT_MAX_TOTAL_BYTES),
+    maxDepth: transcriptScanLimit(options.maxDepth, QODER_CN_TRANSCRIPT_MAX_DEPTH),
+    maxDurationMs: transcriptScanLimit(options.maxDurationMs, QODER_CN_TRANSCRIPT_MAX_DURATION_MS)
+  };
+  return diagnostics;
+}
+
+function publishTranscriptDiagnostics(options, diagnostics) {
+  if (options.diagnostics && typeof options.diagnostics === 'object') {
+    for (const [key, value] of Object.entries(diagnostics)) {
+      if (Array.isArray(value)) options.diagnostics[key] = [...value];
+      else options.diagnostics[key] = value;
+    }
+  }
+  return diagnostics;
+}
+
+function transcriptBudgetError(code, diagnostics) {
+  const error = new Error(`qodercn transcript scan budget exceeded (${code})`);
+  error.code = code;
+  error.diagnostics = { ...diagnostics, usedSources: [...diagnostics.usedSources] };
+  return error;
+}
+
+function checkTranscriptBudget(diagnostics, startedAt, options = {}) {
+  if (transcriptScanNow(options) - startedAt > diagnostics.maxDurationMs) {
+    diagnostics.failureCode = QODER_CN_TRANSCRIPT_BUDGET_CODES.duration;
+    diagnostics.truncated = true;
+    throw transcriptBudgetError(diagnostics.failureCode, diagnostics);
+  }
+}
+
+function listTranscriptFiles(dir, options = {}) {
   const out = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...listTranscriptFiles(full));
-    else if (entry.isFile() && entry.name.endsWith('.jsonl')) out.push(full);
+  const stack = [{ dir, depth: 0 }];
+  const diagnostics = options.diagnostics;
+  const startedAt = options.startedAt ?? transcriptScanNow(options);
+  while (stack.length > 0) {
+    checkTranscriptBudget(diagnostics, startedAt, options);
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(current.dir, { withFileTypes: true })
+        .sort((left, right) => left.name.localeCompare(right.name));
+    } catch (error) {
+      diagnostics.readErrors += 1;
+      if (current.depth === 0) {
+        diagnostics.failureCode = 'QODER_CN_TRANSCRIPT_ROOT_READ_FAILED';
+        throw error;
+      }
+      continue;
+    }
+    for (const entry of entries) {
+      checkTranscriptBudget(diagnostics, startedAt, options);
+      const full = path.join(current.dir, entry.name);
+      if (entry.isDirectory()) {
+        if (current.depth >= diagnostics.maxDepth) {
+          diagnostics.failureCode = QODER_CN_TRANSCRIPT_BUDGET_CODES.depth;
+          diagnostics.truncated = true;
+          throw transcriptBudgetError(diagnostics.failureCode, diagnostics);
+        }
+        stack.push({ dir: full, depth: current.depth + 1 });
+      } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.jsonl')) {
+        diagnostics.candidateFiles += 1;
+        if (diagnostics.candidateFiles > diagnostics.maxFiles) {
+          diagnostics.failureCode = QODER_CN_TRANSCRIPT_BUDGET_CODES.files;
+          diagnostics.truncated = true;
+          throw transcriptBudgetError(diagnostics.failureCode, diagnostics);
+        }
+        out.push(full);
+      }
+    }
   }
   return out;
+}
+
+function transcriptEventTimestamp(event, message) {
+  return timestampMs(event?.timestamp ?? event?.createdAt ?? event?.created_at
+    ?? message?.timestamp ?? message?.createdAt ?? message?.created_at);
+}
+
+function transcriptEventModel(event, message, fallback = '') {
+  return String(
+    message?.model || message?.modelName || message?.model_name
+      || event?.model || event?.modelName || event?.model_name
+      || event?.modelKey || event?.model_key
+      || event?.data?.model || event?.data?.modelName || event?.data?.model_name
+      || event?.data?.modelKey || event?.data?.model_key
+      || event?.data?.content?.model || event?.data?.content?.modelName
+      || event?.data?.content?.model_key || event?.data?.content?.modelKey
+      || message?.usage?.model || fallback || 'unknown'
+  ).trim() || 'unknown';
+}
+
+function transcriptEventIdentity(event, message) {
+  for (const value of [
+    event?.requestId, event?.request_id, event?.messageId, event?.message_id,
+    event?.id, event?.uuid, message?.requestId, message?.request_id,
+    message?.messageId, message?.message_id, message?.id, message?.uuid,
+    message?.usage?.requestId, message?.usage?.request_id
+  ]) {
+    const normalized = String(value || '').trim();
+    if (normalized) return normalized;
+  }
+  return '';
+}
+
+function defineTranscriptIdentity(row, identities) {
+  const values = [...new Set((Array.isArray(identities) ? identities : [identities])
+    .map((value) => String(value || '').trim()).filter(Boolean))];
+  if (values.length === 0) return row;
+  // The identity is an internal de-duplication aid. It must not become a new
+  // wire field containing an upstream request id until that field's privacy and
+  // compatibility contract is reviewed.
+  Object.defineProperty(row, 'sourceIdentities', {
+    value: values,
+    enumerable: false,
+    configurable: true
+  });
+  return row;
+}
+
+function processTranscriptLine(line, state) {
+  const { diagnostics, buckets, projectLabel, sessionId, sinceMs } = state;
+  if (!line) return;
+  if (Buffer.byteLength(line, 'utf8') > QODER_CN_TRANSCRIPT_MAX_LINE_BYTES) {
+    diagnostics.oversizedLines += 1;
+    diagnostics.ignoredEvents += 1;
+    return;
+  }
+  let event;
+  try {
+    event = JSON.parse(line);
+  } catch (_) {
+    diagnostics.badJsonLines += 1;
+    diagnostics.ignoredEvents += 1;
+    return;
+  }
+  const message = event?.message;
+  // Session init/system records carry the model while complete assistant
+  // records generally do not. Capture that declaration before filtering out
+  // records that have no message body, then let later assistant rows inherit
+  // it through state.modelKey.
+  const declaredModel = transcriptEventModel(event, message);
+  if (declaredModel !== 'unknown') state.modelKey = declaredModel;
+  if (!message || typeof message !== 'object' || Array.isArray(message)) {
+    diagnostics.ignoredEvents += 1;
+    return;
+  }
+  const messageTokens = estimateQoderCnContentTokens(message);
+  const messageRole = String(message.role || '').trim().toLowerCase();
+  const eventType = String(event?.type || '').trim().toLowerCase();
+  const usage = message.usage && typeof message.usage === 'object' ? message.usage : event.usage;
+  const credits = Number(usage?.credits);
+  const timestamp = transcriptEventTimestamp(event, message);
+  const identity = transcriptEventIdentity(event, message);
+  const terminalEvent = new Set(['result', 'progress', 'system', 'status', 'user']);
+  const isAssistant = !terminalEvent.has(eventType)
+    && (messageRole === 'assistant' || (!messageRole && eventType === 'assistant'));
+  // `credits` and `billable` describe Qoder's Credits accounting, not whether
+  // the model response consumed token context. Credits may be absent on older
+  // CLIs, and a promoted/free request can legitimately be non-billable; both
+  // still need an estimated token row. Malformed negative credits remain
+  // ignored, while Result.total_credits never reaches this branch because its
+  // event type is terminal.
+  if (isAssistant && (!Number.isFinite(credits) || credits >= 0) && timestamp > 0) {
+    const date = new Date(timestamp);
+    const dayKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    // Qoder's complete assistant record does not repeat the model; it is
+    // declared by the session's system.init record. Carry that value forward
+    // so otherwise valid requests are not collapsed into an `unknown` model.
+    const modelKey = transcriptEventModel(event, message, state.modelKey);
+    // Keep requests with a stable upstream identity in separate buckets. If
+    // SQLite contains one of several transcript requests, mergeQoderCnRows
+    // can then drop only that request instead of discarding the whole day.
+    // Identity-less records still use one conservative same-day bucket and
+    // are handled by the documented source-precedence fallback.
+    const key = JSON.stringify([dayKey, modelKey, projectLabel, sessionId, identity || '']);
+    const bucket = buckets.get(key) || {
+      dayKey,
+      modelKey,
+      projectLabel,
+      sessionId,
+      input: 0,
+      output: 0,
+      requests: 0,
+      sourceIdentities: new Set()
+    };
+    // The anchored collector normally supplies the local day start, but the
+    // parser also accepts an arbitrary sinceMs for diagnostics and tests. Use
+    // the event's actual timestamp here; comparing the bucket's noon marker
+    // would incorrectly retain early same-day events when sinceMs is inside
+    // that day.
+    if (sinceMs === undefined || timestamp >= sinceMs) {
+      bucket.input += state.cumulativeTokens;
+      bucket.output += messageTokens;
+      bucket.requests += 1;
+      if (identity) bucket.sourceIdentities.add(identity);
+      diagnostics.recognizedEvents += 1;
+      diagnostics.estimated = true;
+      if (!diagnostics.lastDataAt || timestamp > Date.parse(diagnostics.lastDataAt)) {
+        diagnostics.lastDataAt = new Date(timestamp).toISOString();
+      }
+      buckets.set(key, bucket);
+    } else {
+      diagnostics.ignoredEvents += 1;
+    }
+  } else {
+    diagnostics.ignoredEvents += 1;
+  }
+  // File order is append order = conversation order; the cumulative counter
+  // tracks how much context the next request re-sends. It is intentionally
+  // advanced for old events even during an anchored read.
+  state.cumulativeTokens += messageTokens;
+}
+
+function transcriptProjectLabel(root, filePath) {
+  const relative = path.relative(root, filePath);
+  const first = relative.split(path.sep)[0];
+  return normalizeQoderCnProjectLabel(first);
+}
+
+function transcriptSessionId(filePath, dayKey = '') {
+  const suffix = sourceId(filePath);
+  return `qodercn:transcript:${dayKey || 'session'}:${suffix}`;
+}
+
+function dirExistsForQoder(dir) {
+  try { return fs.statSync(dir).isDirectory(); } catch (_) { return false; }
+}
+
+// Keep the public collector synchronous for the existing collector/test seams,
+// but never materialize a whole transcript in the Electron main process. The
+// file size and total-byte checks happen before opening it; reading only the
+// stat-sized snapshot also prevents a writer that appends during a scan from
+// turning one bounded read into an unbounded one. StringDecoder preserves UTF-8
+// characters split across chunk boundaries.
+function streamTranscriptFile(filePath, stat, state, diagnostics, startedAt, options = {}) {
+  const decoder = new StringDecoder('utf8');
+  const chunkSize = Math.min(QODER_CN_TRANSCRIPT_READ_CHUNK_BYTES, Math.max(1, Number(stat.size) || 1));
+  const buffer = Buffer.allocUnsafe(chunkSize);
+  let fileRemaining = Math.max(0, Math.trunc(Number(stat.size) || 0));
+  let pendingLine = '';
+  let discardingOversizedLine = false;
+  let descriptor;
+
+  const consumeText = (text) => {
+    let remaining = text;
+    while (remaining) {
+      if (discardingOversizedLine) {
+        const newline = remaining.indexOf('\n');
+        if (newline < 0) return;
+        remaining = remaining.slice(newline + 1);
+        discardingOversizedLine = false;
+        continue;
+      }
+
+      pendingLine += remaining;
+      remaining = '';
+      let newline;
+      while ((newline = pendingLine.indexOf('\n')) >= 0) {
+        checkTranscriptBudget(diagnostics, startedAt, options);
+        const line = pendingLine.slice(0, newline);
+        pendingLine = pendingLine.slice(newline + 1);
+        processTranscriptLine(line.endsWith('\r') ? line.slice(0, -1) : line, state);
+      }
+      if (Buffer.byteLength(pendingLine, 'utf8') > QODER_CN_TRANSCRIPT_MAX_LINE_BYTES) {
+        diagnostics.oversizedLines += 1;
+        diagnostics.ignoredEvents += 1;
+        pendingLine = '';
+        discardingOversizedLine = true;
+      }
+    }
+  };
+
+  try {
+    descriptor = fs.openSync(filePath, 'r');
+    while (fileRemaining > 0) {
+      checkTranscriptBudget(diagnostics, startedAt, options);
+      const requested = Math.min(buffer.length, fileRemaining);
+      const bytesRead = fs.readSync(descriptor, buffer, 0, requested, null);
+      if (!bytesRead) break;
+      fileRemaining -= bytesRead;
+      diagnostics.readBytes += bytesRead;
+      consumeText(decoder.write(buffer.subarray(0, bytesRead)));
+    }
+    consumeText(decoder.end());
+    if (!discardingOversizedLine && pendingLine) {
+      checkTranscriptBudget(diagnostics, startedAt, options);
+      processTranscriptLine(pendingLine, state);
+    }
+  } finally {
+    try { if (descriptor !== undefined) fs.closeSync(descriptor); } catch (_) { /* best effort */ }
+  }
 }
 
 function collectQoderCnTranscriptRows(options = {}) {
   const homeDir = options.homeDir || os.homedir();
   const sinceMs = typeof options.sinceMs === 'number' ? options.sinceMs : undefined;
-  const projectsDir = path.join(homeDir, QODER_CN_TRANSCRIPTS_PROJECTS_DIR);
-  let projects;
-  try {
-    projects = fs.readdirSync(projectsDir);
-  } catch (_) {
-    return [];
-  }
+  const paths = options.dataPaths || qoderCnDataPaths({
+    homeDir,
+    platform: options.platform,
+    env: options.env
+  });
+  const roots = Array.isArray(options.transcriptRoots)
+    ? options.transcriptRoots
+    : (paths.transcriptRoots || [path.join(homeDir, QODER_CN_TRANSCRIPTS_PROJECTS_DIR)]);
+  const diagnostics = transcriptDiagnostics(options);
+  const startedAt = transcriptScanNow(options);
   const buckets = new Map();
-  for (const project of projects) {
-    const projectDir = path.join(projectsDir, project);
-    let files;
-    try {
-      if (!fs.statSync(projectDir).isDirectory()) continue;
-      files = listTranscriptFiles(projectDir);
-    } catch (_) {
-      continue;
-    }
-    for (const filePath of files) {
-      let text;
-      try {
-        const stat = fs.statSync(filePath);
-        if (!stat.isFile() || stat.size <= 0 || stat.size > QODER_CN_TRANSCRIPT_MAX_BYTES) continue;
-        text = fs.readFileSync(filePath, 'utf8');
-      } catch (_) {
-        continue;
-      }
-      // File order is append order = conversation order; the cumulative
-      // counter tracks how much context the next request re-sends.
-      let cumulativeTokens = 0;
-      for (const line of text.split('\n')) {
-        if (!line || line.length > QODER_CN_TRANSCRIPT_MAX_LINE_BYTES) continue;
-        let event;
-        try {
-          event = JSON.parse(line);
-        } catch (_) {
+  try {
+    for (const rawRoot of roots) {
+      checkTranscriptBudget(diagnostics, startedAt, options);
+      const rootValue = String(rawRoot || '').trim();
+      if (!rootValue) continue;
+      const root = path.resolve(rootValue);
+      if (!dirExistsForQoder(root)) continue;
+      diagnostics.rootExists = true;
+      diagnostics.rootsFound += 1;
+      const files = listTranscriptFiles(root, { ...options, diagnostics, startedAt });
+      for (const filePath of files) {
+        checkTranscriptBudget(diagnostics, startedAt, options);
+        let stat;
+        try { stat = fs.statSync(filePath); } catch (_) { diagnostics.readErrors += 1; continue; }
+        if (!stat.isFile() || stat.size <= 0) {
+          diagnostics.ignoredEvents += 1;
           continue;
         }
-        const message = event && event.message;
-        if (!message || typeof message !== 'object') continue;
-        const messageTokens = estimateQoderCnContentTokens(message);
-        const usage = message.usage;
-        if (usage && typeof usage === 'object' && Number(usage.credits) > 0) {
-          const ts = Date.parse(typeof event.timestamp === 'string' ? event.timestamp : '');
-          if (Number.isFinite(ts)) {
-            const date = new Date(ts);
-            const dayKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-            const modelKey = typeof message.model === 'string' && message.model ? message.model : 'unknown';
-            const key = `${dayKey}|${modelKey}`;
-            const bucket = buckets.get(key) || { dayKey, modelKey, input: 0, output: 0, requests: 0 };
-            bucket.input += cumulativeTokens;
-            bucket.output += messageTokens;
-            bucket.requests += 1;
-            buckets.set(key, bucket);
-          }
+        if (stat.size > QODER_CN_TRANSCRIPT_MAX_BYTES) {
+          diagnostics.oversizedFiles += 1;
+          diagnostics.ignoredEvents += 1;
+          continue;
         }
-        cumulativeTokens += messageTokens;
+        if (diagnostics.readBytes + stat.size > diagnostics.maxTotalBytes) {
+          diagnostics.failureCode = QODER_CN_TRANSCRIPT_BUDGET_CODES.bytes;
+          diagnostics.truncated = true;
+          throw transcriptBudgetError(diagnostics.failureCode, diagnostics);
+        }
+        const relative = path.relative(root, filePath);
+        const dayHint = relative.split(path.sep).find((part) => /^\d{4}-\d{2}-\d{2}$/.test(part)) || '';
+        const state = {
+          cumulativeTokens: 0,
+          diagnostics,
+          buckets,
+          projectLabel: transcriptProjectLabel(root, filePath),
+          sessionId: transcriptSessionId(filePath, dayHint),
+          sinceMs
+        };
+        try {
+          streamTranscriptFile(filePath, stat, state, diagnostics, startedAt, options);
+          diagnostics.readFiles += 1;
+        } catch (error) {
+          if (error?.code && String(error.code).startsWith('QODER_CN_TRANSCRIPT_')) throw error;
+          diagnostics.readErrors += 1;
+        }
       }
     }
+  } catch (error) {
+    publishTranscriptDiagnostics(options, diagnostics);
+    if (error?.code && String(error.code).startsWith('QODER_CN_TRANSCRIPT_')) throw error;
+    diagnostics.failureCode = diagnostics.failureCode || 'QODER_CN_TRANSCRIPT_READ_FAILED';
+    const wrapped = new Error(`qodercn transcript read failed (${diagnostics.failureCode})`, { cause: error });
+    wrapped.code = diagnostics.failureCode;
+    wrapped.diagnostics = { ...diagnostics, usedSources: [...diagnostics.usedSources] };
+    throw wrapped;
   }
   const rows = [];
   for (const bucket of buckets.values()) {
     const createdAt = Date.parse(`${bucket.dayKey}T12:00:00`);
     if (!Number.isFinite(createdAt)) continue;
-    if (sinceMs !== undefined && createdAt < sinceMs) continue;
     const displayName = Object.prototype.hasOwnProperty.call(QODER_CN_MODEL_DISPLAY_NAMES, bucket.modelKey)
       ? QODER_CN_MODEL_DISPLAY_NAMES[bucket.modelKey]
       : bucket.modelKey;
-    rows.push({
-      sessionId: `qodercn:transcript:${bucket.dayKey}:${bucket.modelKey}`,
-      messageId: `qodercn:transcript:${bucket.dayKey}:${bucket.modelKey}`,
+    const sessionSource = bucket.sessionId.split(':').pop();
+    const sessionId = transcriptSessionId(sessionSource, bucket.dayKey);
+    const identity = [...bucket.sourceIdentities][0] || '';
+    const identitySuffix = identity
+      ? createHash('sha256').update(identity).digest('hex').slice(0, 12)
+      : 'anonymous';
+    const row = {
+      sessionId,
+      messageId: `${sessionId}:${bucket.modelKey}:${identitySuffix}`,
       model: displayName,
-      projectLabel: '',
+      projectLabel: bucket.projectLabel,
       input: bucket.input,
       output: bucket.output,
       cacheRead: 0,
       cacheWrite: 0,
       createdAt,
-      messages: bucket.requests
-    });
+      messages: bucket.requests,
+      estimated: true
+    };
+    defineTranscriptIdentity(row, [...bucket.sourceIdentities]);
+    rows.push(row);
   }
-  return rows;
+  diagnostics.source = rows.length > 0 ? 'transcript' : 'none';
+  diagnostics.usedSources = rows.length > 0 ? ['transcript'] : [];
+  publishTranscriptDiagnostics(options, diagnostics);
+  return options.returnDiagnostics ? { rows, diagnostics } : rows;
+}
+
+function qoderCnRowIdentities(row) {
+  return Array.isArray(row?.sourceIdentities) ? row.sourceIdentities : [];
+}
+
+function qoderCnRowFallbackKey(row) {
+  return `${localDateKey(row?.createdAt) || 'undated'}|${String(row?.model || '').trim().toLowerCase()}|${normalizeQoderCnProjectLabel(row?.projectLabel)}`;
+}
+
+// SQLite and transcript rows are often version-specific, but a user can have
+// both sources during an upgrade. Prefer the legacy DB for an explicitly shared
+// request identity; when an older transcript has no identity, use a documented
+// same-day/model/project precedence instead of silently concatenating a likely
+// duplicate. Rows from non-overlapping buckets remain additive.
+function mergeQoderCnRows(dbRows = [], transcriptRows = [], diagnostics = null, options = {}) {
+  const databaseRows = Array.isArray(dbRows) ? dbRows : [];
+  const transcript = Array.isArray(transcriptRows) ? transcriptRows : [];
+  const databaseSources = options.databaseSources && typeof options.databaseSources === 'object'
+    ? [
+      ...(options.databaseSources.legacy ? ['sqlite'] : []),
+      ...(options.databaseSources.main ? ['main-sqlite'] : [])
+    ]
+    : (databaseRows.length > 0 ? ['sqlite'] : []);
+  const merged = [...databaseRows];
+  const identities = new Set(merged.flatMap(qoderCnRowIdentities));
+  const fallbackKeys = new Set(merged.map(qoderCnRowFallbackKey));
+  const databaseFallbackKeysWithoutIdentity = new Set(
+    databaseRows
+      .filter((row) => qoderCnRowIdentities(row).length === 0)
+      .map(qoderCnRowFallbackKey)
+  );
+  const acceptedTranscriptRows = [];
+  let duplicates = 0;
+  for (const row of transcript) {
+    const rowIds = qoderCnRowIdentities(row);
+    const fallbackKey = qoderCnRowFallbackKey(row);
+    // If either source lacks a comparable identity, a matching day/model/
+    // project bucket cannot prove that the rows are distinct. SQLite is the
+    // authoritative legacy source in that case; only rows with distinct,
+    // stable identities remain additive across the two sources.
+    const ambiguousFallback = fallbackKeys.has(fallbackKey)
+      && (rowIds.length === 0 || databaseFallbackKeysWithoutIdentity.has(fallbackKey));
+    if (rowIds.some((identity) => identities.has(identity)) || ambiguousFallback) {
+      duplicates += 1;
+      continue;
+    }
+    merged.push(row);
+    acceptedTranscriptRows.push(row);
+    for (const identity of rowIds) identities.add(identity);
+  }
+  if (diagnostics && typeof diagnostics === 'object') {
+    diagnostics.duplicateRows = Number(diagnostics.duplicateRows || 0) + duplicates;
+    const transcriptUsed = acceptedTranscriptRows.length > 0;
+    diagnostics.source = merged.length > 0
+      ? (databaseRows.length > 0 && transcriptUsed ? 'sqlite+transcript' : databaseRows.length > 0 ? 'sqlite' : 'transcript')
+      : 'none';
+    diagnostics.usedSources = [
+      ...databaseSources,
+      ...(transcriptUsed ? ['transcript'] : [])
+    ];
+  }
+  return merged;
 }
 
 module.exports = {
+  QODER_CN_READ_BUDGET_ERROR,
+  QODER_CN_SQLITE_BACKEND_UNAVAILABLE,
+  QODER_CN_TRANSCRIPT_BUDGET_CODES,
   QODER_CN_MODEL_DISPLAY_NAMES,
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
+  collectQoderCnMainRows,
   collectQoderCnRows,
   collectQoderCnTranscriptRows,
   estimateQoderCnContentTokens,
+  mergeQoderCnRows,
+  normalizeQoderCnMainMessage,
   normalizeQoderCnDbRow,
   qoderCnDataPaths,
+  qoderCnSourceFingerprint,
+  readQoderCnMainDbRows,
   readQoderCnDbRows,
   resolveQoderCnPricing,
   resetQoderCnPricingCache,

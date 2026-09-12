@@ -228,28 +228,3 @@ test('main process external URL allowlist delegates enterprise device-flow to sh
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   assert.match(main, /if \(isAllowedVerificationUrl\(value, enterpriseHost\)\) return true;/);
 });
-
-test('main process Copilot sign-in owns controller cleanup per flow', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  const signInHandler = main.slice(
-    main.indexOf("ipcMain.handle('copilot:signIn'"),
-    main.indexOf("ipcMain.handle('copilot:cancelSignIn'")
-  );
-  const cancelHandler = main.slice(
-    main.indexOf("ipcMain.handle('copilot:cancelSignIn'"),
-    main.indexOf("ipcMain.on('window:minimize'")
-  );
-
-  assert.match(main, /let copilotLoginFlowId = '';/);
-  assert.match(signInHandler, /const controller = new AbortController\(\);/);
-  assert.match(signInHandler, /const flowId = String\(request\?\.flowId \|\| ''\)\.trim\(\);/);
-  assert.match(signInHandler, /copilotLoginController = controller;/);
-  assert.match(signInHandler, /copilotLoginFlowId = flowId;/);
-  assert.match(signInHandler, /if \(copilotLoginController !== controller\) return;/);
-  assert.match(signInHandler, /event\.sender\.send\('copilot:loginStatus', \{ \.\.\.payload, flowId \}\)/);
-  assert.match(signInHandler, /if \(copilotLoginController !== controller\) \{[\s\S]*return \{ ok: false, error: copilotLoginErrorMessage\(\{ status: 'cancelled' \}\), flowId \};[\s\S]*\}/);
-  assert.match(signInHandler, /if \(copilotLoginController === controller\) \{[\s\S]*copilotLoginController = null;[\s\S]*copilotLoginFlowId = '';/);
-  assert.match(cancelHandler, /if \(flowId && copilotLoginFlowId && flowId !== copilotLoginFlowId\) return \{ ok: true \};/);
-  assert.match(cancelHandler, /const controller = copilotLoginController;/);
-  assert.match(cancelHandler, /if \(copilotLoginController === controller\) \{/);
-});

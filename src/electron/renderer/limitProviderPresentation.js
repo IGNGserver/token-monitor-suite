@@ -1,13 +1,10 @@
 'use strict';
 
 (function exposeLimitProviderPresentation(root, factory) {
-  const accountIdentityApi = typeof module === 'object' && module.exports
-    ? require('./accountIdentity')
-    : root?.TokenMonitorAccountIdentity;
-  const api = factory(accountIdentityApi);
+  const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorLimitProviderPresentation = api;
-})(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi(accountIdentityApi) {
+})(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi() {
   const SOURCE_LABELS = {
     oauth: 'OAuth',
     cli: 'CLI',
@@ -217,21 +214,6 @@
     return remainingMs >= -Math.max(0, Number(resetNowGraceMs) || 0) ? 0 : null;
   }
 
-  // The "live" Codex account is the one THIS device's Codex app/CLI is currently
-  // signed into (sourceDetail app/cli/unknown). Managed accounts added inside
-  // Token Monitor report sourceDetail 'managed' and are NOT live. A remote
-  // device's live login (selectedIsRemote) is also not "live" from here — across
-  // synced devices, "Live" only ever points at the local account.
-  function isCodexLiveAccount(provider, provenance) {
-    if (!accountIdentityApi?.isCodexLiveAccount(provider)) return false;
-    // "Active" means this device is signed into the account — not that the shown
-    // quota came from here. So hide it only when the selected record is remote
-    // AND this device has no login of its own for the account; when both devices
-    // are signed in, the remote record is selected but the badge still belongs.
-    if (provenance && provenance.selectedIsRemote && !provenance.hasLocalCandidate) return false;
-    return true;
-  }
-
   function isLinkedStatus(provider) {
     const providerName = providerId(provider);
     const source = sourceId(provider);
@@ -394,7 +376,6 @@
   return {
     antigravityQuotaWindow,
     apiKeyAccountStatus,
-    isCodexLiveAccount,
     limitProviderCapabilityTags,
     limitProviderCompactWindowLabel,
     limitProviderCompactWindowPeriodLabel,

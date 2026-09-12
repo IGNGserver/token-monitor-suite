@@ -79,9 +79,19 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 
 #### Qoder CN（本機介接）
 
-Qoder CN 的 Token 用量來自應用程式本機 SQLite 資料庫，而非 API —— 在 Settings → tools 中啟用（選用，預設關閉）。資料庫路徑依平台自動偵測：macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`、Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`、Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` —— 可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆寫。
+Qoder CN 0.1.x 也會將對話訊息儲存在平台應用程式支援目錄下的 `com.qoder.app.stable/main.sqlite`；必要時可用 `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH` 覆寫。此來源與舊版 `QoderCN/.../local.db` 及 `~/.qoder-cn/projects/**/*.jsonl` transcript 一起偵測。
 
-這是進階本機整合：讀取需要 PATH 上的 `sqlite3` CLI，或內建免 flag 即可用 `node:sqlite` 的 Node 執行環境（Node ≥ 23.4；Electron 元件可能需要 CLI）。讀取失敗會寫入日誌；若已有完整快照，採集器會保留它，而不會以零用量覆蓋。成本依每個對應模型在 models.dev 目錄中的價格估算；Qoder 若變更資料庫 schema，介接器可能失效。
+若 Qoder CN 使用搬移後的設定目錄，請設定 Qoder CN 自帶的 `QODERCN_CONFIG_DIR`；除非設定 `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`，Token Monitor 會監看該目錄下的 `projects`。
+
+Qoder CN 的 Token 用量來自應用程式本機 SQLite 資料庫，而非 API —— 在 Settings → tools 中啟用（選用，預設關閉）。資料庫路徑依平台自動偵測：macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`、Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`、Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` —— 可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆寫。Qoder CN 0.1.x 也可能寫入 `~/.qoder-cn/projects/**/*.jsonl`；此 transcript 目錄會被監看以即時更新，也可用 `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` 覆寫。
+
+這是進階本機整合：讀取需要 PATH 上的 `sqlite3` CLI，或內建免 flag 即可用 `node:sqlite` 的 Node 執行環境（Node ≥ 23.4；Electron 元件可能需要 CLI）。讀取失敗會寫入日誌；若已有完整快照，採集器會保留它，而不會以零用量覆蓋。Transcript 行使用 CJK 字元 / 1.5 與其他字元 / 4 的混合公式估算；請求輸入是該 session 到目前請求的累計上下文，輸出是該請求的內容。系統提示與工具 schema 不在 transcript 中，因此 transcript 得出的用量與成本會標記為 `estimated`，不等於供應商的精確計費 Token。成本依每個對應模型在 models.dev 目錄中的價格估算；Qoder 若變更資料庫 schema，介接器可能失效。
+
+Main SQLite 的對話內容同樣只提供估算用量，沒有供應商計費欄位、系統提示或工具 schema，因此會標記為 `estimated`，不等於精確計費 Token。
+
+#### Qoder 帳號額度
+
+`qoder` 額度帳號必須手動加入 Hub，與本機 `qodercn` 用量介接器分開。Hub 會加密保存使用者提交的憑證、自動重新整理帳號額度，並將規範化結果分發給已連線裝置。裝置端已移除對本機 Qoder 登入、瀏覽器 profile、環境憑證與 CLI 帳號的自動偵測；這些憑證不會由裝置上報，也不會作為額度來源。
 </details>
 
 ## 介面展示
@@ -89,7 +99,7 @@ Qoder CN 的 Token 用量來自應用程式本機 SQLite 資料庫，而非 API 
 <table>
 <tr>
 <td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="主頁檢視"><br><sub>可自訂儀表板：自選要顯示的模組與排序</sub></td>
-<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="額度檢視"><br><sub>多帳號並列，Codex 可一鍵切換本機帳號</sub></td>
+<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="額度檢視"><br><sub>Hub 管理帳號，額度重新整理後同步到各裝置</sub></td>
 <td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="工具檢視"><br><sub>點任一工具展開輸入／輸出與快取命中明細</sub></td>
 </tr>
 <tr>
@@ -123,7 +133,7 @@ Qoder CN 的 Token 用量來自應用程式本機 SQLite 資料庫，而非 API 
 ### 額度、趨勢與匯出
 
 - **AI 工具額度偵測**：涵蓋 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、Kimi 等 19+ 家供應商的 session、每週、帳單與 credits 視窗，支援多個 OpenRouter／第三方 profile，以及 DeepSeek 預付餘額與消費
-- **多帳號與 Codex 帳號切換**：同一供應商可追蹤多個帳號、各自顯示額度；已加入追蹤的 Codex 帳號還能一鍵切換為本機使用帳號，免重新登入授權
+- **Hub 統一管理額度帳號**：同一供應商可手動加入多個帳號；憑證只保存在 Hub，由 Hub 統一重新整理額度並同步到所有連線裝置
 - **保留已刪除會話用量**：許多工具會定期清除舊 session（Claude Code 預設清 30 天前的 transcript），一刪就再也算不到。開啟後，Token Monitor 會在本機不設期限地封存已觀測到的每日工具／模型用量，讓熱力圖與趨勢即使在來源檔案被清掉後仍然完整（詳見下方[〈會話資料保留期〉](#會話資料保留期)）
 - **使用趨勢與儀表板**：主頁的活躍熱力圖與趨勢圖，加上獨立的儀表板視窗，提供連續天數，以及跨所有裝置、依工具／依模型堆疊的歷史（柱狀圖與 K 線兩種檢視）
 - **可選的狀態檢視**：追蹤 Claude、OpenAI、Cursor 與 DeepSeek status 頁，支援手動或定時重新檢查
@@ -170,6 +180,8 @@ Qoder CN 的 Token 用量來自應用程式本機 SQLite 資料庫，而非 API 
 挑一個所有裝置（與任何無頭代理）都連得到的 hub 後端。在每台裝置上打開小工具，在 設定 → 多裝置同步 選一個模式。小工具會自動回報本機用量；只在沒有小工具的機器上跑 `npm run agent`。
 
 Hub 憑證已分權：viewer 令牌唯讀，裝置令牌只能上報綁定的 Device ID，admin 令牌才能變更資料。遠端預設要求 HTTPS；Android 發行版不允許明文 HTTP。
+
+升級舊設定時，若 Hub 是非本機的 `http://` 位址，不會靜默降低安全性：本機採集會繼續執行，但 Hub 讀取／回報／即時串流會維持 blocked，直到改用 HTTPS 或使用者明確開啟可信任 LAN 選項。同步設定會分別顯示這些通道，並在設定變更後於同一程序中恢復。
 
 #### 選項 A——直接在小工具內開 hub（最簡單，無需命令列）
 

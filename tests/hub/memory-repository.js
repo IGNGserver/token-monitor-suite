@@ -36,6 +36,10 @@ class MemoryRepository {
     this.events = [];
     this.pricing = new Map();
     this.sessions = new Map();
+    this.hubAccounts = new Map();
+    this.hubCredentials = new Map();
+    this.hubSnapshots = new Map();
+    this.hubAudit = [];
   }
 
   async transaction(work) { return work(this); }
@@ -49,11 +53,90 @@ class MemoryRepository {
   async getDeviceRecord(deviceId) { return clone(this.devices.get(deviceId) || null); }
 
   async saveDevice(record) {
-    this.devices.set(record.deviceId, clone(record));
+    const stored = { ...record };
+    delete stored.limits;
+    delete stored.limitsOnly;
+    this.devices.set(record.deviceId, clone(stored));
     this.hiddenDevices.delete(record.deviceId);
   }
 
   async countDevices() { return this.devices.size - this.hiddenDevices.size; }
+
+  async listHubAccounts() {
+    return [...this.hubAccounts.values()]
+      .map(clone)
+      .sort((left, right) => `${left.provider}\u0000${left.name}\u0000${left.id}`.localeCompare(`${right.provider}\u0000${right.name}\u0000${right.id}`));
+  }
+
+  async getHubAccount(accountId) { return clone(this.hubAccounts.get(String(accountId || '')) || null); }
+
+  async findHubAccount(provider, accountKey = '', accountEmail = '') {
+    const normalizedProvider = String(provider || '').trim();
+    const normalizedKey = String(accountKey || '').trim();
+    const normalizedEmail = String(accountEmail || '').trim().toLowerCase();
+    if (!normalizedProvider || (!normalizedKey && !normalizedEmail)) return null;
+    for (const account of this.hubAccounts.values()) {
+      if (account.provider !== normalizedProvider) continue;
+      if (normalizedKey && account.accountKey === normalizedKey) return clone(account);
+      if (normalizedEmail && String(account.accountEmail || '').toLowerCase() === normalizedEmail) return clone(account);
+    }
+    return null;
+  }
+
+  async createHubAccount(account, envelope, snapshot) {
+    const id = String(account.id || '');
+    this.hubAccounts.set(id, clone(account));
+    this.hubCredentials.set(id, clone(envelope));
+    this.hubSnapshots.set(id, clone(snapshot));
+    return this.getHubAccount(id);
+  }
+
+  async updateHubAccount(accountId, patch = {}) {
+    const id = String(accountId || '');
+    const current = this.hubAccounts.get(id);
+    if (!current) return null;
+    this.hubAccounts.set(id, { ...current, ...clone(patch) });
+    return this.getHubAccount(id);
+  }
+
+  async deleteHubAccount(accountId) {
+    const id = String(accountId || '');
+    const deleted = this.hubAccounts.delete(id);
+    this.hubCredentials.delete(id);
+    this.hubSnapshots.delete(id);
+    return deleted;
+  }
+
+  async getHubAccountCredential(accountId) {
+    return clone(this.hubCredentials.get(String(accountId || '')) || null);
+  }
+
+  async replaceHubAccountCredential(accountId, envelope) {
+    const id = String(accountId || '');
+    this.hubCredentials.set(id, clone(envelope));
+    return this.getHubAccountCredential(id);
+  }
+
+  async getHubAccountSnapshot(accountId) {
+    return clone(this.hubSnapshots.get(String(accountId || '')) || null);
+  }
+
+  async saveHubAccountSnapshot(accountId, snapshot) {
+    const id = String(accountId || '');
+    this.hubSnapshots.set(id, clone(snapshot));
+    return this.getHubAccountSnapshot(id);
+  }
+
+  async appendHubAccountAudit(accountId, action, actor = '', details = null) {
+    this.hubAudit.push({
+      id: this.hubAudit.length + 1,
+      accountId: accountId ? String(accountId) : null,
+      action: String(action || ''),
+      actor: String(actor || ''),
+      details: clone(details),
+      createdAt: new Date().toISOString()
+    });
+  }
 
   async getPricing(models) {
     return new Map(models.filter(Boolean).map((model) => [model, clone(this.pricing.get(model))]).filter(([, item]) => item));

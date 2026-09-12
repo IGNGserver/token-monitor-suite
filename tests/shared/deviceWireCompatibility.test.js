@@ -67,7 +67,7 @@ test('composed full records remain compatible with hub normalization and merging
   assert.equal(merged.receivedAt, '2026-07-21T01:01:01.000Z');
 });
 
-test('sync payload keeps retained public status/windows and drops runtime-only provider state', () => {
+test('sync payload omits all device quota state for Hub-owned refreshes', () => {
   const payload = syncPayload({
     deviceId: 'device-1',
     updatedAt: '2026-07-21T01:00:00.000Z',
@@ -89,11 +89,6 @@ test('sync payload keeps retained public status/windows and drops runtime-only p
       }]
     }
   });
-  const provider = payload.limits.providers[0];
-  assert.equal(provider.status, 'unavailable');
-  assert.equal(provider.windows[0].usedPercent, 40);
-  assert.equal(Object.hasOwn(provider, 'lastAttempt'), false);
-  assert.equal(Object.hasOwn(provider, 'error'), false);
-  assert.equal(Object.hasOwn(provider, 'credentialDigest'), false);
-  assert.equal(Object.hasOwn(provider, 'revision'), false);
+  assert.equal(Object.hasOwn(payload, 'limits'), false);
+  assert.equal(Object.hasOwn(payload, 'limitsOnly'), false);
 });

@@ -5,39 +5,28 @@ const test = require('node:test');
 
 const { runAgent, runAgentOnce } = require('../../src/agent/runtime');
 
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
-  return { promise, reject, resolve };
-}
-
 function runtimeHarness() {
   let usageOptions;
-  let limitsDeps;
-  const limitsRefresh = deferred();
+  let limitsFactoryCalls = 0;
   const deps = {
     deviceRuntimeDeps: {
       createUsageRuntime(options) {
         usageOptions = options;
-        return { stop() {}, tick() {}, refreshClient() {} };
-      },
-      createLimitsRuntime(_options, nextDeps) {
-        limitsDeps = nextDeps;
         return {
-          clear() {},
-          getSnapshot() { return { providers: [] }; },
-          reconfigure() {},
-          refresh() { return limitsRefresh.promise; },
-          stop() {}
+          stop() {},
+          tick() {},
+          refreshClient() {}
         };
+      },
+      createLimitsRuntime() {
+        limitsFactoryCalls += 1;
+        throw new Error('agent limits runtime must not be constructed');
       }
     }
   };
   return {
     deps,
-    limitsRefresh,
-    limitsUpdate: (summary) => limitsDeps.onUpdate(summary),
+    limitsFactoryCalls: () => limitsFactoryCalls,
     usageError: (error) => usageOptions.onError(error, 'startup'),
     usageUpdate: (summary) => usageOptions.onUpdate(summary, 'startup')
   };
@@ -53,21 +42,20 @@ function usageSummary(tokens = 1) {
   };
 }
 
-test('long-running agent posts usage before hung limits and never overlaps posts', async () => {
+test('long-running agent posts usage without starting a local limits collector', async () => {
   const harness = runtimeHarness();
-  const firstSend = deferred();
+  const firstSend = new Promise((resolve) => { harness.releaseFirstSend = resolve; });
   const delivered = [];
   let active = 0;
   let maxActive = 0;
   const runtime = runAgent({
     envelope: { deviceId: 'device-1' },
-    usageOptions: {},
     limitsOptions: {},
     async deliver(record) {
       active += 1;
       maxActive = Math.max(maxActive, active);
       delivered.push(record);
-      if (delivered.length === 1) await firstSend.promise;
+      if (delivered.length === 1) await firstSend;
       active -= 1;
     }
   }, harness.deps);
@@ -75,27 +63,21 @@ test('long-running agent posts usage before hung limits and never overlaps posts
   harness.usageUpdate(usageSummary(10));
   await new Promise(setImmediate);
   assert.equal(delivered.length, 1);
-  harness.limitsUpdate({ updatedAt: 'limits-time', refreshMs: 300000, providers: [] });
-  await new Promise(setImmediate);
-  assert.equal(delivered.length, 1);
-  firstSend.resolve();
+  assert.equal(harness.limitsFactoryCalls(), 0);
+  harness.releaseFirstSend();
   await runtime.flush();
 
-  assert.equal(delivered.length, 2);
-  assert.equal(delivered[1].today.totalTokens, 10);
-  assert.equal(delivered[1].limits.updatedAt, 'limits-time');
+  assert.equal(delivered[0].today.totalTokens, 10);
+  assert.equal(Object.hasOwn(delivered[0], 'limits'), false);
   assert.equal(maxActive, 1);
   runtime.stop();
 });
-
 test('long-running agent reports one owned error for a failed delivery', async () => {
   const harness = runtimeHarness();
   const expected = new Error('post failed');
   const errors = [];
   const runtime = runAgent({
     envelope: { deviceId: 'device-1' },
-    usageOptions: {},
-    limitsOptions: {},
     deliver: async () => { throw expected; },
     onError: (...args) => errors.push(args)
   }, harness.deps);
@@ -106,74 +88,48 @@ test('long-running agent reports one owned error for a failed delivery', async (
   runtime.stop();
 });
 
-test('normal once posts usage immediately and a changed limits record second', async () => {
+test('normal once posts exactly one usage record', async () => {
   const harness = runtimeHarness();
   const delivered = [];
   const running = runAgentOnce({
     envelope: { deviceId: 'device-1' },
-    usageOptions: {},
-    limitsOptions: {},
     deliver: async (record) => delivered.push(record)
   }, harness.deps);
 
   harness.usageUpdate(usageSummary(11));
-  await new Promise(setImmediate);
-  assert.equal(delivered.length, 1);
-  harness.limitsUpdate({ updatedAt: 'limits-time', refreshMs: 300000, providers: [] });
-  harness.limitsRefresh.resolve();
   const final = await running;
 
-  assert.equal(delivered.length, 2);
+  assert.equal(delivered.length, 1);
   assert.equal(delivered[0].today.totalTokens, 11);
-  assert.equal(delivered[1].limits.updatedAt, 'limits-time');
-  assert.deepEqual(final, delivered[1]);
+  assert.equal(Object.hasOwn(delivered[0], 'limits'), false);
+  assert.deepEqual(final, delivered[0]);
 });
 
-test('dry-run once waits for bounded limits and emits one final JSON record', async () => {
+test('dry-run once waits for usage and emits one final JSON record', async () => {
   const harness = runtimeHarness();
   const delivered = [];
   const running = runAgentOnce({
     dryRun: true,
     envelope: { deviceId: 'device-1' },
-    usageOptions: {},
-    limitsOptions: {},
     deliver: async (record) => delivered.push(record)
   }, harness.deps);
 
-  harness.usageUpdate(usageSummary(12));
+  const resultPromise = running;
   await new Promise(setImmediate);
   assert.deepEqual(delivered, []);
-  harness.limitsUpdate({ updatedAt: 'limits-time', refreshMs: 300000, providers: [] });
-  harness.limitsRefresh.resolve();
-  await running;
+  harness.usageUpdate(usageSummary(12));
+  const result = await resultPromise;
 
   assert.equal(delivered.length, 1);
   assert.equal(delivered[0].today.totalTokens, 12);
-  assert.equal(delivered[0].limits.updatedAt, 'limits-time');
-});
-
-test('once does not duplicate when the initial limits pass has no new publish', async () => {
-  const harness = runtimeHarness();
-  const delivered = [];
-  const running = runAgentOnce({
-    envelope: { deviceId: 'device-1' },
-    usageOptions: {},
-    limitsOptions: {},
-    deliver: async (record) => delivered.push(record)
-  }, harness.deps);
-
-  harness.usageUpdate(usageSummary(13));
-  harness.limitsRefresh.resolve();
-  await running;
-  assert.equal(delivered.length, 1);
+  assert.equal(Object.hasOwn(delivered[0], 'limits'), false);
+  assert.deepEqual(result, delivered[0]);
 });
 
 test('once rejects and stops when the initial usage collection fails', async () => {
   const harness = runtimeHarness();
   const running = runAgentOnce({
     envelope: { deviceId: 'device-1' },
-    usageOptions: {},
-    limitsOptions: {},
     deliver: async () => {}
   }, harness.deps);
   harness.usageError(new Error('usage failed'));

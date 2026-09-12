@@ -40,6 +40,12 @@ function clientsCsvForSetting(value, fallback = DEFAULT_CLIENTS) {
   return normalizeClientsCsv(value);
 }
 
+// An explicit environment selection is complete, including an empty one. The
+// default-client migration must not mutate that selection on any restart.
+function shouldMigrateNewDefaultClients({ hasExplicitEnvClients = false } = {}) {
+  return !hasExplicitEnvClients;
+}
+
 /**
  * One-time merge of newly introduced default clients into an explicit tracked list.
  * Empty lists stay empty (user disabled everything). Clients already migrated are
@@ -78,5 +84,6 @@ module.exports = {
   NEW_DEFAULT_CLIENTS,
   clientsCsvForSetting,
   normalizeClientsCsv,
-  applyNewDefaultClientMigration
+  applyNewDefaultClientMigration,
+  shouldMigrateNewDefaultClients
 };

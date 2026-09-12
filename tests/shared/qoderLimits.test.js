@@ -5,13 +5,16 @@ const test = require('node:test');
 
 const {
   qoderCookie,
+  qoderCookieMode,
   qoderSite,
   qoderUsageUrl,
   qoderUserPlanUrl,
   parseQoderPlanLabel,
   parseQoderUsage,
-  fetchQoderLimits
+  fetchQoderLimits,
+  normalizeQoderCookieMode
 } = require('../../src/shared/qoderLimits');
+const { hashKey } = require('../../src/shared/hashKey');
 
 test('qoderCookie reads settings before env and trims quoted cookies', () => {
   assert.equal(qoderCookie({ QODER_COOKIE: 'env-cookie' }, { qoderCookie: '  "settings-cookie"  ' }), 'settings-cookie');
@@ -139,4 +142,159 @@ test('fetchQoderLimits requests the selected site with the dashboard cookie', as
   assert.equal(requests[1].url, 'https://qoder.com.cn/api/v1/me/userplan');
   assert.equal(requests[0].init.headers.Cookie, 'session=abc');
   assert.equal(requests[0].init.headers.Origin, 'https://qoder.com.cn');
+});
+
+test('fetchQoderLimits uses stable identity and metadata from the user-plan response', async () => {
+  const provider = await fetchQoderLimits(
+    { qoderCookie: 'session=rotated', qoderSite: 'global' },
+    {
+      env: {},
+      fetch: async (url) => {
+        if (String(url).endsWith('/api/v1/me/userplan')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ data: { user: { user_id: 'stable-from-plan', email: 'user@example.test' }, plan_tier: 'PLAN_TIER_PRO' } })
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total_quota: { quota_summary: { used_value: 1, limit_value: 2, remaining_value: 1 } }
+          })
+        };
+      }
+    }
+  );
+
+  assert.equal(provider.accountKey, hashKey('qoder-account', 'stable-from-plan'));
+  assert.equal(provider.accountEmail, 'user@example.test');
+  assert.equal(provider.accountLabel, 'Pro');
+});
+
+test('qoder cookie modes normalize legacy aliases and keep env discovery automatic', () => {
+  assert.equal(normalizeQoderCookieMode('automatic'), 'auto');
+  assert.equal(normalizeQoderCookieMode('manual-only'), 'manual');
+  assert.equal(normalizeQoderCookieMode('disabled'), 'off');
+  assert.equal(qoderCookieMode({}, {}), 'auto');
+  assert.equal(qoderCookieMode({ qoderCookieMode: 'manual' }, { TOKEN_MONITOR_QODER_COOKIE_MODE: 'auto' }), 'manual');
+});
+
+test('qoder manual mode ignores env and browser candidates', async () => {
+  let imported = false;
+  const requests = [];
+  const provider = await fetchQoderLimits(
+    { qoderCookieMode: 'manual', qoderCookie: 'session=manual', qoderSite: 'global' },
+    {
+      env: { QODER_COOKIE: 'session=env' },
+      importQoderCookies: async () => { imported = true; return [{ cookie: 'session=browser', site: 'global' }]; },
+      fetch: async (url, init) => {
+        requests.push({ url, init });
+        return { ok: true, status: 200, json: async () => ({
+          user: { userId: 'stable-user' },
+          total_quota: { quota_summary: { used_value: 1, limit_value: 2, remaining_value: 1 } }
+        }) };
+      }
+    }
+  );
+  assert.equal(imported, false);
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.credentialOrigin, 'manual');
+  assert.equal(provider.accountKey.startsWith('sha256:'), true);
+  assert.equal(requests[0].init.headers.Cookie, 'session=manual');
+});
+
+test('generic provider manual-only policy preserves explicit Qoder Cookie but blocks auto candidates', async () => {
+  let imported = false;
+  const requests = [];
+  const provider = await fetchQoderLimits(
+    {
+      qoderCookieMode: 'auto',
+      qoderCookie: 'session=manual',
+      suppressAutoDetectedAccounts: true,
+      qoderSite: 'global'
+    },
+    {
+      env: { QODER_COOKIE: 'session=env' },
+      importQoderCookies: async () => {
+        imported = true;
+        return [{ cookie: 'session=browser', site: 'global' }];
+      },
+      fetch: async (url, init) => {
+        requests.push({ url, init });
+        return { ok: true, status: 200, json: async () => ({
+          user: { userId: 'manual-user' },
+          total_quota: { quota_summary: { used_value: 1, limit_value: 2, remaining_value: 1 } }
+        }) };
+      }
+    }
+  );
+
+  assert.equal(imported, false);
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.credentialOrigin, 'manual');
+  assert.equal(requests[0].init.headers.Cookie, 'session=manual');
+});
+
+test('qoder manual mode does not resurrect an automatic cache', async () => {
+  const requests = [];
+  const provider = await fetchQoderLimits(
+    { qoderCookieMode: 'manual' },
+    {
+      env: {},
+      qoderCookieCache: [{ cookie: 'session=automatic', site: 'global', source: 'chrome' }],
+      fetch: async (_url, init) => {
+        requests.push(init.headers.Cookie);
+        return { ok: true, status: 200, json: async () => ({
+          user: { userId: 'manual-user' },
+          total_quota: { quota_summary: { used_value: 1, limit_value: 2, remaining_value: 1 } }
+        }) };
+      }
+    }
+  );
+  assert.equal(provider.status, 'notConfigured');
+  assert.deepEqual(requests, []);
+});
+
+test('qoder auto mode drops an invalid cached candidate and uses the next candidate', async () => {
+  const cache = [{ cookie: 'session=expired', site: 'cn', source: 'chrome', validatedAt: '2026-07-01T00:00:00Z' }];
+  const persisted = [];
+  const cookies = [];
+  const provider = await fetchQoderLimits(
+    { qoderCookieMode: 'auto' },
+    {
+      env: {},
+      now: () => Date.parse('2026-07-06T00:00:00Z'),
+      qoderCookieCache: cache,
+      readQoderCookieCache: () => cache,
+      writeQoderCookieCache: (next) => { persisted.push(next); cache.splice(0, cache.length, ...next); },
+      importQoderCookies: async () => [{ cookie: 'session=fresh', site: 'cn', source: 'chrome', profile: 'Default' }],
+      fetch: async (url, init) => {
+        cookies.push(init.headers.Cookie);
+        if (init.headers.Cookie === 'session=expired') return { ok: false, status: 401, json: async () => ({}) };
+        return { ok: true, status: 200, json: async () => ({
+          data: {
+            user: { id: 'stable-user' },
+            total_quota: { quota_summary: { used_value: 10, limit_value: 100, remaining_value: 90 } }
+          }
+        }) };
+      }
+    }
+  );
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.credentialOrigin, 'automatic');
+  assert.equal(provider.region, 'cn');
+  assert.deepEqual(cookies.slice(0, 2), ['session=expired', 'session=fresh']);
+  assert.equal(persisted.length >= 2, true, 'invalid cache removal and valid cache write are both persisted');
+  assert.match(cache[0].cookie, /session=fresh/);
+});
+
+test('qoder off mode never makes a network request', async () => {
+  let requests = 0;
+  const provider = await fetchQoderLimits({ qoderCookieMode: 'off', qoderCookie: 'session=manual' }, {
+    fetch: async () => { requests += 1; throw new Error('must not fetch'); }
+  });
+  assert.equal(provider.status, 'disabled');
+  assert.equal(requests, 0);
 });

@@ -2552,8 +2552,183 @@ test('Qoder CN db-shm events are ignored without suppressing real database chang
   const roots = { qodercn: [root] };
 
   assert.equal(isQoderCnSelfWatchEvent(path.join(root, 'local.db-shm'), roots), true);
+  assert.equal(isQoderCnSelfWatchEvent(path.join(root, 'main.sqlite-shm'), roots), true);
   assert.equal(isQoderCnSelfWatchEvent(path.join(root, 'local.db-wal'), roots), false);
   assert.equal(isQoderCnSelfWatchEvent(path.join(os.tmpdir(), 'Other', 'local.db-shm'), roots), false);
+});
+
+test('Qoder CN source descriptor context reaches checks and watcher roots', () => {
+  const tmp = withTmpHome([]);
+  const qoderHome = path.join(tmp, '.qoder-cn-custom');
+  const transcriptRoot = path.join(qoderHome, 'projects');
+  const dbPath = path.join(tmp, '.config', 'QoderCN', 'SharedClientCache', 'cache', 'db', 'local.db');
+  const mainDbPath = path.join(tmp, '.config', 'com.qoder.app.stable', 'main.sqlite');
+  fs.mkdirSync(transcriptRoot, { recursive: true });
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.writeFileSync(dbPath, 'fixture placeholder');
+
+  const source = {
+    homeDir: tmp,
+    platform: 'linux',
+    env: { QODERCN_CONFIG_DIR: qoderHome }
+  };
+  try {
+    const {
+      clientSourceRoots,
+      clientSourceChecks,
+      clientsForWatchPath,
+      watchAttributionRootsForClients,
+      watchIgnoreMatcher,
+      watchPathsForClients
+    } = freshCollector();
+    const roots = clientSourceRoots('qodercn', source).qodercn;
+    assert.ok(roots.some((root) => root.id === 'qodercn-db' && root.sourcePath === dbPath));
+    assert.ok(roots.some((root) => root.id === 'qodercn-main-db' && root.sourcePath === mainDbPath));
+    assert.ok(roots.some((root) => root.id === 'qodercn-transcripts' && root.dir === transcriptRoot));
+
+    const watched = watchPathsForClients('qodercn', source);
+    assert.ok(watched.includes(path.dirname(dbPath)));
+    assert.ok(watched.includes(transcriptRoot));
+
+    const ignored = watchIgnoreMatcher('qodercn', source);
+    assert.equal(ignored(dbPath), false);
+    assert.equal(ignored(`${dbPath}-wal`), false);
+    assert.equal(ignored(`${dbPath}-shm`), false);
+    assert.equal(ignored(mainDbPath), false);
+    assert.equal(ignored(`${mainDbPath}-wal`), false);
+    assert.equal(ignored(`${mainDbPath}-shm`), false);
+    assert.equal(ignored(path.join(path.dirname(dbPath), 'unrelated.json')), true);
+
+    const attribution = watchAttributionRootsForClients('qodercn', { qodercn: watched }, source);
+    assert.deepEqual(clientsForWatchPath(`${dbPath}-wal`, attribution), ['qodercn']);
+    assert.deepEqual(clientsForWatchPath(`${mainDbPath}-wal`, attribution), ['qodercn']);
+    assert.deepEqual(clientsForWatchPath(path.join(path.dirname(dbPath), 'unrelated.json'), attribution), []);
+
+    assert.deepEqual(clientSourceChecks('qodercn', source).qodercn, [
+      { id: 'qodercn-db', exists: true },
+      { id: 'qodercn-main-db', exists: false },
+      { id: 'qodercn-transcripts', exists: true }
+    ]);
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Qoder CN watches an existing ancestor when its roots are created after startup', () => {
+  const tmp = withTmpHome([]);
+  const source = { homeDir: tmp, platform: 'linux', env: {} };
+  try {
+    const {
+      clientsForWatchPath,
+      watchAttributionRootsForClients,
+      watchIgnoreMatcher,
+      watchPathsForClients
+    } = freshCollector();
+    const watched = watchPathsForClients('qodercn', source);
+    assert.deepEqual(watched, [tmp]);
+
+    const ignored = watchIgnoreMatcher('qodercn', source);
+    assert.equal(ignored(tmp), false, 'the existing ancestor must remain watchable');
+    assert.equal(ignored(path.join(tmp, '.qoder-cn')), false);
+    assert.equal(ignored(path.join(tmp, '.qoder-cn', 'projects')), false);
+    assert.equal(ignored(path.join(tmp, '.qoder-cn', 'unrelated')), true);
+    assert.equal(ignored(path.join(tmp, '.config')), false);
+    assert.equal(ignored(path.join(tmp, '.config', 'unrelated')), true);
+
+    const attribution = watchAttributionRootsForClients('qodercn', { qodercn: watched }, source);
+    const transcript = path.join(tmp, '.qoder-cn', 'projects', 'project-a', 'session.jsonl');
+    assert.deepEqual(clientsForWatchPath(transcript, attribution), ['qodercn']);
+    assert.deepEqual(clientsForWatchPath(path.join(tmp, 'unrelated.txt'), attribution), []);
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Qoder CN transcript create and append events trigger a targeted refresh', async () => {
+  const projectsRelativeRoot = path.join('.qoder-cn', 'projects');
+  const projectRelativeRoot = path.join(projectsRelativeRoot, 'project-a');
+  const tmp = withTmpHome([projectRelativeRoot]);
+  const projectsRoot = path.join(tmp, projectsRelativeRoot);
+  const projectRoot = path.join(tmp, projectRelativeRoot);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  let watchedDirs = [];
+  chokidar.watch = (dirs) => {
+    watchedDirs = dirs;
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const line = (content) => JSON.stringify({
+    timestamp: new Date().toISOString(),
+    message: { role: 'assistant', content, model: 'dfmodel', usage: { credits: 1 } }
+  });
+  const firstFile = path.join(projectRoot, 'session-a.jsonl');
+  fs.writeFileSync(firstFile, `${line('first event')}\n`);
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude,qodercn',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchDebounceMs: 10,
+      watchEnabled: true,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      lookupModelPricing: async () => null,
+      runTokscale: async () => ({ entries: [] }),
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1 && watchHandler);
+    assert.ok(watchedDirs.includes(projectsRoot));
+    const firstTokens = updates.at(-1).summary.today.totalTokens;
+
+    const createdFile = path.join(projectRoot, 'session-created.jsonl');
+    fs.writeFileSync(createdFile, `${line('created event')}\n`);
+    watchHandler('add', createdFile);
+    await waitForCondition(() => updates.length === 2);
+    assert.equal(updates.at(-1).reason.startsWith('watch:add:'), true);
+    assert.equal(handle.getDiagnostics().lastTickScope, 'targeted');
+    assert.ok(updates.at(-1).summary.today.totalTokens > firstTokens);
+
+    const createdTokens = updates.at(-1).summary.today.totalTokens;
+    fs.appendFileSync(firstFile, `${line('appended event')}\n`);
+    watchHandler('change', firstFile);
+    await waitForCondition(() => updates.length === 3);
+    assert.equal(updates.at(-1).reason.startsWith('watch:change:'), true);
+    assert.equal(handle.getDiagnostics().lastTickScope, 'targeted');
+    assert.ok(updates.at(-1).summary.today.totalTokens > createdTokens);
+  } finally {
+    if (handle) handle.stop();
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('collector preserves Qoder CN while publishing other clients after a bounded SQLite read fails', async () => {
@@ -2907,6 +3082,49 @@ test('collector publishes live periods when only Qoder CN history read fails', a
     qoderCnUsage.buildQoderCnHistoryGraph = originalHistory;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('Qoder CN transcript history remains available when a targeted tick names another client', async () => {
+  const projectsRelativeRoot = path.join('.qoder-cn', 'projects');
+  const projectRelativeRoot = path.join(projectsRelativeRoot, 'project-a');
+  const tmp = withTmpHome([projectRelativeRoot]);
+  const transcript = path.join(tmp, projectRelativeRoot, 'session.jsonl');
+  fs.writeFileSync(transcript, `${JSON.stringify({
+    timestamp: new Date().toISOString(),
+    message: { role: 'assistant', content: 'history event', model: 'history-model', usage: { credits: 1 } }
+  })}\n`);
+
+  try {
+    const { collectUsageOnce } = freshCollector();
+    const result = await collectUsageOnce({
+      clients: 'claude,qodercn',
+      targetClients: ['claude'],
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      homeDir: tmp,
+      historyEnabled: true,
+      includeHistory: true,
+      wslScanEnabled: false,
+      lookupModelPricing: async () => null,
+      runTokscale: async () => ({ entries: [{ client: 'claude', model: 'm', input: 3 }] }),
+      runGraph: async () => ({
+        contributions: [{
+          date: new Date().toISOString().slice(0, 10),
+          clients: [{ client: 'claude', modelId: 'm', tokens: { input: 3 }, cost: 0, messages: 1 }]
+        }]
+      })
+    });
+
+    const today = result.history.daily.find((entry) => entry.date === new Date().toISOString().slice(0, 10));
+    assert.ok(today, 'history includes the current local day');
+    assert.ok(today.perClient.qodercn, 'history graph includes transcript-derived Qoder CN usage');
+    assert.equal(today.perClient.qodercn.tokens > 0, true);
+  } finally {
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }

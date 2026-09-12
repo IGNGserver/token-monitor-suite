@@ -117,7 +117,6 @@ const DEFAULT_LIMIT_PROVIDER_ORDER = LIMIT_PROVIDERS.map((provider) => provider.
 const limitProviderOrderApi = window.TokenMonitorLimitProviderOrder;
 const limitProviderPresentationApi = window.TokenMonitorLimitProviderPresentation;
 const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
-const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const clientStatusPresentationApi = window.TokenMonitorClientStatusPresentation;
 const serviceStatusPresentationApi = window.TokenMonitorServiceStatusPresentation;
 const clientDisplayPreferencesApi = window.TokenMonitorClientDisplayPreferences;
@@ -143,7 +142,6 @@ const deviceBreakdownApi = window.TokenMonitorDeviceBreakdown;
 const projectRowsApi = window.TokenMonitorProjectRows;
 const sessionDetailApi = window.TokenMonitorSessionDetail;
 const windowShortcutApi = window.TokenMonitorWindowShortcut;
-const LIMIT_REFRESH_OPTIONS = [60000, 120000, 300000, 900000, 1800000];
 const WINDOW_BEHAVIOR_VALUES = ['floating', 'normal', 'desktop'];
 const WINDOW_BEHAVIOR_ICONS = { floating: '⇧', normal: '○', desktop: '⇩' };
 const LIMIT_SOURCE_LABELS = { oauth: 'OAuth', cli: 'CLI', web: 'Web', rpc: 'RPC', local: 'Local', api: 'API' };
@@ -239,7 +237,6 @@ const TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/blob
 const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProviderPreferences;
 const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'accounts', 'sync'];
 const REFRESH_BUTTON_FEEDBACK_MS = 700;
-const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;
 const initialFloatingBubble = window.__TOKEN_MONITOR_INITIAL_FLOATING_BUBBLE__ || { collapsed: false, side: null };
 const initialViewState = window.__TOKEN_MONITOR_INITIAL_VIEW_STATE__ || {};
 let initialBreakdownPreferenceApplied = typeof initialViewState.breakdown === 'string';
@@ -249,7 +246,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, homeScrollResetPending: true, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, stats: null, syncHealth: null, recoveryResult: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, homeScrollResetPending: true, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubAccounts: [], hubAccountsBusy: false, hubAccountError: '', hubAccountExpanded: false, customPricingExpanded: false, floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
 state.homeHistoryLoadedSignature = '';
 state.homeHistoryRetrySignature = '';
 state.homeReturnVisible = false;
@@ -273,7 +270,7 @@ let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInput: document.getElementById('showLimitUsedInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), usageEstimateBadge: document.getElementById('usageEstimateBadge'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInput: document.getElementById('showLimitUsedInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
 };
 Object.assign(els, {
   viewBackRow: document.getElementById('viewBackRow'),
@@ -285,6 +282,18 @@ Object.assign(els, {
   hubModeOptions: document.getElementById('hubModeOptions'),
   hubClientFields: document.getElementById('hubClientFields'),
   hubHostFields: document.getElementById('hubHostFields'),
+  hubAdminSecretInput: document.getElementById('hubAdminSecretInput'),
+  hubAccountsSettingsToggle: document.getElementById('hubAccountsSettingsToggle'),
+  hubAccountsSettingsDetails: document.getElementById('hubAccountsSettingsDetails'),
+  hubAccountsStatus: document.getElementById('hubAccountsStatus'),
+  hubAccountProvider: document.getElementById('hubAccountProvider'),
+  hubAccountName: document.getElementById('hubAccountName'),
+  hubAccountLabel: document.getElementById('hubAccountLabel'),
+  hubAccountCredential: document.getElementById('hubAccountCredential'),
+  hubAccountAddButton: document.getElementById('hubAccountAddButton'),
+  hubAccountsRefreshButton: document.getElementById('hubAccountsRefreshButton'),
+  hubAccountError: document.getElementById('hubAccountError'),
+  hubAccountsList: document.getElementById('hubAccountsList'),
   hubPortInput: document.getElementById('hubPortInput'),
   hubSecretInput: document.getElementById('hubSecretInput'),
   hubSecretCopyButton: document.getElementById('hubSecretCopyButton'),
@@ -298,7 +307,7 @@ Object.assign(els, {
   secretPasteButton: document.getElementById('secretPasteButton'),
   allowInsecureHubHttpInput: document.getElementById('allowInsecureHubHttpInput'),
   hubStatusRow: document.getElementById('hubStatusRow'),
-  syncClientStatus: document.getElementById('syncClientStatus'),
+  syncClientStatus: document.getElementById('syncClientStatus'), syncHealthStatus: document.getElementById('syncHealthStatus'),
   hubAddressList: document.getElementById('hubAddressList'),
   syncUploadIntervalInput: document.getElementById('syncUploadIntervalInput'),
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
@@ -471,11 +480,6 @@ function translatedLimitCapabilityTag(label) {
   return key ? t(key) : label;
 }
 
-function translatedLimitProviderTag(tagInfo) {
-  if (tagInfo?.key) return t(tagInfo.key, tagInfo.values);
-  return translatedLimitCapabilityTag(tagInfo?.label || '');
-}
-
 function applySettingsTranslations() {
   if (els.languageInput) els.languageInput.value = currentLanguage();
   i18n.applyTranslations(document, currentLocale());
@@ -598,23 +602,10 @@ function settingsSectionSummary(section) {
     });
   }
   if (section === 'accounts') {
-    const cursorLinked = Boolean(state.cursorAccount.status?.loggedIn) && !state.cursorAccount.status?.expired;
-    const opencodeCount = state.opencodeProfileCount || 0;
-    const openrouterCount = state.openrouterProfileCount || 0;
-    const deepseekLinked = deepseekAccountLinked();
-    const minimaxLinked = minimaxAccountLinked();
-    const zaiLinked = externalProviderAccountLinked('zai');
-    const zaiteamLinked = externalProviderAccountLinked('zaiteam');
-    const volcengineLinked = externalProviderAccountLinked('volcengine');
-    const qoderLinked = externalProviderAccountLinked('qoder');
-    const kimiLinked = externalProviderAccountLinked('kimi');
-    const ollamaLinked = externalProviderAccountLinked('ollama');
-    const mimoLinked = mimoAccountLinked();
-    const copilotLinked = copilotAccountLinked();
-    const codexLinked = (state.settings?.codexManagedAccounts || []).length > 0;
+    const accountCount = Array.isArray(state.hubAccounts) ? state.hubAccounts.length : 0;
     return t('settings.summary.accounts', {
-      linked: (codexLinked ? 1 : 0) + (cursorLinked ? 1 : 0) + (opencodeCount > 0 ? 1 : 0) + (openrouterCount > 0 ? 1 : 0) + (deepseekLinked ? 1 : 0) + (minimaxLinked ? 1 : 0) + (zaiLinked ? 1 : 0) + (zaiteamLinked ? 1 : 0) + (volcengineLinked ? 1 : 0) + (qoderLinked ? 1 : 0) + (kimiLinked ? 1 : 0) + (ollamaLinked ? 1 : 0) + (mimoLinked ? 1 : 0) + (copilotLinked ? 1 : 0),
-      total: 14
+      linked: accountCount,
+      total: accountCount
     });
   }
   if (section === 'limits') {
@@ -1976,7 +1967,7 @@ function limitProviderMeta(provider, provenance = null) {
 function limitProviderPlan(provider) {
   if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
   const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
-  if (label) return limitProviderPresentationApi.limitProviderDisplayLabel(label);
+  if (label) return limitProviderPresentationApi.limitProviderDisplayLabel(translatedLimitCapabilityTag(label));
   return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
 }
 
@@ -1996,19 +1987,6 @@ function configuredLimitProviderSelection() {
 function enabledLimitProviderSet() {
   if (state.settings?.limitsEnabled === false) return new Set();
   return new Set(configuredLimitProviderSelection());
-}
-
-function limitProviderEnabled(providerName) {
-  return enabledLimitProviderSet().has(providerName);
-}
-
-function limitProviderSelectionIncluding(providerName) {
-  const selected = new Set(configuredLimitProviderSelection());
-  selected.add(providerName);
-  return LIMIT_PROVIDERS
-    .map((provider) => provider.id)
-    .filter((id) => selected.has(id))
-    .join(',');
 }
 
 function missingLimitProviderStatus() {
@@ -2110,19 +2088,6 @@ function limitDetailTooltipShouldHoldRender() {
 function flushPendingLimitDetailTooltipRender() {
   if (!state.limitDetailTooltipRenderPending || state.breakdown !== 'limits') return;
   state.limitDetailTooltipRenderPending = false;
-  renderLimits();
-}
-
-function codexSwitchPopoverShouldHoldRender() {
-  if (!state.codexSwitchPopoverActive || !els.limitsPanel) return false;
-  return Boolean(els.limitsPanel.querySelector(
-    '.limit-account-switch-zone:hover, .limit-account-switch-zone:focus-within, .limit-account-active-zone:hover, .limit-account-active-zone:focus-within'
-  ));
-}
-
-function flushPendingCodexSwitchPopoverRender() {
-  if (!state.codexSwitchPopoverRenderPending || state.breakdown !== 'limits') return;
-  state.codexSwitchPopoverRenderPending = false;
   renderLimits();
 }
 
@@ -2455,141 +2420,6 @@ function renderLimitProviderMark(id, color) {
   return mark;
 }
 
-function codexSwitchAccountForProvider(provider) {
-  if (!provider || provider.provider !== 'codex') return null;
-  if (!provider.accountKey && !provider.accountEmail) return null;
-  return (state.settings?.codexManagedAccounts || []).find((account) => {
-    if (account.enabled === false) return false;
-    return accountIdentityApi.codexAccountMatchesProvider(account, provider);
-  }) || null;
-}
-
-function codexProviderMatchesProvider(left, right) {
-  if (!left || !right || left.provider !== 'codex' || right.provider !== 'codex') return false;
-  const leftKey = String(left.accountKey || '').trim();
-  const rightKey = String(right.accountKey || '').trim();
-  if (leftKey && rightKey && leftKey === rightKey) return true;
-  const leftEmail = String(left.accountEmail || '').trim().toLowerCase();
-  const rightEmail = String(right.accountEmail || '').trim().toLowerCase();
-  return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
-}
-
-function codexActiveAccountMatchesProvider(provider) {
-  return accountIdentityApi.codexAccountMatchesProvider(state.codexActiveAccount, provider);
-}
-
-function codexAccountsShareIdentity(left, right) {
-  if (!left || !right) return false;
-  const leftKey = String(left.accountKey || '').trim();
-  const rightKey = String(right.accountKey || '').trim();
-  if (leftKey && rightKey) return leftKey === rightKey;
-  const leftEmail = String(left.email || left.accountEmail || '').trim().toLowerCase();
-  const rightEmail = String(right.email || right.accountEmail || '').trim().toLowerCase();
-  return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
-}
-
-// The account THIS device's Codex app/CLI is signed into is a purely local fact:
-// the local device's own record for it carries a live (non-managed) sourceDetail.
-// Read it from the local device's RAW limits, not the cross-device aggregate:
-// aggregateLimits() keeps one record per account by freshness, so after sync the
-// selected codex row can belong to a remote device signed into a *different*
-// account. Reading the aggregate would move the active marker onto that remote
-// login, or drop it entirely when every selected row is 'managed'. Legacy stats
-// without per-device rows fall back to the aggregate (localDeviceLimitsProviders
-// returns null there), mirroring localProviderStatus().
-function localLiveCodexProvider() {
-  return accountIdentityApi.localLiveCodexProvider(state.stats, state.settings?.deviceId || '');
-}
-
-function codexActiveAccountFromStats() {
-  const provider = localLiveCodexProvider();
-  if (!provider) return null;
-  return {
-    id: codexSwitchAccountForProvider(provider)?.id || '',
-    email: provider.accountEmail || '',
-    accountKey: provider.accountKey || '',
-    accountLabel: provider.accountLabel || ''
-  };
-}
-
-function clearCodexPendingActiveAccount() {
-  if (state.codexPendingActiveAccountTimer) {
-    clearTimeout(state.codexPendingActiveAccountTimer);
-    state.codexPendingActiveAccountTimer = null;
-  }
-  state.codexPendingActiveAccount = null;
-  state.codexPendingActiveAccountUntil = 0;
-}
-
-function scheduleCodexPendingActiveAccountExpiry() {
-  if (state.codexPendingActiveAccountTimer) clearTimeout(state.codexPendingActiveAccountTimer);
-  const delay = Math.max(0, state.codexPendingActiveAccountUntil - Date.now());
-  state.codexPendingActiveAccountTimer = setTimeout(() => {
-    state.codexPendingActiveAccountTimer = null;
-    applyCodexActiveAccountFromStats();
-    renderLimits();
-    renderCodexAccounts();
-    renderSettingsSummaries();
-  }, delay);
-}
-
-function setCodexPendingActiveAccount(account) {
-  if (!account) {
-    clearCodexPendingActiveAccount();
-    return;
-  }
-  state.codexPendingActiveAccount = account;
-  state.codexPendingActiveAccountUntil = Date.now() + CODEX_PENDING_ACTIVE_GRACE_MS;
-  scheduleCodexPendingActiveAccountExpiry();
-}
-
-function applyCodexActiveAccountFromStats() {
-  const activeAccount = codexActiveAccountFromStats();
-  if (state.codexPendingActiveAccount) {
-    const pendingAccount = state.codexPendingActiveAccount;
-    if (activeAccount && codexAccountsShareIdentity(pendingAccount, activeAccount)) {
-      clearCodexPendingActiveAccount();
-      state.codexActiveAccount = activeAccount;
-      return;
-    }
-    if (Date.now() < state.codexPendingActiveAccountUntil) {
-      state.codexActiveAccount = pendingAccount;
-      return;
-    }
-    clearCodexPendingActiveAccount();
-  }
-  state.codexActiveAccount = activeAccount;
-}
-
-function applyCodexAccountLimitsRefresh(providers) {
-  const refreshed = (providers || []).filter((provider) => provider?.provider === 'codex');
-  if (!refreshed.length || !state.stats?.limits) return;
-  const used = new Set();
-  const existingProviders = state.stats.limits.providers || [];
-  const nextProviders = existingProviders.map((provider) => {
-    if (provider?.provider !== 'codex') return provider;
-    const index = refreshed.findIndex((candidate, candidateIndex) => (
-      !used.has(candidateIndex) && codexProviderMatchesProvider(candidate, provider)
-    ));
-    if (index === -1) return provider;
-    used.add(index);
-    return refreshed[index];
-  });
-  refreshed.forEach((provider, index) => {
-    if (!used.has(index)) nextProviders.push(provider);
-  });
-  state.stats = {
-    ...state.stats,
-    limits: {
-      ...state.stats.limits,
-      providers: nextProviders
-    }
-  };
-  applyCodexActiveAccountFromStats();
-  renderLimits();
-  maybeUpdateBarsIcon();
-}
-
 function renderLimitProviderHead(id, label, provider, color, options = {}) {
   const head = document.createElement('div');
   head.className = 'limit-head';
@@ -2602,127 +2432,7 @@ function renderLimitProviderHead(id, label, provider, color, options = {}) {
   title.className = 'limit-name-title';
   title.textContent = options.title || label;
   const provenance = limitProviderProvenance(provider);
-  // The ✓ marks the account THIS device's Codex is signed into
-  // (state.codexActiveAccount, derived locally by codexActiveAccountFromStats).
-  // It only disambiguates rows in the multi-account group, so it's gated on
-  // showActiveBadge. Never re-derive "live" from the row being rendered — in
-  // sync mode that row can be a remote device's record for a different account,
-  // which would move the ✓ onto the wrong one.
-  const activeCodexAccount = options.showActiveBadge && codexActiveAccountMatchesProvider(provider);
-  const switchAccount = options.allowSystemSwitch && !activeCodexAccount ? codexSwitchAccountForProvider(provider) : null;
-  if (switchAccount && window.tokenMonitor?.codex?.switchSystemAccount) {
-    const switchZone = document.createElement('span');
-    const switchPopover = document.createElement('span');
-    const switchButton = document.createElement('button');
-    const switching = state.codexSystemSwitchingAccountId === switchAccount.id;
-    const failed = state.codexSystemSwitchErrorAccountId === switchAccount.id && state.codexSystemSwitchError;
-    switchZone.className = 'limit-account-switch-zone';
-    switchZone.classList.toggle('has-opened', state.codexSwitchPopoverHasOpened);
-    switchZone.classList.toggle('is-switching', Boolean(switching));
-    switchZone.classList.toggle('is-error', Boolean(failed));
-    switchPopover.className = 'limit-account-switch-popover';
-    switchButton.type = 'button';
-    switchButton.className = 'limit-account-switch-button';
-    switchButton.disabled = Boolean(state.codexSystemSwitchingAccountId);
-    switchButton.title = failed || t('limits.codex.switchAccountTitle', {
-      account: switchAccount.email || t('settings.codex.unnamedAccount')
-    });
-    switchButton.setAttribute('aria-label', switchButton.title);
-    switchButton.textContent = switching
-      ? t('limits.codex.switching')
-      : failed
-        ? t('limits.codex.switchFailedShort')
-        : t('limits.codex.switchAccount');
-    const markCodexSwitchPopoverOpened = () => {
-      state.codexSwitchPopoverHasOpened = true;
-      state.codexSwitchPopoverActive = true;
-      switchZone.classList.add('has-opened');
-    };
-    const releaseCodexSwitchPopover = () => {
-      requestAnimationFrame(() => {
-        if (switchZone.matches(':hover, :focus-within')) return;
-        state.codexSwitchPopoverActive = false;
-        flushPendingCodexSwitchPopoverRender();
-      });
-    };
-    switchZone.addEventListener('pointerenter', markCodexSwitchPopoverOpened);
-    switchZone.addEventListener('focusin', markCodexSwitchPopoverOpened);
-    switchZone.addEventListener('pointerleave', releaseCodexSwitchPopover);
-    switchZone.addEventListener('focusout', releaseCodexSwitchPopover);
-    switchButton.addEventListener('click', async (event) => {
-      event.stopPropagation();
-      if (state.codexSystemSwitchingAccountId) return;
-      state.codexSystemSwitchingAccountId = switchAccount.id;
-      state.codexSystemSwitchErrorAccountId = '';
-      state.codexSystemSwitchError = '';
-      state.codexSwitchPopoverActive = false;
-      renderLimits();
-      try {
-        const result = await window.tokenMonitor.codex.switchSystemAccount(switchAccount.id);
-        if (!result?.ok) {
-          const message = result?.error || t('limits.codex.switchFailed');
-          state.codexSystemSwitchErrorAccountId = switchAccount.id;
-          state.codexSystemSwitchError = message;
-          state.codexAccountError = message;
-        } else {
-          state.codexAccountError = '';
-          state.settings.codexManagedAccounts = result.accounts || state.settings.codexManagedAccounts || [];
-          setCodexPendingActiveAccount(result.activeAccount || null);
-          state.codexActiveAccount = result.activeAccount;
-          renderLimits();
-          window.tokenMonitor.codex.refreshAccountLimits(switchAccount.id).then((refreshResult) => {
-            if (refreshResult?.ok) applyCodexAccountLimitsRefresh(refreshResult.providers || []);
-            else if (refreshResult?.error) console.log(`[codex] refresh account limits failed: ${refreshResult.error}`);
-          }).catch((refreshError) => {
-            console.log(`[codex] refresh account limits failed: ${refreshError?.message || refreshError}`);
-          });
-        }
-      } catch (error) {
-        const message = error?.message || t('limits.codex.switchFailed');
-        state.codexSystemSwitchErrorAccountId = switchAccount.id;
-        state.codexSystemSwitchError = message;
-        state.codexAccountError = message;
-      } finally {
-        state.codexSystemSwitchingAccountId = '';
-        renderLimits();
-        renderCodexAccounts();
-        renderSettingsSummaries();
-      }
-    });
-    switchPopover.append(switchButton);
-    switchZone.append(title, switchPopover);
-    name.append(switchZone);
-  } else if (activeCodexAccount) {
-    const activeZone = document.createElement('span');
-    const badge = document.createElement('span');
-    const activePopover = document.createElement('span');
-    const activeHint = t('limits.codex.activeAccountHint');
-    activeZone.className = 'limit-account-active-zone';
-    activeZone.tabIndex = 0;
-    activeZone.setAttribute('aria-label', activeHint);
-    badge.className = 'limit-live-badge';
-    badge.textContent = '\u2713';
-    activePopover.className = 'limit-account-active-popover';
-    activePopover.textContent = activeHint;
-    const markCodexActiveHintOpened = () => {
-      state.codexSwitchPopoverActive = true;
-    };
-    const releaseCodexActiveHint = () => {
-      requestAnimationFrame(() => {
-        if (activeZone.matches(':hover, :focus-within')) return;
-        state.codexSwitchPopoverActive = false;
-        flushPendingCodexSwitchPopoverRender();
-      });
-    };
-    activeZone.addEventListener('pointerenter', markCodexActiveHintOpened);
-    activeZone.addEventListener('focusin', markCodexActiveHintOpened);
-    activeZone.addEventListener('pointerleave', releaseCodexActiveHint);
-    activeZone.addEventListener('focusout', releaseCodexActiveHint);
-    activeZone.append(title, badge, activePopover);
-    name.append(activeZone);
-  } else {
-    name.append(title);
-  }
+  name.append(title);
   titleBlock.append(name);
   // The multi-account group header has no quota of its own, and its accounts can
   // update at different times (different devices too), so it omits the meta line
@@ -3098,16 +2808,21 @@ function renderLimitProviderRow(id, label, provider, color, options = {}) {
   return row;
 }
 
-function codexAccountTitle(provider, index, providers = [provider]) {
-  const label = accountIdentityApi.codexAccountDisplayLabel(provider, providers, {
-    maskEmail: state.settings?.maskLimitAccountEmails,
-    // Limits presents raw account data such as email and Plus/Pro labels, so
-    // keep the provider's canonical English workspace name on this surface.
-    personalWorkspaceLabel: 'Personal'
-  });
-  if (label) return label;
-  // Never fall back to the plan label here — "Plus" as a title reads like an
-  // account name. The plan still shows on the right via limitProviderPlan().
+function maskEmailAddress(value) {
+  const raw = String(value || '').trim();
+  const separator = raw.indexOf('@');
+  if (separator <= 0) return raw;
+  const local = raw.slice(0, separator);
+  const domain = raw.slice(separator + 1);
+  if (local.length <= 2) return `${local[0] || ''}***@${domain}`;
+  return `${local[0]}***${local[local.length - 1]}@${domain}`;
+}
+
+function codexAccountTitle(provider, index) {
+  const accountLabel = String(provider?.accountLabel || provider?.accountName || '').trim();
+  if (accountLabel) return accountLabel;
+  const email = String(provider?.accountEmail || '').trim();
+  if (email) return state.settings?.maskLimitAccountEmails ? maskEmailAddress(email) : email;
   return `Account ${index + 1}`;
 }
 
@@ -3125,8 +2840,6 @@ function renderCodexAccountGroup(label, providers, color) {
     accountList.append(renderLimitProviderRow('codex', codexAccountTitle(provider, index, providers), provider, color, {
       accountRow: true,
       accountTitle: true,
-      allowSystemSwitch: true,
-      showActiveBadge: true,
       showIcon: false
     }));
   });
@@ -3136,12 +2849,8 @@ function renderCodexAccountGroup(label, providers, color) {
 
 function mimoAccountTitle(provider, index) {
   const email = String(provider?.accountEmail || '').trim();
-  if (email) return state.settings?.maskLimitAccountEmails ? accountIdentityApi.maskEmailAddress(email) : email;
+  if (email) return state.settings?.maskLimitAccountEmails ? maskEmailAddress(email) : email;
   return `Account ${index + 1}`;
-}
-
-function mimoSettingsAccountTitle(account, index) {
-  return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
 }
 
 function renderMimoAccountGroup(label, providers, color) {
@@ -3231,14 +2940,11 @@ function renderOpenRouterAccountGroup(label, providers, color) {
 function renderLimits() {
   if (!els.limitsPanel) return;
   const holdLimitDetailTooltipRender = limitDetailTooltipShouldHoldRender();
-  const holdCodexSwitchPopoverRender = codexSwitchPopoverShouldHoldRender();
-  if (holdLimitDetailTooltipRender || holdCodexSwitchPopoverRender) {
-    if (holdLimitDetailTooltipRender) state.limitDetailTooltipRenderPending = true;
-    if (holdCodexSwitchPopoverRender) state.codexSwitchPopoverRenderPending = true;
+  if (holdLimitDetailTooltipRender) {
+    state.limitDetailTooltipRenderPending = true;
     return;
   }
   state.limitDetailTooltipRenderPending = false;
-  state.codexSwitchPopoverRenderPending = false;
   const limitsEnabled = state.settings?.limitsEnabled !== false;
   const enabled = enabledLimitProviderSet();
   const providers = providersByLimitProviderId(state.stats?.limits?.providers || []);
@@ -3276,10 +2982,7 @@ function renderLimits() {
       continue;
     }
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
-    nodes.push(renderLimitProviderRow(id, label, provider, color, id === 'codex' ? {
-      accountTitle: true,
-      allowSystemSwitch: true
-    } : undefined));
+    nodes.push(renderLimitProviderRow(id, label, provider, color));
   }
   els.limitsPanel.replaceChildren(...nodes);
 }
@@ -4604,6 +4307,16 @@ function renderHome() {
   // post-layout, so no requestAnimationFrame guess is needed here.
 }
 
+function renderUsageEstimateBadge(period) {
+  const badge = els.usageEstimateBadge;
+  if (!badge) return;
+  const estimated = period?.estimated === true;
+  badge.hidden = !estimated;
+  badge.classList.toggle('hidden', !estimated);
+  badge.textContent = estimated ? t('usage.estimated') : '';
+  badge.title = estimated ? t('usage.estimatedTitle') : '';
+}
+
 function render() {
   if (!state.stats) return;
   reconcileCustomRangeCapability();
@@ -4614,6 +4327,7 @@ function render() {
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
+  renderUsageEstimateBadge(period);
   const nextTotal = Number(period.totalTokens || 0);
   const totalChanged = nextTotal !== state.currentTotal;
   if (state.suppressInitialNumberAnimation) {
@@ -4723,8 +4437,73 @@ const STREAM_REASON_KEYS = {
   unreachable: 'settings.sync.offline.unreachable',
   server_error: 'settings.sync.offline.serverError',
   disconnected: 'settings.sync.offline.disconnected',
+  idle_timeout: 'settings.sync.offline.idleTimeout',
   network: 'settings.sync.offline.network'
 };
+
+const SYNC_HEALTH_REASON_KEYS = {
+  unauthorized: 'settings.sync.offline.unauthorized',
+  forbidden: 'settings.sync.offline.forbidden',
+  request_timeout: 'settings.sync.offline.timeout',
+  timeout: 'settings.sync.offline.timeout',
+  rate_limited: 'settings.sync.offline.rateLimited',
+  hub_server_error: 'settings.sync.offline.serverError',
+  server_error: 'settings.sync.offline.serverError',
+  refused: 'settings.sync.offline.refused',
+  dns: 'settings.sync.offline.dns',
+  unreachable: 'settings.sync.offline.unreachable',
+  network: 'settings.sync.offline.network',
+  disconnected: 'settings.sync.offline.disconnected',
+  idle_timeout: 'settings.sync.offline.idleTimeout',
+  hub_not_configured: 'settings.sync.offline.notConfigured',
+  insecure_hub_transport: 'settings.sync.offline.configuration',
+  hub_transport_unavailable: 'settings.sync.offline.configuration',
+  collector_unavailable: 'settings.sync.offline.network',
+  collection_failed: 'settings.sync.offline.network',
+  external_agent_active: 'settings.sync.offline.configuration',
+  upload_scheduler_unavailable: 'settings.sync.offline.network',
+  stream_offline: 'settings.sync.offline.disconnected',
+  recovery_timeout: 'settings.sync.offline.timeout',
+  upload_failed: 'settings.sync.offline.network',
+  hub_read_failed: 'settings.sync.offline.network'
+};
+
+const SYNC_HEALTH_STATE_KEYS = {
+  idle: 'settings.sync.healthState.idle',
+  collecting: 'settings.sync.healthState.collecting',
+  ok: 'settings.sync.healthState.ok',
+  uploading: 'settings.sync.healthState.uploading',
+  waiting: 'settings.sync.healthState.waiting',
+  backoff: 'settings.sync.healthState.backoff',
+  failed: 'settings.sync.healthState.failed',
+  error: 'settings.sync.healthState.error',
+  aborted: 'settings.sync.healthState.aborted',
+  blocked: 'settings.sync.healthState.blocked',
+  connecting: 'settings.sync.healthState.connecting',
+  live: 'settings.sync.healthState.live',
+  offline: 'settings.sync.healthState.offline',
+  'idle-timeout': 'settings.sync.healthState.idleTimeout',
+  not_applicable: 'settings.sync.healthState.notApplicable',
+  stopped: 'settings.sync.healthState.stopped',
+  unknown: 'settings.sync.healthState.unknown'
+};
+
+const RECOVERY_CHANNEL_LABEL_KEYS = {
+  collection: 'settings.sync.healthLocal',
+  upload: 'settings.sync.healthUpload',
+  rest: 'settings.sync.healthRest',
+  stream: 'settings.sync.healthStream'
+};
+
+function recoveryFailures(result) {
+  if (!result || typeof result !== 'object') return [];
+  const channels = ['collection', 'upload', 'rest', 'stream'];
+  return result.ok === false || channels.some((channel) => result[channel]?.ok === false)
+    ? channels
+      .filter((channel) => result[channel]?.ok === false && result[channel]?.code !== 'not_applicable')
+      .map((channel) => ({ channel, result: result[channel] }))
+    : [];
+}
 
 function streamFailureText(failure) {
   if (!failure || !failure.reason) return '';
@@ -4735,6 +4514,61 @@ function streamFailureText(failure) {
   if (!key) return '';
   const base = t(key);
   return failure.detail ? `${base} (${failure.detail})` : base;
+}
+
+function syncHealthFailureText(code) {
+  if (!code) return '';
+  const key = SYNC_HEALTH_REASON_KEYS[code];
+  return key ? t(key) : String(code);
+}
+
+function syncHealthStateText(stateValue) {
+  const state = String(stateValue || '').trim().toLowerCase();
+  return t(SYNC_HEALTH_STATE_KEYS[state] || SYNC_HEALTH_STATE_KEYS.unknown);
+}
+
+function syncHealthEntryHasFailure(entry) {
+  if (!entry || entry.state === 'not_applicable') return false;
+  return Boolean(entry.failureCode) || ['error', 'failed', 'blocked', 'aborted'].includes(entry.state);
+}
+
+function syncHealthEntryDetail(entry) {
+  if (!entry || !entry.failureCode || !['error', 'failed', 'backoff', 'blocked', 'aborted', 'offline', 'idle-timeout'].includes(entry.state)) return '';
+  const retry = entry.nextRetryAt ? ` → ${formatTime(entry.nextRetryAt)}` : '';
+  return ` — ${syncHealthFailureText(entry.failureCode)}${retry}`;
+}
+
+function renderSyncHealthStatus() {
+  if (!els.syncHealthStatus) return;
+  const health = state.syncHealth;
+  if (!health || state.settings?.hubMode !== 'client' || state.mode !== 'sync') {
+    els.syncHealthStatus.textContent = '';
+    els.syncHealthStatus.className = 'hub-status';
+    els.syncHealthStatus.hidden = true;
+    return;
+  }
+  const channelKeys = [
+    ['local', 'settings.sync.healthLocal'],
+    ['upload', 'settings.sync.healthUpload'],
+    ['rest', 'settings.sync.healthRest'],
+    ['stream', 'settings.sync.healthStream']
+  ];
+  const parts = channelKeys.map(([channel, labelKey]) => {
+    const entry = health[channel] || {};
+    return `${t(labelKey)}: ${syncHealthStateText(entry.state)}${syncHealthEntryDetail(entry)}`;
+  });
+  const recoveryParts = recoveryFailures(state.recoveryResult);
+  for (const { channel, result } of recoveryParts) {
+    const label = t(RECOVERY_CHANNEL_LABEL_KEYS[channel]);
+    const healthChannel = channel === 'collection' ? 'local' : channel;
+    const alreadyShown = syncHealthEntryHasFailure(health[healthChannel]);
+    if (alreadyShown) continue;
+    parts.push(`${label}: ${syncHealthFailureText(result.code || 'sync_failed')}`);
+  }
+  els.syncHealthStatus.textContent = parts.join(' · ');
+  const hasFailure = channelKeys.some(([channel]) => syncHealthEntryHasFailure(health[channel])) || recoveryParts.length > 0;
+  els.syncHealthStatus.className = hasFailure ? 'hub-status error' : 'hub-status';
+  els.syncHealthStatus.hidden = false;
 }
 
 function statusTextFor(mode, connected) {
@@ -4845,7 +4679,15 @@ async function refreshStats(options = {}) {
     setRefreshButtonState('refreshing');
   }
   try {
-    state.stats = preserveCustomPeriod(overlayAllTimeSessions(await window.tokenMonitor.getStats(options)));
+    if (options.recover !== true) state.recoveryResult = null;
+    if (options.recover === true) {
+      state.recoveryResult = await window.tokenMonitor.recoverNow?.() || null;
+      state.syncHealth = await window.tokenMonitor.getSyncHealth?.() || state.syncHealth;
+    }
+    const statsOptions = options.recover === true
+      ? { ...options, force: false, forceHistory: false, recover: false }
+      : options;
+    state.stats = preserveCustomPeriod(overlayAllTimeSessions(await window.tokenMonitor.getStats(statsOptions)));
     if (state.period === 'custom' && state.customRange && (options.force || options.feedback)) {
       try { await applyCustomRange(state.customRange); } catch (_) {}
     }
@@ -4860,25 +4702,12 @@ async function refreshStats(options = {}) {
       state.homeHistoryRetries = 0;
       state.homeHistorySignature = '';
     }
-    applyCodexActiveAccountFromStats();
     setStatus(statusTextFor(state.mode, state.streamConnected));
     render();
-    renderLimitProviderCheckboxes();
     renderToolPreferences();
     renderWslPanel();
-    updateOpenRouterProfilesStatus();
-    renderDeepseekStatus();
-    renderMinimaxStatus();
-    renderExternalProviderStatus('zai');
-    renderExternalProviderStatus('zaiteam');
-    renderExternalProviderStatus('volcengine');
-    renderExternalProviderStatus('qoder');
-    renderExternalProviderStatus('kimi');
-    renderExternalProviderStatus('ollama');
-    renderMimoStatus();
-    renderCopilotStatus();
     maybeUpdateBarsIcon();
-    if (feedback) settleRefreshButtonState('refreshed');
+    if (feedback) settleRefreshButtonState(recoveryFailures(state.recoveryResult).length > 0 ? 'error' : 'refreshed');
   } catch (error) {
     // The dot colour shows the offline state and the reason lives in the
     // live-dot tooltip + sync settings line, so keep the header status pill
@@ -6097,9 +5926,9 @@ function renderHubStatus() {
 
 function renderSyncClientStatus() {
   if (!els.syncClientStatus) return;
-  // Gate on the runtime mode, not just the hubMode setting: client mode with no
-  // URL falls back to the local collector (mode 'local'), and its statuses must
-  // not surface as a sync failure in this row. Matches liveDotTitle's gating.
+  // Gate on the runtime mode, not just the hubMode setting: an invalid or
+  // blocked Hub URL leaves local collection running, while its transport error
+  // stays separate in the health row. Matches liveDotTitle's gating.
   const show = state.settings?.hubMode === 'client' && state.mode === 'sync' && !state.streamConnected;
   const text = show ? streamFailureText(state.streamFailure) : '';
   els.syncClientStatus.textContent = text;
@@ -6107,6 +5936,7 @@ function renderSyncClientStatus() {
   // Empty .hub-status still renders a bordered box, so hide it entirely when
   // there is nothing to show (connected, or not in client mode).
   els.syncClientStatus.hidden = !text;
+  renderSyncHealthStatus();
 }
 
 function renderHubAddresses(addresses, port) {
@@ -6221,7 +6051,7 @@ function syncSettingsForm() {
   els.hubUrlInput.value = state.settings.hubUrl || '';
   els.secretInput.value = state.settings.secret || '';
   els.deviceIdInput.value = state.settings.deviceId || '';
-  els.limitsRefreshInput.value = String(LIMIT_REFRESH_OPTIONS.includes(Number(state.settings.limitsRefreshMs)) ? state.settings.limitsRefreshMs : 300000);
+  if (els.hubAdminSecretInput && state.settings.hubAdminSecret) els.hubAdminSecretInput.value = state.settings.hubAdminSecret;
   els.showLimitSourceInput.checked = Boolean(state.settings.showLimitSource);
   els.maskLimitAccountEmailsInput.checked = Boolean(state.settings.maskLimitAccountEmails);
   els.showLimitUsedInput.value = state.settings.showLimitUsed ? 'used' : 'remaining';
@@ -6309,30 +6139,16 @@ function syncSettingsForm() {
   els.blurInput.value = String(state.settings.glassBlur ?? 32);
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
   syncSliderRows();
-  renderDeepseekStatus();
-  renderMinimaxStatus();
-  renderExternalProviderStatus('zai');
-  renderExternalProviderStatus('zaiteam');
-  renderExternalProviderStatus('volcengine');
-  renderExternalProviderStatus('qoder');
-  renderExternalProviderStatus('kimi');
-  renderExternalProviderStatus('ollama');
-  renderMimoStatus();
-  renderCopilotStatus();
   renderViewPreferences();
   renderToolPreferences();
-  renderLimitProviderCheckboxes();
   renderSettingsSummaries();
-  renderOpenCodeProfiles();
-  renderOpenRouterProfiles();
   applyVendorColorOverrides(state.settings.vendorColors);
   applyAppearanceSettings(state.settings);
   buildAppearanceColorControls();
   renderTokscaleStatus();
   renderSettingsAppUpdateRow();
-  renderCodexAccounts();
   renderCustomPricing();
-  renderCursorStatus();
+  renderHubAccountList();
   applyFloatingBubbleState(state.floatingBubble);
   if (state.breakdown === 'limits') renderLimits();
   else render();
@@ -6406,7 +6222,7 @@ function preferenceListForKind(kind) {
   if (kind === 'statusProvider') return document.getElementById('serviceProviderList');
   if (kind === 'homeModule') return document.getElementById('homeSettingsList');
   if (kind === 'homeLimitProvider') return document.getElementById('homeLimitProviderList');
-  return els.limitProviderCheckboxes;
+  return null;
 }
 
 function preferenceItemAttribute(kind) {
@@ -6415,7 +6231,7 @@ function preferenceItemAttribute(kind) {
   if (kind === 'statusProvider') return 'statusProvider';
   if (kind === 'homeModule') return 'homeModule';
   if (kind === 'homeLimitProvider') return 'homeLimitProvider';
-  return 'provider';
+  return '';
 }
 
 function preferenceRows(kind) {
@@ -7339,54 +7155,6 @@ function renderToolPreferences() {
   }
 }
 
-function renderLimitProviderCheckboxes() {
-  if (!els.limitProviderCheckboxes) return;
-  const enabled = enabledLimitProviderSet();
-  const collected = new Map((state.stats?.limits?.providers || []).map((provider) => [provider.provider, provider]));
-  const providers = limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder);
-  els.limitProviderCheckboxes.replaceChildren();
-  for (const { id, label, settingsLabel } of providers) {
-    const provider = enabled.has(id)
-      ? (collected.get(id) || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
-      : { provider: id, status: 'disabled', windows: [] };
-    const row = document.createElement('div');
-    row.className = 'limit-provider-row';
-    row.dataset.provider = id;
-    const wrap = document.createElement('label');
-    wrap.className = 'client-checkbox limit-provider-toggle';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.dataset.provider = id;
-    cb.checked = enabled.has(id);
-    cb.addEventListener('change', onLimitProviderToggle);
-    const copy = document.createElement('span');
-    copy.className = 'limit-provider-copy';
-    const text = document.createElement('span');
-    text.className = 'limit-provider-name';
-    text.textContent = settingsLabel || label;
-    const tags = document.createElement('span');
-    tags.className = 'limit-provider-tags';
-    const provenance = limitProviderProvenance(provider);
-    for (const tagInfo of limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance)) {
-      const tag = document.createElement('span');
-      tag.className = `limit-provider-tag limit-provider-tag-${tagInfo.kind}`;
-      if (tagInfo.tone) tag.classList.add(`limit-provider-tag-${tagInfo.tone}`);
-      tag.textContent = translatedLimitProviderTag(tagInfo);
-      tags.append(tag);
-    }
-    copy.append(text, tags);
-    wrap.append(cb, copy);
-    const handle = createPreferenceOrderHandle({
-      kind: 'provider',
-      id,
-      label: settingsLabel || label,
-      count: providers.length
-    });
-    row.append(wrap, handle);
-    els.limitProviderCheckboxes.appendChild(row);
-  }
-}
-
 async function onToolTrackingToggle() {
   const checked = Array.from(els.clientDisplayList.querySelectorAll('input[data-preference="track"]'))
     .filter((cb) => cb.checked)
@@ -7430,30 +7198,6 @@ async function onProjectVisibilityToggle() {
     return;
   }
   await onViewVisibilityToggle('project');
-}
-
-async function onLimitProviderToggle() {
-  const checked = Array.from(els.limitProviderCheckboxes.querySelectorAll('input[type=checkbox]'))
-    .filter((cb) => cb.checked)
-    .map((cb) => cb.dataset.provider);
-  if (checked.length === 0 && state.breakdown === 'limits') {
-    setBreakdown('tool');
-  }
-  await saveSettings({ limitProviders: checked.join(','), limitsEnabled: checked.length > 0 });
-  clearDisabledLimitProviderPendingChecks(new Set(checked));
-  await refreshStats({ force: true });
-}
-
-async function onLimitProviderMove(providerId, direction) {
-  const next = limitProviderOrderApi.moveLimitProvider(state.settings?.limitProviderOrder, LIMIT_PROVIDERS, providerId, direction);
-  await saveSettings({ limitProviderOrder: next });
-}
-
-async function onLimitProviderReorder(providerId, targetIndex) {
-  const current = limitProviderOrderApi.normalizeLimitProviderOrder(state.settings?.limitProviderOrder, LIMIT_PROVIDERS).join(',');
-  const next = limitProviderOrderApi.reorderLimitProvider(state.settings?.limitProviderOrder, LIMIT_PROVIDERS, providerId, targetIndex);
-  if (next === current) return;
-  await saveSettings({ limitProviderOrder: next });
 }
 
 async function onClientDisplayMove(clientId, direction) {
@@ -7597,7 +7341,6 @@ async function onPreferenceReorder(kind, id, targetIndex) {
   else if (kind === 'homeModule') await onHomeModuleReorder(id, targetIndex);
   else if (kind === 'homeLimitProvider') await onHomeLimitProviderReorder(id, targetIndex);
   else if (kind === 'statusProvider') await onServiceProviderReorder(id, targetIndex);
-  else await onLimitProviderReorder(id, targetIndex);
 }
 
 async function onPreferenceOrderCommit(kind, order, id) {
@@ -7638,8 +7381,6 @@ async function onPreferenceOrderCommit(kind, order, id) {
     if (value !== current) await saveSettings({ serviceProviderDisplayOrder: value });
     return;
   }
-  const current = limitProviderOrderApi.normalizeLimitProviderOrder(state.settings?.limitProviderOrder, LIMIT_PROVIDERS).join(',');
-  if (value !== current) await saveSettings({ limitProviderOrder: value });
 }
 
 function onPreferenceOrderKeydown(event, kind, id) {
@@ -7651,7 +7392,6 @@ function onPreferenceOrderKeydown(event, kind, id) {
     else if (kind === 'homeModule') void onHomeModuleMove(id, moves[event.key]);
     else if (kind === 'homeLimitProvider') void onHomeLimitProviderMove(id, moves[event.key]);
     else if (kind === 'statusProvider') void onServiceProviderMove(id, moves[event.key]);
-    else void onLimitProviderMove(id, moves[event.key]);
     return;
   }
   if (event.key === 'Home' || event.key === 'End') {
@@ -7775,6 +7515,7 @@ async function init() {
     state.settings.startAtLogin = Boolean(state.appInfo.loginItemOpenAtLogin);
   }
   syncSettingsForm();
+  await refreshHubAccounts();
   publishViewState();
   await refreshHubInfo();
   await refreshTokscaleStatus();
@@ -7784,10 +7525,15 @@ async function init() {
     if (status) {
       state.streamConnected = Boolean(status.connected);
       state.mode = status.mode || state.mode;
+      state.syncHealth = status.health || state.syncHealth;
       state.streamFailure = status.connected ? null : (status.reason ? { reason: status.reason, detail: status.detail ?? null } : null);
       setLiveDot(state.streamConnected);
       renderSyncClientStatus();
     }
+  } catch (_) {}
+  try {
+    state.syncHealth = await window.tokenMonitor.getSyncHealth?.() || state.syncHealth;
+    renderSyncHealthStatus();
   } catch (_) {}
   await refreshStats();
   restartTimer();
@@ -7853,12 +7599,14 @@ els.saveSettingsButton.addEventListener('click', async () => {
     allowInsecureHubHttp: Boolean(els.allowInsecureHubHttpInput?.checked),
     deviceId: els.deviceIdInput.value.trim()
   };
+  if (els.hubAdminSecretInput?.value.trim()) patch.hubAdminSecret = els.hubAdminSecretInput.value.trim();
   if (state.settings.hubMode === 'host') {
     patch.hubHostPort = Number(els.hubPortInput.value) || 17321;
   }
   try {
     await saveSettings(patch);
     await refreshHubInfo();
+    await refreshHubAccounts();
     await refreshStats();
   } catch (error) {
     if (els.syncClientStatus) {
@@ -7874,6 +7622,7 @@ els.hubModeOptions.addEventListener('change', async (event) => {
   if (!(target instanceof HTMLInputElement) || target.name !== 'hubMode') return;
   await saveSettings({ hubMode: target.value });
   await refreshHubInfo();
+  await refreshHubAccounts();
   await refreshStats();
 });
 
@@ -7958,10 +7707,6 @@ els.secretPasteButton?.addEventListener('click', async () => {
       els.secretInput.value = text.trim();
     }
   } catch (_) {}
-});
-els.limitsRefreshInput.addEventListener('change', async () => {
-  await saveSettings({ limitsRefreshMs: Number(els.limitsRefreshInput.value) });
-  await refreshStats({ force: true });
 });
 els.showLimitSourceInput.addEventListener('change', async () => {
   await saveSettings({ showLimitSource: els.showLimitSourceInput.checked });
@@ -8167,7 +7912,7 @@ els.refreshButton.addEventListener('click', () => {
   // Only this button asks for a history rescan: `{ force: true }` is used all over the
   // settings/account flows, and folding history into it would re-run the expensive
   // `tokscale graph` on every one of them.
-  else refreshStats({ force: true, forceHistory: true, feedback: true });
+  else refreshStats({ force: true, forceHistory: true, recover: true, feedback: true });
 });
 els.minButton.addEventListener('click', () => window.tokenMonitor.minimize());
 els.closeButton.addEventListener('click', () => window.tokenMonitor.close());
@@ -8334,18 +8079,22 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   if (payload.event === 'status') {
     state.streamConnected = Boolean(payload.data?.connected);
     if (payload.data?.mode) state.mode = payload.data.mode;
+    state.syncHealth = payload.data?.health || state.syncHealth;
     state.streamFailure = state.streamConnected ? null : (payload.data?.reason ? { reason: payload.data.reason, detail: payload.data.detail ?? null } : state.streamFailure);
+  } else if (payload.event === 'sync-health') {
+    state.syncHealth = payload.data?.health || state.syncHealth;
+    renderSyncClientStatus();
+    return;
   } else if (payload.data?.stats) {
     // Local collector overlays update client-mode data independently of the
     // Hub SSE transport. Preserve its current Offline/error state until a
     // real stream status or remote stats event proves the connection changed.
-    if (payload.data?.reason !== 'local') {
+    if (payload.data?.reason !== 'local' && payload.data?.transport !== 'rest') {
       state.streamConnected = true;
       state.streamFailure = null;
     }
     if (payload.data?.mode) state.mode = payload.data.mode;
     state.stats = preserveCustomPeriod(overlayAllTimeSessions(payload.data.stats));
-    applyCodexActiveAccountFromStats();
     // Progressive mid-tick pushes never carry a fresh history scan (see
     // AGENTS.md collector notes), so only the final push can retire the
     // "just turned trends on" loading state without a flash back to empty.
@@ -8358,19 +8107,8 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   renderSyncClientStatus();
   if (payload.data?.stats) {
     render();
-    renderLimitProviderCheckboxes();
     renderToolPreferences();
     renderWslPanel();
-    updateOpenRouterProfilesStatus();
-    renderDeepseekStatus();
-    renderMinimaxStatus();
-    renderExternalProviderStatus('zai');
-    renderExternalProviderStatus('zaiteam');
-    renderExternalProviderStatus('volcengine');
-    renderExternalProviderStatus('qoder');
-    renderExternalProviderStatus('kimi');
-    renderExternalProviderStatus('ollama');
-    renderCopilotStatus();
     maybeUpdateBarsIcon();
   }
   restartTimer();
@@ -9023,24 +8761,17 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
 }
 
 function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options = {}) {
-  const activeCodex = localLiveCodexProvider();
-  const activeCodexKey = activeCodex?.accountKey
-    && (stats?.limits?.providers || []).some((provider) => (
-      provider?.provider === 'codex' && provider?.accountKey === activeCodex.accountKey
-    ))
-    ? activeCodex.accountKey
-    : '';
   const resolved = trayLayoutApi.resolveTrayLayout(layout, stats, {
     currency: currentCurrency(),
     nowMs: Date.now(),
-    activeAccountKeys: activeCodexKey ? { codex: activeCodexKey } : {},
+    activeAccountKeys: {},
     availableProviderIds: Object.keys(trayProviderImages)
   });
   const items = resolved.items.map((item) => (
     item.type === 'text'
       && item.metric === 'account'
       && state.settings?.maskLimitAccountEmails
-      ? { ...item, text: accountIdentityApi.maskEmailAddress(item.text) }
+      ? { ...item, text: maskEmailAddress(item.text) }
       : item
   ));
   const segments = items.map((item) => renderCustomTrayItemCanvas(item, height, colors, options));
@@ -9362,1200 +9093,228 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
   maybeUpdateBarsIcon();
 }
 
-function setAccountGroupExpanded(prefix, expanded, stateKey) {
-  const toggle = document.getElementById(`${prefix}SettingsToggle`);
-  const details = document.getElementById(`${prefix}SettingsDetails`);
-  const group = document.getElementById(`${prefix}AccountGroup`) || document.getElementById(`${prefix}CookieGroup`);
-  if (!toggle || !details) return;
-  const next = Boolean(expanded);
-  if (stateKey) state[stateKey] = next;
-  toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-  details.classList.toggle('hidden', !next);
-  if (group) group.classList.toggle('expanded', next);
+const HUB_ACCOUNT_PROVIDERS = [
+  { id: 'claude', label: 'Claude' },
+  { id: 'opencode', label: 'OpenCode' },
+  { id: 'openrouter', label: 'OpenRouter' },
+  { id: 'deepseek', label: 'DeepSeek' },
+  { id: 'minimax', label: 'Minimax' },
+  { id: 'mimo', label: 'MiMo' },
+  { id: 'copilot', label: 'GitHub Copilot' },
+  { id: 'zai', label: 'GLM' },
+  { id: 'zaiteam', label: 'GLM Team' },
+  { id: 'volcengine', label: 'Volcengine' },
+  { id: 'qoder', label: 'Qoder' },
+  { id: 'commandcode', label: 'Command Code' },
+  { id: 'ollama', label: 'Ollama' },
+  { id: 'kimi', label: 'Kimi' },
+  { id: 'thirdparty', label: 'Third-party' }
+];
+const HUB_ACCOUNT_PROVIDER_LABELS = new Map(HUB_ACCOUNT_PROVIDERS.map((provider) => [provider.id, provider.label]));
+
+function hubAccountProviderLabel(provider) {
+  return HUB_ACCOUNT_PROVIDER_LABELS.get(String(provider || '').trim().toLowerCase()) || String(provider || '').trim() || 'Unknown';
 }
 
-function setCodexAccountExpanded(expanded) {
-  setAccountGroupExpanded('codex', expanded, 'codexAccountExpanded');
+function setHubAccountError(message = '') {
+  state.hubAccountError = String(message || '');
+  if (!els.hubAccountError) return;
+  els.hubAccountError.textContent = state.hubAccountError;
+  els.hubAccountError.classList.toggle('hidden', !state.hubAccountError);
 }
 
-function setCursorAccountExpanded(expanded) {
-  setAccountGroupExpanded('cursor', expanded, 'cursorAccountExpanded');
+function setHubAccountsExpanded(expanded) {
+  state.hubAccountExpanded = Boolean(expanded);
+  if (els.hubAccountsSettingsToggle) {
+    els.hubAccountsSettingsToggle.setAttribute('aria-expanded', String(state.hubAccountExpanded));
+  }
+  els.hubAccountsSettingsDetails?.classList.toggle('hidden', !state.hubAccountExpanded);
 }
 
-function setOpencodeCookieExpanded(expanded) {
-  setAccountGroupExpanded('opencode', expanded, 'opencodeCookieExpanded');
+function hubAccountStatusText(account) {
+  if (account?.enabled === false) return t('settings.hubAccounts.disabled');
+  if (account?.status === 'ok') return t('settings.hubAccounts.statusOk');
+  if (account?.status === 'refreshing' || account?.status === 'pending') return t('settings.hubAccounts.statusRefreshing');
+  if (account?.status === 'error') return t('settings.hubAccounts.statusError');
+  return t('settings.hubAccounts.statusUnknown');
 }
 
-function setOpenrouterAccountExpanded(expanded) {
-  setAccountGroupExpanded('openrouter', expanded, 'openrouterAccountExpanded');
-}
-
-function setDeepseekAccountExpanded(expanded) {
-  setAccountGroupExpanded('deepseek', expanded, 'deepseekAccountExpanded');
-}
-
-function setMimoAccountExpanded(expanded) {
-  setAccountGroupExpanded('mimo', expanded, 'mimoAccountExpanded');
-}
-
-function setCopilotAccountExpanded(expanded) {
-  setAccountGroupExpanded('copilot', expanded, 'copilotAccountExpanded');
-}
-
-function setCopilotManualExpanded(expanded) {
-  const next = Boolean(expanded);
-  state.copilotManualExpanded = next;
-  document.getElementById('copilotManualToggle')?.setAttribute('aria-expanded', next ? 'true' : 'false');
-  document.getElementById('copilotManualDetails')?.classList.toggle('hidden', !next);
-  document.getElementById('copilotManualPanel')?.classList.toggle('expanded', next);
-}
-
-function setCursorStatusText(el, text) {
-  el.textContent = text;
-  el.title = text;
-}
-
-function renderCodexLoginStatus() {
-  const addButton = document.getElementById('codexAddAccountButton');
-  const cancelButton = document.getElementById('codexCancelLoginButton');
-  const refreshButton = document.getElementById('codexRefreshAccountsButton');
-  const openButton = document.getElementById('codexOpenLoginUrlButton');
-  const copyButton = document.getElementById('codexCopyLoginUrlButton');
-  const statusEl = document.getElementById('codexLoginStatus');
-  const workspaceSelection = document.getElementById('codexWorkspaceSelection');
-  const workspaceSelect = document.getElementById('codexWorkspaceSelect');
-  const urlActions = document.getElementById('codexLoginUrlActions');
-  const details = document.getElementById('codexLoginDetails');
-  const output = document.getElementById('codexLoginOutput');
-  if (!addButton || !cancelButton || !refreshButton || !openButton || !copyButton || !statusEl || !workspaceSelection || !workspaceSelect || !urlActions || !details || !output) return;
-
-  addButton.classList.toggle('hidden', state.codexSignInBusy);
-  cancelButton.classList.toggle('hidden', !state.codexSignInBusy);
-  refreshButton.classList.toggle('hidden', state.codexSignInBusy);
-  statusEl.textContent = state.codexLoginStatus;
-  statusEl.classList.toggle('hidden', !state.codexLoginStatus);
-  workspaceSelection.classList.toggle('hidden', state.codexWorkspaceChoices.length === 0);
-  workspaceSelect.replaceChildren(...state.codexWorkspaceChoices.map((workspace) => {
-    const option = document.createElement('option');
-    option.value = workspace.id;
-    option.textContent = workspace.workspaceKind === 'personal'
-      ? t('settings.codex.personalWorkspace')
-      : workspace.label || workspace.id;
-    option.selected = workspace.id === state.codexWorkspaceId;
-    return option;
-  }));
-  urlActions.classList.toggle('hidden', !state.codexSignInBusy);
-  openButton.classList.toggle('hidden', !state.codexLoginUrl);
-  copyButton.classList.toggle('hidden', !state.codexLoginUrl);
-  output.textContent = state.codexLoginOutput;
-  details.classList.toggle('hidden', !state.codexLoginOutput);
-}
-
-function renderCodexAccounts() {
-  const statusEl = document.getElementById('codexAccountStatus');
-  const listEl = document.getElementById('codexAccountList');
-  const errorEl = document.getElementById('codexAccountErrorMessage');
-  if (!statusEl || !listEl || !errorEl) return;
-
-  const accounts = state.settings?.codexManagedAccounts || [];
-  const enabledCount = accounts.filter(account => account.enabled !== false).length;
-  const statusText = accounts.length === 0
-    ? t('settings.codex.notConfigured')
-    : t('settings.opencode.connected', { linked: enabledCount, total: accounts.length });
-  setCursorStatusText(statusEl, statusText);
-  errorEl.textContent = state.codexAccountError || '';
-  errorEl.classList.toggle('hidden', !state.codexAccountError);
-  listEl.replaceChildren();
+function renderHubAccountList() {
+  if (!els.hubAccountsList) return;
+  const accounts = Array.isArray(state.hubAccounts) ? state.hubAccounts : [];
+  const isHubMode = state.settings?.hubMode === 'host' || state.settings?.hubMode === 'client';
+  if (els.hubAccountsStatus) {
+    els.hubAccountsStatus.textContent = !isHubMode
+      ? t('settings.hubAccounts.notConfigured')
+      : accounts.length
+        ? t('settings.hubAccounts.count', { count: accounts.length })
+        : t('settings.hubAccounts.empty');
+    els.hubAccountsStatus.classList.toggle('error', Boolean(state.hubAccountError));
+  }
+  els.hubAccountsList.replaceChildren();
+  if (!isHubMode) {
+    const note = document.createElement('p');
+    note.className = 'settings-note';
+    note.textContent = t('settings.hubAccounts.requiresHub');
+    els.hubAccountsList.append(note);
+    return;
+  }
   if (accounts.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'settings-note';
-    empty.textContent = t('settings.codex.empty');
-    listEl.append(empty);
-  } else {
-    for (const account of accounts) {
-      const enabled = account.enabled !== false;
-      const row = document.createElement('div');
-      row.className = 'managed-account-row';
-      row.classList.toggle('disabled', !enabled);
-      const input = document.createElement('input');
-      input.className = 'managed-account-checkbox';
-      input.type = 'checkbox';
-      input.checked = account.enabled !== false;
-      input.setAttribute('aria-label', t('settings.codex.toggleAccount', {
-        account: account.email || t('settings.codex.unnamedAccount')
-      }));
-      const main = document.createElement('div');
-      main.className = 'managed-account-main';
-      const email = document.createElement('div');
-      email.className = 'managed-account-email';
-      email.textContent = account.email || t('settings.codex.unnamedAccount');
-      main.append(email);
-      input.addEventListener('change', async () => {
-        input.disabled = true;
-        const result = await window.tokenMonitor.codex.setAccountEnabled(account.id, input.checked);
-        if (!result?.ok) {
-          state.codexAccountError = result?.error || t('settings.codex.toggleFailed');
-        } else {
-          state.codexAccountError = '';
-          state.settings.codexManagedAccounts = result.accounts || [];
-        }
-        renderCodexAccounts();
-        renderSettingsSummaries();
-      });
-      const right = document.createElement('span');
-      right.className = 'managed-account-right';
-      const info = document.createElement('span');
-      info.className = 'managed-account-info';
-      const workspaceLabel = account.workspaceKind === 'personal'
-        ? t('settings.codex.personalWorkspace')
-        : account.workspaceLabel;
-      const accountMetadata = [
-        workspaceLabel,
-        enabled ? limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel) : t('settings.codex.disabled')
-      ].filter((value, index, values) => value && values.indexOf(value) === index);
-      info.textContent = accountMetadata.join(' · ');
-      info.title = accountMetadata.join(' · ');
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'managed-account-remove';
-      remove.textContent = '✕';
-      remove.title = t('settings.codex.remove');
-      let confirmingRemove = false;
-      remove.addEventListener('click', async () => {
-        if (!confirmingRemove) {
-          confirmingRemove = true;
-          remove.classList.add('confirming');
-          remove.textContent = '✓';
-          remove.title = t('settings.codex.removeConfirm', {
-            account: account.email || t('settings.codex.unnamedAccount')
-          });
-          return;
-        }
-        const result = await window.tokenMonitor.codex.removeAccount(account.id);
-        if (!result?.ok) {
-          state.codexAccountError = result?.error || t('settings.codex.removeFailed');
-        } else {
-          state.codexAccountError = '';
-          state.settings.codexManagedAccounts = result.accounts || [];
-          renderCodexAccounts();
-          renderSettingsSummaries();
-          refreshStats({ force: true }).catch(() => {});
-          return;
-        }
-        renderCodexAccounts();
-        renderSettingsSummaries();
-      });
-      right.append(info, remove);
-      row.append(input, main, right);
-      listEl.append(row);
-    }
+    empty.textContent = t('settings.hubAccounts.empty');
+    els.hubAccountsList.append(empty);
+    return;
   }
-  renderSettingsSummaries();
+  for (const account of accounts) {
+    const row = document.createElement('div');
+    row.className = 'managed-account-row hub-account-row';
+    row.dataset.accountId = String(account.id || '');
+
+    const main = document.createElement('div');
+    main.className = 'managed-account-main';
+    const name = document.createElement('div');
+    name.className = 'managed-account-name';
+    name.textContent = String(account.name || hubAccountProviderLabel(account.provider));
+    const metadata = document.createElement('div');
+    metadata.className = 'managed-account-meta';
+    const parts = [hubAccountProviderLabel(account.provider)];
+    if (account.label) parts.push(String(account.label));
+    parts.push(hubAccountStatusText(account));
+    if (account.lastSuccessAt) parts.push(t('settings.hubAccounts.lastRefresh', { time: formatTime(account.lastSuccessAt) }));
+    metadata.textContent = parts.join(' · ');
+    main.append(name, metadata);
+
+    const actions = document.createElement('div');
+    actions.className = 'managed-account-actions';
+    const refreshButton = document.createElement('button');
+    refreshButton.type = 'button';
+    refreshButton.dataset.action = 'refresh';
+    refreshButton.dataset.accountId = String(account.id || '');
+    refreshButton.textContent = t('settings.hubAccounts.refresh');
+    refreshButton.disabled = state.hubAccountsBusy;
+    const removeButton = document.createElement('button');
+    removeButton.type = 'button';
+    removeButton.dataset.action = 'remove';
+    removeButton.dataset.accountId = String(account.id || '');
+    removeButton.textContent = t('settings.hubAccounts.remove');
+    removeButton.disabled = state.hubAccountsBusy;
+    actions.append(refreshButton, removeButton);
+    row.append(main, actions);
+    els.hubAccountsList.append(row);
+  }
 }
 
-async function refreshCodexAccounts() {
+async function refreshHubAccounts() {
+  if (!window.tokenMonitor.hubAccounts) return;
+  if (state.settings?.hubMode !== 'host' && state.settings?.hubMode !== 'client') {
+    state.hubAccounts = [];
+    setHubAccountError('');
+    renderHubAccountList();
+    return;
+  }
+  state.hubAccountsBusy = true;
+  setHubAccountError('');
+  renderHubAccountList();
   try {
-    state.settings.codexManagedAccounts = await window.tokenMonitor.codex.accounts();
-    state.codexAccountError = '';
-  } catch (err) {
-    state.codexAccountError = err.message;
+    const result = await window.tokenMonitor.hubAccounts.list();
+    state.hubAccounts = Array.isArray(result?.accounts) ? result.accounts : [];
+  } catch (error) {
+    state.hubAccounts = [];
+    setHubAccountError(error?.message || String(error));
+  } finally {
+    state.hubAccountsBusy = false;
+    renderHubAccountList();
   }
-  renderCodexAccounts();
 }
 
-// Account cards reflect THIS machine's configured credential, so read the
-// local device's RAW limits from state.stats.devices — NOT the collapsed
-// state.stats.limits.providers. In sync mode, aggregateLimits() collapses a
-// local `unauthorized` row out in favor of a remote `ok` (providerCollapseKey
-// for deepseek/minimax/grok is just the provider name; pickBetterProvider keeps
-// the higher statusRank). Searching the aggregate would miss the local row and
-// fall back to the remote `ok`, falsely reporting an invalid local key as
-// Linked. Only legacy/non-aggregated stats without a `devices` array may fall
-// back to the aggregate; once raw device rows are present they are authoritative.
-function localDeviceLimitsProviders() {
-  return accountIdentityApi.localDeviceLimitsProviders(
-    state.stats,
-    state.settings?.deviceId || ''
-  );
-}
-
-function localProviderStatus(name) {
-  const localProviders = localDeviceLimitsProviders();
-  if (localProviders !== null) {
-    return localProviders.find((provider) => provider.provider === name) || null;
+function readHubAccountCredential() {
+  const raw = String(els.hubAccountCredential?.value || '').trim();
+  if (!raw) throw new Error(t('settings.hubAccounts.credentialRequired'));
+  let credential;
+  try {
+    credential = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(t('settings.hubAccounts.invalidJson'), { cause: error });
   }
-  return (state.stats?.limits?.providers || []).find((provider) => provider.provider === name) || null;
+  if (!credential || typeof credential !== 'object' || Array.isArray(credential)) {
+    throw new Error(t('settings.hubAccounts.invalidJson'));
+  }
+  return credential;
 }
 
-function localProviderStatuses(name) {
-  const localProviders = localDeviceLimitsProviders();
-  const providers = localProviders !== null
-    ? localProviders
-    : (state.stats?.limits?.providers || []);
-  return providers.filter((provider) => provider.provider === name);
-}
-
-function deepseekAccountLinked() {
-  const provider = deepseekProviderForAccount();
-  return Boolean(state.settings?.deepseekApiKeyConfigured) && provider?.status === 'ok';
-}
-
-function deepseekProviderStatus() {
-  return localProviderStatus('deepseek');
-}
-
-function deepseekProviderForAccount() {
-  const provider = deepseekProviderStatus();
-  const pendingSince = Number(state.deepseekPendingCheckSince || 0);
-  if (!provider || !pendingSince) return provider;
-  const updatedAt = Date.parse(provider.updatedAt || '');
-  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
-  state.deepseekPendingCheckSince = 0;
-  return provider;
-}
-
-function markDeepseekKeyCheckPending() {
-  state.deepseekPendingCheckSince = Date.now();
-  clearDeepseekProviderStatus();
-}
-
-function clearDeepseekPendingCheck() {
-  state.deepseekPendingCheckSince = 0;
-}
-
-function clearDeepseekProviderStatus() {
-  if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'deepseek');
-}
-
-function mimoAccountLinked() {
-  return (state.settings?.mimoManagedAccounts || []).length > 0;
-}
-
-function renderMimoStatus() {
-  const statusEl = document.getElementById('mimoAccountStatus');
-  const listEl = document.getElementById('mimoAccountList');
-  const emptyEl = document.getElementById('mimoAccountEmpty');
-  const errorEl = document.getElementById('mimoAccountErrorMessage');
-  if (!statusEl || !listEl || !emptyEl || !errorEl) return;
-  const accounts = state.settings?.mimoManagedAccounts || [];
-  const enabledCount = accounts.filter((account) => account.enabled !== false).length;
-  const statusText = accounts.length === 0
-    ? t('settings.mimo.notConfigured')
-    : t('settings.mimo.connected', { linked: enabledCount, total: accounts.length });
-  setCursorStatusText(statusEl, statusText);
-  errorEl.textContent = state.mimoAccountError || '';
-  errorEl.classList.toggle('hidden', !state.mimoAccountError);
-  emptyEl.classList.toggle('hidden', accounts.length > 0);
-
-  listEl.replaceChildren();
-  if (accounts.length > 0) {
-    for (const [index, account] of accounts.entries()) {
-      const enabled = account.enabled !== false;
-      const accountName = mimoSettingsAccountTitle(account, index);
-      const row = document.createElement('div');
-      row.className = 'managed-account-row';
-      row.classList.toggle('disabled', !enabled);
-
-      const input = document.createElement('input');
-      input.className = 'managed-account-checkbox';
-      input.type = 'checkbox';
-      input.checked = enabled;
-      input.setAttribute('aria-label', t('settings.mimo.toggleAccount', {
-        account: accountName
-      }));
-      input.addEventListener('change', async () => {
-        input.disabled = true;
-        const result = await window.tokenMonitor.mimo.setAccountEnabled(account.id, input.checked);
-        if (!result?.ok) {
-          state.mimoAccountError = result?.error || t('settings.mimo.toggleFailed');
-        } else {
-          state.mimoAccountError = '';
-          state.settings.mimoManagedAccounts = result.accounts || [];
-        }
-        renderMimoStatus();
-        renderSettingsSummaries();
-      });
-
-      const main = document.createElement('div');
-      main.className = 'managed-account-main';
-      const label = document.createElement('div');
-      label.className = 'managed-account-email';
-      label.textContent = accountName;
-      main.append(label);
-
-      const right = document.createElement('span');
-      right.className = 'managed-account-right';
-      const info = document.createElement('span');
-      info.className = 'managed-account-info';
-      info.textContent = enabled ? limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel) : t('settings.mimo.disabled');
-
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'managed-account-remove';
-      remove.textContent = '✕';
-      remove.title = t('settings.mimo.remove');
-      let confirmingRemove = false;
-      remove.addEventListener('click', async () => {
-        if (!confirmingRemove) {
-          confirmingRemove = true;
-          remove.classList.add('confirming');
-          remove.textContent = '✓';
-          remove.title = t('settings.mimo.removeConfirm', {
-            account: accountName
-          });
-          return;
-        }
-        const result = await window.tokenMonitor.mimo.removeAccount(account.id);
-        if (result?.ok) {
-          state.mimoAccountError = '';
-          state.settings.mimoManagedAccounts = result.accounts || [];
-          renderMimoStatus();
-          renderSettingsSummaries();
-          refreshStats({ force: true }).catch(() => {});
-          return;
-        }
-        state.mimoAccountError = result?.error || t('settings.mimo.removeFailed');
-        renderMimoStatus();
-        renderSettingsSummaries();
-      });
-
-      right.append(info, remove);
-      row.append(input, main, right);
-      listEl.append(row);
+function setupHubAccountsUI() {
+  if (!els.hubAccountsSettingsToggle || !els.hubAccountsList) return;
+  if (els.hubAccountProvider && els.hubAccountProvider.options.length === 0) {
+    for (const provider of HUB_ACCOUNT_PROVIDERS) {
+      const option = document.createElement('option');
+      option.value = provider.id;
+      option.textContent = provider.label;
+      els.hubAccountProvider.append(option);
     }
   }
-  renderSettingsSummaries();
-}
-
-function minimaxProviderStatus() {
-  return localProviderStatus('minimax');
-}
-
-function minimaxAccountLinked() {
-  const provider = minimaxProviderForAccount();
-  return Boolean(state.settings?.minimaxApiKeyConfigured) && provider?.status === 'ok';
-}
-
-function minimaxProviderForAccount() {
-  const provider = minimaxProviderStatus();
-  const pendingSince = Number(state.minimaxPendingCheckSince || 0);
-  if (!provider || !pendingSince) return provider;
-  const updatedAt = Date.parse(provider.updatedAt || '');
-  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
-  state.minimaxPendingCheckSince = 0;
-  return provider;
-}
-
-function markMinimaxKeyCheckPending() {
-  state.minimaxPendingCheckSince = Date.now();
-  clearMinimaxProviderStatus();
-}
-
-function clearMinimaxPendingCheck() {
-  state.minimaxPendingCheckSince = 0;
-}
-
-function clearMinimaxProviderStatus() {
-  if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'minimax');
-}
-
-function copilotProviderStatus() {
-  return localProviderStatus('copilot');
-}
-
-function copilotAccountLinked() {
-  const provider = copilotProviderForAccount();
-  return Boolean(state.settings?.copilotApiTokenConfigured) && provider?.status === 'ok';
-}
-
-function copilotProviderForAccount() {
-  const provider = copilotProviderStatus();
-  const pendingSince = Number(state.copilotPendingCheckSince || 0);
-  if (!provider || !pendingSince) return provider;
-  const updatedAt = Date.parse(provider.updatedAt || '');
-  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
-  state.copilotPendingCheckSince = 0;
-  return provider;
-}
-
-function markCopilotTokenCheckPending() {
-  state.copilotPendingCheckSince = Date.now();
-  clearCopilotProviderStatus();
-}
-
-function clearCopilotPendingCheck() {
-  state.copilotPendingCheckSince = 0;
-}
-
-function clearCopilotProviderStatus() {
-  if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'copilot');
-}
-
-const externalLimitAccountConfig = {
-  zai: {
-    configuredKey: 'zaiApiKeyConfigured',
-    sourceKey: 'zaiApiKeySource',
-    pendingKey: 'zaiPendingCheckSince'
-  },
-  zaiteam: {
-    configuredKey: 'zaiTeamApiKeyConfigured',
-    sourceKey: 'zaiTeamApiKeySource',
-    pendingKey: 'zaiteamPendingCheckSince'
-  },
-  volcengine: {
-    configuredKey: 'volcengineCredentialsConfigured',
-    sourceKey: 'volcengineCredentialsSource',
-    pendingKey: 'volcenginePendingCheckSince'
-  },
-  qoder: {
-    configuredKey: 'qoderCookieConfigured',
-    sourceKey: 'qoderCookieSource',
-    pendingKey: 'qoderPendingCheckSince'
-  },
-  kimi: {
-    configuredKey: 'kimiCredentialConfigured',
-    sourceKey: 'kimiCredentialSource',
-    pendingKey: 'kimiPendingCheckSince'
-  },
-  ollama: {
-    configuredKey: 'ollamaCookieConfigured',
-    sourceKey: 'ollamaCookieSource',
-    pendingKey: 'ollamaPendingCheckSince'
-  }
-};
-
-function clearDisabledLimitProviderPendingChecks(enabledProviders) {
-  if (!enabledProviders.has('deepseek')) clearDeepseekPendingCheck();
-  if (!enabledProviders.has('minimax')) clearMinimaxPendingCheck();
-  if (!enabledProviders.has('copilot')) clearCopilotPendingCheck();
-  for (const providerName of Object.keys(externalLimitAccountConfig)) {
-    if (!enabledProviders.has(providerName)) clearExternalProviderCheckPending(providerName);
-  }
-}
-
-function externalProviderForAccount(providerName) {
-  const provider = localProviderStatus(providerName);
-  const config = externalLimitAccountConfig[providerName];
-  const pendingSince = Number(config ? state[config.pendingKey] : 0);
-  if (!provider || !pendingSince) return provider;
-  const updatedAt = Date.parse(provider.updatedAt || '');
-  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
-  state[config.pendingKey] = 0;
-  return provider;
-}
-
-function externalProviderAccountLinked(providerName) {
-  const config = externalLimitAccountConfig[providerName];
-  const provider = externalProviderForAccount(providerName);
-  return Boolean(config && state.settings?.[config.configuredKey]) && provider?.status === 'ok';
-}
-
-function markExternalProviderCheckPending(providerName) {
-  const config = externalLimitAccountConfig[providerName];
-  if (!config) return;
-  state[config.pendingKey] = Date.now();
-  clearExternalProviderPendingStatus(providerName);
-}
-
-function clearExternalProviderCheckPending(providerName) {
-  const config = externalLimitAccountConfig[providerName];
-  if (config) state[config.pendingKey] = 0;
-}
-
-function clearExternalProviderPendingStatus(providerName) {
-  if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName);
-}
-
-function nextCopilotSignInFlowId() {
-  return `copilot-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function nextCodexSignInFlowId() {
-  return `codex-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function isCurrentCodexSignInFlow(flowId) {
-  const current = String(state.codexSignInFlowId || '');
-  const incoming = String(flowId || '');
-  return current && incoming === current;
-}
-
-function isCurrentCopilotSignInFlow(flowId) {
-  const current = String(state.copilotSignInFlowId || '');
-  const incoming = String(flowId || '');
-  return current && incoming === current;
-}
-
-function copilotAccountStatusText(provider, configured, source, enabled = true) {
-  const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
-  if (accountStatus === 'linked') {
-    const accountName = String(provider?.accountName || '').trim();
-    return accountName || t(source === 'env' ? 'settings.copilot.statusEnv' : 'settings.copilot.statusSet');
-  }
-  if (accountStatus === 'invalid') return t('settings.copilot.statusInvalid');
-  if (accountStatus === 'notConfigured') return t('settings.copilot.statusNotSet');
-  const statusKeys = {
-    checking: 'settings.common.checking',
-    disabled: 'settings.limits.status.disabled',
-    limited: 'settings.common.limited',
-    unavailable: 'settings.common.unavailable',
-    notChecked: 'settings.common.notChecked',
-    error: 'settings.common.error'
-  };
-  return t(statusKeys[accountStatus] || 'settings.common.error');
-}
-
-function apiKeyAccountStatusText(providerName, provider, configured, source, enabled = true) {
-  const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
-  if (accountStatus === 'linked') {
-    return t(source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`);
-  }
-  if (accountStatus === 'invalid') return t(`settings.${providerName}.statusInvalid`);
-  if (accountStatus === 'notConfigured') return t(`settings.${providerName}.statusNotSet`);
-  const statusKeys = {
-    checking: 'settings.common.checking',
-    disabled: 'settings.limits.status.disabled',
-    limited: 'settings.common.limited',
-    unavailable: 'settings.common.unavailable',
-    notChecked: 'settings.common.notChecked',
-    error: 'settings.common.error'
-  };
-  return t(statusKeys[accountStatus] || 'settings.common.error');
-}
-
-// Follow the region we last successfully polled so a global (minimax.io)
-// account lands on platform.minimax.io, not the CN landing page. Fall back
-// to the CN host until we've seen a successful poll.
-function minimaxPlatformUrl() {
-  const provider = minimaxProviderForAccount();
-  const region = provider && provider.region === 'en' ? 'en' : 'cn';
-  return region === 'en'
-    ? 'https://platform.minimax.io/user-center/payment/token-plan'
-    : 'https://platform.minimaxi.com/user-center/payment/token-plan';
-}
-
-function setExternalAccountExpanded(providerName, expanded) {
-  const details = document.getElementById(`${providerName}SettingsDetails`);
-  const toggle = document.getElementById(`${providerName}SettingsToggle`);
-  if (!details || !toggle) return;
-  state[`${providerName}AccountExpanded`] = expanded;
-  details.classList.toggle('hidden', !expanded);
-  toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-}
-
-function zaiPlatformUrl() {
-  const selectedRegion = document.getElementById('zaiApiRegionInput')?.value;
-  const region = selectedRegion || (state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global');
-  return region === 'bigmodel-cn'
-    ? 'https://bigmodel.cn/coding-plan/personal/usage'
-    : 'https://z.ai/manage-apikey/coding-plan/personal/my-plan';
-}
-
-function zaiteamPlatformUrl() {
-  return 'https://bigmodel.cn/coding-plan/team/usage-stats';
-}
-
-function volcenginePlatformUrl() {
-  return 'https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=subscribe';
-}
-
-function selectedQoderSite() {
-  const selectedSite = document.getElementById('qoderSiteInput')?.value;
-  return selectedSite || (state.settings?.qoderSite === 'cn' ? 'cn' : 'global');
-}
-
-function qoderUsagePagePath() {
-  return selectedQoderSite() === 'cn' ? 'qoder.com.cn/account/usage' : 'qoder.com/account/usage';
-}
-
-function qoderPlatformUrl() {
-  return `https://${qoderUsagePagePath()}`;
-}
-
-function updateQoderUsagePageHint() {
-  const hint = document.getElementById('qoderUsagePageHint');
-  if (hint) hint.textContent = qoderUsagePagePath();
-}
-
-function kimiPlatformUrl() {
-  return 'https://www.kimi.com/code/console';
-}
-
-function ollamaPlatformUrl() {
-  return 'https://ollama.com/settings';
-}
-
-function ollamaValidationError(provider) {
-  if (provider?.status === 'unauthorized') return t('settings.ollama.validationInvalid');
-  if (provider?.status === 'rateLimited' || provider?.status === 'sourceRateLimited') {
-    return t('settings.ollama.validationRateLimited');
-  }
-  return t('settings.ollama.validationUnavailable');
-}
-
-function renderExternalProviderStatus(providerName) {
-  const config = externalLimitAccountConfig[providerName];
-  const statusEl = document.getElementById(`${providerName}AccountStatus`);
-  const openBtn = document.getElementById(`${providerName}OpenBrowser`);
-  const logoutBtn = document.getElementById(`${providerName}LogoutButton`);
-  const refreshBtn = document.getElementById(`${providerName}RefreshButton`);
-  const manualPanel = document.getElementById(`${providerName}ManualPanel`);
-  const errorEl = document.getElementById(`${providerName}ErrorMessage`);
-  if (!config || !statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
-
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
-
-  const source = state.settings?.[config.sourceKey] || '';
-  const wasPending = Number(state[config.pendingKey] || 0) > 0;
-  const provider = externalProviderForAccount(providerName);
-  const configured = Boolean(state.settings?.[config.configuredKey]);
-  const enabled = limitProviderEnabled(providerName);
-  const pending = enabled && Number(state[config.pendingKey] || 0) > 0;
-  const linked = externalProviderAccountLinked(providerName);
-  if (providerName === 'ollama' && wasPending && !pending && linked) {
-    setExternalAccountExpanded('ollama', false);
-  }
-  if (providerName === 'zai') {
-    const regionInput = document.getElementById('zaiApiRegionInput');
-    if (regionInput) regionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
-  }
-  if (providerName === 'qoder') {
-    const siteInput = document.getElementById('qoderSiteInput');
-    if (siteInput) siteInput.value = state.settings?.qoderSite === 'cn' ? 'cn' : 'global';
-    updateQoderUsagePageHint();
-  }
-  setCursorStatusText(
-    statusEl,
-    pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
-  );
-  manualPanel.classList.toggle('hidden', linked);
-  openBtn.classList.toggle('hidden', linked);
-  logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
-  refreshBtn.classList.toggle('hidden', !configured);
-  renderSettingsSummaries();
-}
-
-function setMinimaxAccountExpanded(expanded) {
-  const details = document.getElementById('minimaxSettingsDetails');
-  const toggle = document.getElementById('minimaxSettingsToggle');
-  if (!details || !toggle) return;
-  state.minimaxAccountExpanded = expanded;
-  details.classList.toggle('hidden', !expanded);
-  toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-}
-
-function renderMinimaxStatus() {
-  const statusEl = document.getElementById('minimaxApiKeyStatus');
-  const openBtn = document.getElementById('minimaxOpenBrowser');
-  const logoutBtn = document.getElementById('minimaxLogoutButton');
-  const refreshBtn = document.getElementById('minimaxRefreshButton');
-  const manualPanel = document.getElementById('minimaxManualPanel');
-  const errorEl = document.getElementById('minimaxErrorMessage');
-  if (!statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
-
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
-
-  const source = state.settings?.minimaxApiKeySource || '';
-  const provider = minimaxProviderForAccount();
-  const configured = Boolean(state.settings?.minimaxApiKeyConfigured);
-  const enabled = limitProviderEnabled('minimax');
-  const linked = minimaxAccountLinked();
-  setCursorStatusText(statusEl, apiKeyAccountStatusText('minimax', provider, configured, source, enabled));
-  manualPanel.classList.toggle('hidden', linked);
-  openBtn.classList.toggle('hidden', linked);
-  logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
-  refreshBtn.classList.toggle('hidden', !configured);
-  renderSettingsSummaries();
-}
-
-function renderCopilotStatus() {
-  const statusEl = document.getElementById('copilotApiTokenStatus');
-  const signInBtn = document.getElementById('copilotSignInButton');
-  const cancelBtn = document.getElementById('copilotCancelSignInButton');
-  const logoutBtn = document.getElementById('copilotLogoutButton');
-  const refreshBtn = document.getElementById('copilotRefreshButton');
-  const manualPanel = document.getElementById('copilotManualPanel');
-  const loginStatusEl = document.getElementById('copilotLoginStatus');
-  const errorEl = document.getElementById('copilotErrorMessage');
-  if (!statusEl || !signInBtn || !cancelBtn || !logoutBtn || !refreshBtn || !manualPanel || !loginStatusEl || !errorEl) return;
-
-  const source = state.settings?.copilotApiTokenSource || '';
-  const provider = copilotProviderForAccount();
-  const configured = Boolean(state.settings?.copilotApiTokenConfigured);
-  const enabled = limitProviderEnabled('copilot');
-  const linked = copilotAccountLinked();
-  errorEl.textContent = state.copilotErrorMessage || '';
-  errorEl.classList.toggle('hidden', !state.copilotErrorMessage);
-  setCursorStatusText(statusEl, copilotAccountStatusText(provider, configured, source, enabled));
-  manualPanel.classList.toggle('hidden', linked);
-  if (linked && state.copilotManualExpanded) setCopilotManualExpanded(false);
-  signInBtn.classList.toggle('hidden', linked || state.copilotSignInBusy);
-  cancelBtn.classList.toggle('hidden', !state.copilotSignInBusy || !state.copilotSignInCancelable || linked);
-  logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
-  refreshBtn.classList.toggle('hidden', !configured || (state.copilotSignInBusy && !linked));
-  loginStatusEl.classList.toggle('hidden', !state.copilotLoginStatus);
-  loginStatusEl.textContent = state.copilotLoginStatus;
-  renderSettingsSummaries();
-}
-
-function renderDeepseekStatus() {
-  const statusEl = document.getElementById('deepseekApiKeyStatus');
-  const openBtn = document.getElementById('deepseekOpenBrowser');
-  const logoutBtn = document.getElementById('deepseekLogoutButton');
-  const refreshBtn = document.getElementById('deepseekRefreshButton');
-  const manualPanel = document.getElementById('deepseekManualPanel');
-  const errorEl = document.getElementById('deepseekErrorMessage');
-  if (!statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
-
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
-
-  const source = state.settings?.deepseekApiKeySource || '';
-  const provider = deepseekProviderForAccount();
-  const configured = Boolean(state.settings?.deepseekApiKeyConfigured);
-  const enabled = limitProviderEnabled('deepseek');
-  const linked = deepseekAccountLinked();
-  setCursorStatusText(statusEl, apiKeyAccountStatusText('deepseek', provider, configured, source, enabled));
-  manualPanel.classList.toggle('hidden', linked);
-  openBtn.classList.toggle('hidden', linked);
-  logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
-  refreshBtn.classList.toggle('hidden', !configured);
-  renderSettingsSummaries();
-}
-
-function renderOpenCodeProfiles() {
-  const listEl = document.getElementById('opencodeProfileList');
-  if (!listEl) return;
-
-  const api = window.tokenMonitor.opencode;
-
-  api.getProfiles().then(({ profiles, hasEnvVar }) => {
-    listEl.innerHTML = '';
-    const entries = Object.entries(profiles);
-
-    if (entries.length === 0 && !hasEnvVar) {
-      listEl.innerHTML = '<div class="opencode-empty">' + t('settings.opencode.emptyList') + '</div>';
-      state.opencodeProfileCount = 0;
-      renderSettingsSummaries();
+  els.hubAccountsSettingsToggle.addEventListener('click', () => setHubAccountsExpanded(!state.hubAccountExpanded));
+  els.hubAccountsRefreshButton?.addEventListener('click', () => { void refreshHubAccounts(); });
+  els.hubAccountAddButton?.addEventListener('click', async () => {
+    if (state.hubAccountsBusy) return;
+    const name = String(els.hubAccountName?.value || '').trim();
+    if (!name) {
+      setHubAccountError(t('settings.hubAccounts.nameRequired'));
       return;
     }
-
-    state.opencodeProfileCount = entries.length;
-    renderSettingsSummaries();
-
-    for (const [name, profile] of entries) {
-      const item = document.createElement('div');
-      item.className = 'opencode-profile-item';
-
-      const toggle = document.createElement('input');
-      toggle.className = 'profile-toggle';
-      toggle.type = 'checkbox';
-      toggle.checked = profile.enabled;
-      toggle.addEventListener('change', () => {
-        api.setProfileEnabled(name, toggle.checked).then(() => {
-          const info = item.querySelector('.profile-info');
-          info.textContent = toggle.checked ? '...' : t('settings.opencode.disabled');
-          renderSettingsSummaries();
-          updateOpenCodeProfilesStatus();
-        });
-      });
-
-      const nameBox = document.createElement('span');
-      nameBox.className = 'profile-name-box';
-      const nameSpan = document.createElement('span');
-      nameSpan.className = 'profile-name';
-      nameSpan.textContent = name;
-
-      const nameInput = document.createElement('input');
-      nameInput.className = 'profile-name-input hidden';
-      nameInput.type = 'text';
-      nameInput.value = name;
-
-      const renameBtn = document.createElement('button');
-      renameBtn.className = 'profile-rename-btn';
-      renameBtn.textContent = '✎';
-      renameBtn.title = t('settings.opencode.rename');
-
-      let editing = false;
-      function beginRename() {
-        if (editing) return;
-        editing = true;
-        nameSpan.classList.add('hidden');
-        nameInput.classList.remove('hidden');
-        nameInput.focus();
-        nameInput.select();
-      }
-      function endRename(save) {
-        if (!editing) return;
-        editing = false;
-        nameInput.classList.add('hidden');
-        nameSpan.classList.remove('hidden');
-        if (save && nameInput.value.trim() && nameInput.value.trim() !== name) {
-          api.renameProfile(name, nameInput.value.trim()).then(() => {
-            renderOpenCodeProfiles();
-            updateOpenCodeProfilesStatus();
-            renderSettingsSummaries();
-          });
-        }
-      }
-      renameBtn.addEventListener('click', beginRename);
-      nameInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') endRename(true);
-        if (e.key === 'Escape') endRename(false);
-      });
-      nameInput.addEventListener('blur', () => endRename(true));
-
-      nameBox.append(nameSpan, nameInput, renameBtn);
-
-      const rightBox = document.createElement('span');
-      rightBox.className = 'profile-right';
-
-      const infoSpan = document.createElement('span');
-      infoSpan.className = 'profile-info';
-      infoSpan.id = 'opencode-info-' + name.replace(/[^a-zA-Z0-9_-]/g, '_');
-      infoSpan.textContent = profile.enabled ? '...' : t('settings.opencode.disabled');
-
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'profile-delete';
-      deleteBtn.textContent = '✕';
-      deleteBtn.title = t('settings.opencode.delete');
-      let confirmingDelete = false;
-      deleteBtn.addEventListener('click', async () => {
-        if (!confirmingDelete) {
-          confirmingDelete = true;
-          deleteBtn.classList.add('confirming');
-          deleteBtn.textContent = '✓';
-          deleteBtn.title = t('settings.opencode.deleteConfirm', { name });
-          return;
-        }
-        await api.deleteProfile(name);
-        renderOpenCodeProfiles();
-        updateOpenCodeProfilesStatus();
-        renderSettingsSummaries();
-      });
-
-      rightBox.append(infoSpan, deleteBtn);
-      item.append(toggle, nameBox, rightBox);
-      listEl.appendChild(item);
-    }
-
-    updateOpenCodeProfilesStatus();
-  });
-}
-
-async function updateOpenCodeProfilesStatus() {
-  const api = window.tokenMonitor.opencode;
-  const status = await api.status();
-  const profiles = status.profiles || {};
-
-  for (const [name, s] of Object.entries(profiles)) {
-    const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const infoEl = document.getElementById('opencode-info-' + safeName);
-    if (!infoEl) continue;
-
-    if (s.expired) {
-      infoEl.textContent = t('settings.opencode.statusExpired');
-    } else if (s.linked) {
-      const parts = [];
-      if (s.go) parts.push('Go');
-      if (s.zen) parts.push('Zen');
-      let text = '✓ ' + parts.join(' · ');
-      if (s.hasBalance && s.balanceUsd != null) {
-        text += '  $' + Number(s.balanceUsd).toFixed(2);
-      }
-      infoEl.textContent = text;
-    } else if (s.error) {
-      infoEl.textContent = s.error;
-    } else {
-      infoEl.textContent = t('settings.opencode.connectFailed');
-    }
-  }
-
-  // Update summary pill
-  const totalEl = document.getElementById('opencodeCookieStatus');
-  if (totalEl) {
-    const linkedCount = Object.values(profiles).filter(s => s.linked).length;
-    const configuredProfileCount = state.opencodeProfileCount || 0;
-    const totalCount = Math.max(Object.keys(profiles).length, configuredProfileCount);
-    if (totalCount > 0) {
-      totalEl.textContent = t('settings.opencode.connected', { linked: linkedCount, total: totalCount });
-    } else {
-      totalEl.textContent = t('settings.opencode.statusNotSet');
-    }
-  }
-}
-
-function openrouterProfileStatusText(provider, enabled = true) {
-  if (!enabled) return t('settings.opencode.disabled');
-  if (!provider) return t('settings.openrouter.checking');
-  if (provider.status === 'unauthorized') return t('settings.openrouter.invalidKey');
-  if (provider.status !== 'ok') return t('settings.openrouter.unavailable');
-  const balance = optionalFiniteNumber(provider.balance?.amount);
-  if (balance !== null) return `✓ ${formatMoney(balance, 'USD')}`;
-  const quota = (provider.windows || []).find((window) => window?.showMeter !== false);
-  const remaining = optionalFiniteNumber(quota?.remaining);
-  if (remaining !== null) return `✓ ${formatMoney(remaining, 'USD')} left`;
-  return '✓';
-}
-
-function updateOpenRouterProfilesStatus() {
-  const providers = localProviderStatuses('openrouter');
-  const byName = new Map(providers.map((provider) => [String(provider.accountName || provider.accountLabel || ''), provider]));
-  for (const infoEl of document.querySelectorAll('[data-openrouter-profile-name]')) {
-    const name = infoEl.dataset.openrouterProfileName || '';
-    const profile = state.settings?.openrouterProfiles?.[name];
-    infoEl.textContent = openrouterProfileStatusText(byName.get(name), profile?.enabled !== false);
-  }
-  const envInfo = document.querySelector('[data-openrouter-environment]');
-  if (envInfo) envInfo.textContent = openrouterProfileStatusText(byName.get('environment'));
-
-  const statusEl = document.getElementById('openrouterStatus');
-  if (!statusEl) return;
-  const total = state.openrouterProfileCount || 0;
-  const linked = providers.filter((provider) => provider.status === 'ok').length;
-  statusEl.textContent = total > 0
-    ? t('settings.openrouter.connected', { linked, total })
-    : t('settings.openrouter.statusNotSet');
-}
-
-function openrouterProfileErrorText(result) {
-  if (result?.errorCode === 'invalidName') return t('settings.openrouter.invalidName');
-  if (result?.errorCode === 'missingApiKey') return t('settings.openrouter.statusNotSet');
-  return result?.error || t('settings.openrouter.saveFailedShort');
-}
-
-function renderOpenRouterProfiles() {
-  const listEl = document.getElementById('openrouterProfileList');
-  if (!listEl || !window.tokenMonitor.openrouter) return;
-  const api = window.tokenMonitor.openrouter;
-  api.getProfiles().then(({ profiles, hasEnvVar }) => {
-    listEl.replaceChildren();
-    state.settings.openrouterProfiles = profiles;
-    state.settings.openrouterEnvConfigured = Boolean(hasEnvVar);
-    const entries = Object.entries(profiles);
-    state.openrouterProfileCount = entries.length + (hasEnvVar ? 1 : 0);
-    if (state.openrouterProfileCount === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'opencode-empty';
-      empty.textContent = t('settings.openrouter.emptyList');
-      listEl.append(empty);
-      updateOpenRouterProfilesStatus();
-      renderSettingsSummaries();
+    let credential;
+    try {
+      credential = readHubAccountCredential();
+    } catch (error) {
+      setHubAccountError(error.message);
       return;
     }
-
-    const appendRow = ({ name = '', profile = { enabled: true }, env = false } = {}) => {
-      const item = document.createElement('div');
-      item.className = 'opencode-profile-item';
-      if (!env) {
-        const toggle = document.createElement('input');
-        toggle.className = 'profile-toggle';
-        toggle.type = 'checkbox';
-        toggle.checked = profile.enabled !== false;
-        toggle.setAttribute('aria-label', name);
-        toggle.addEventListener('change', async () => {
-          const result = await api.setProfileEnabled(name, toggle.checked);
-          if (!result?.ok) toggle.checked = !toggle.checked;
-          updateOpenRouterProfilesStatus();
-          renderSettingsSummaries();
-        });
-        item.append(toggle);
-      } else {
-        const spacer = document.createElement('span');
-        spacer.className = 'profile-toggle';
-        spacer.setAttribute('aria-hidden', 'true');
-        item.append(spacer);
-      }
-
-      const nameBox = document.createElement('span');
-      nameBox.className = 'profile-name-box';
-      const nameSpan = document.createElement('span');
-      nameSpan.className = 'profile-name';
-      nameSpan.textContent = env ? t('settings.openrouter.environment') : name;
-      nameBox.append(nameSpan);
-
-      if (!env) {
-        const nameInput = document.createElement('input');
-        nameInput.className = 'profile-name-input hidden';
-        nameInput.type = 'text';
-        nameInput.value = name;
-        const renameBtn = document.createElement('button');
-        renameBtn.className = 'profile-rename-btn';
-        renameBtn.textContent = '✎';
-        renameBtn.title = t('settings.opencode.rename');
-        let editing = false;
-        const finishRename = async (save) => {
-          if (!editing) return;
-          editing = false;
-          nameInput.classList.add('hidden');
-          nameSpan.classList.remove('hidden');
-          const nextName = nameInput.value.trim();
-          if (save && nextName && nextName !== name) {
-            const result = await api.renameProfile(name, nextName);
-            if (result?.ok) {
-              renderOpenRouterProfiles();
-            } else {
-              nameInput.value = name;
-              const errorEl = document.getElementById('openrouterErrorMessage');
-              if (errorEl) {
-                errorEl.textContent = openrouterProfileErrorText(result);
-                errorEl.classList.remove('hidden');
-              }
-            }
-          }
-        };
-        renameBtn.addEventListener('click', () => {
-          editing = true;
-          nameSpan.classList.add('hidden');
-          nameInput.classList.remove('hidden');
-          nameInput.focus();
-          nameInput.select();
-        });
-        nameInput.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter') void finishRename(true);
-          if (event.key === 'Escape') void finishRename(false);
-        });
-        nameInput.addEventListener('blur', () => void finishRename(true));
-        nameBox.append(nameInput, renameBtn);
-      }
-
-      const rightBox = document.createElement('span');
-      rightBox.className = 'profile-right';
-      const info = document.createElement('span');
-      info.className = 'profile-info';
-      if (env) {
-        info.dataset.openrouterEnvironment = 'true';
-      } else {
-        info.dataset.openrouterProfileName = name;
-      }
-      info.textContent = t('settings.openrouter.checking');
-      rightBox.append(info);
-
-      if (!env) {
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'profile-delete';
-        deleteBtn.textContent = '✕';
-        deleteBtn.title = t('settings.opencode.delete');
-        let confirming = false;
-        deleteBtn.addEventListener('click', async () => {
-          if (!confirming) {
-            confirming = true;
-            deleteBtn.classList.add('confirming');
-            deleteBtn.textContent = '✓';
-            deleteBtn.title = t('settings.opencode.deleteConfirm', { name });
-            return;
-          }
-          const result = await api.deleteProfile(name);
-          if (result?.ok) renderOpenRouterProfiles();
-        });
-        rightBox.append(deleteBtn);
-      }
-      item.append(nameBox, rightBox);
-      listEl.append(item);
-    };
-
-    for (const [name, profile] of entries) appendRow({ name, profile });
-    if (hasEnvVar) appendRow({ env: true });
-    updateOpenRouterProfilesStatus();
-    renderSettingsSummaries();
-  }).catch(() => {
-    const statusEl = document.getElementById('openrouterStatus');
-    if (statusEl) statusEl.textContent = t('settings.openrouter.unavailable');
+    state.hubAccountsBusy = true;
+    setHubAccountError('');
+    renderHubAccountList();
+    try {
+      await window.tokenMonitor.hubAccounts.add({
+        provider: els.hubAccountProvider.value,
+        name,
+        label: String(els.hubAccountLabel?.value || '').trim(),
+        credential
+      });
+      if (els.hubAccountName) els.hubAccountName.value = '';
+      if (els.hubAccountLabel) els.hubAccountLabel.value = '';
+      if (els.hubAccountCredential) els.hubAccountCredential.value = '';
+      await refreshHubAccounts();
+    } catch (error) {
+      setHubAccountError(error?.message || String(error));
+    } finally {
+      state.hubAccountsBusy = false;
+      renderHubAccountList();
+    }
   });
-}
-
-function renderCursorStatus() {
-  const statusEl = document.getElementById('cursorAccountStatus');
-  const loginBtn = document.getElementById('cursorLoginButton');
-  const logoutBtn = document.getElementById('cursorLogoutButton');
-  const refreshBtn = document.getElementById('cursorRefreshButton');
-  const manualPanel = document.getElementById('cursorManualPanel');
-  const errorEl = document.getElementById('cursorErrorMessage');
-  if (!statusEl || !loginBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
-
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
-
-  if (state.cursorAccount.error) {
-    setCursorStatusText(statusEl, t('settings.common.error'));
-    errorEl.textContent = t('settings.cursor.statusCheckFailed', { message: state.cursorAccount.error });
-    errorEl.classList.remove('hidden');
-    loginBtn.classList.remove('hidden');
-    logoutBtn.classList.add('hidden');
-    refreshBtn.classList.remove('hidden');
-    manualPanel.classList.remove('hidden');
-    setCursorCheckboxesEnabled(false);
-    setSettingsSectionExpanded('accounts', true);
-    setCursorAccountExpanded(true);
-    renderSettingsSummaries();
-    return;
-  }
-
-  const status = state.cursorAccount.status;
-  if (!status) {
-    setCursorStatusText(statusEl, t('settings.common.checking'));
-    renderSettingsSummaries();
-    return;
-  }
-
-  if (!status.loggedIn) {
-    setCursorStatusText(statusEl, t('settings.cursor.notLoggedIn'));
-    loginBtn.classList.remove('hidden');
-    logoutBtn.classList.add('hidden');
-    refreshBtn.classList.add('hidden');
-    manualPanel.classList.remove('hidden');
-    setCursorCheckboxesEnabled(false);
-    renderSettingsSummaries();
-    return;
-  }
-  if (status.expired) {
-    setCursorStatusText(statusEl, t('settings.cursor.expired'));
-    loginBtn.classList.remove('hidden');
-    logoutBtn.classList.remove('hidden');
-    refreshBtn.classList.remove('hidden');
-    manualPanel.classList.remove('hidden');
-    setCursorCheckboxesEnabled(false);
-    setSettingsSectionExpanded('accounts', true);
-    setCursorAccountExpanded(true);
-    renderSettingsSummaries();
-    return;
-  }
-  const summary = status.email || t('settings.cursor.loggedIn');
-  setCursorStatusText(statusEl, summary);
-  loginBtn.classList.add('hidden');
-  logoutBtn.classList.remove('hidden');
-  refreshBtn.classList.remove('hidden');
-  manualPanel.classList.add('hidden');
-  setCursorCheckboxesEnabled(true);
-  renderSettingsSummaries();
-}
-
-async function refreshCursorStatus() {
-  state.cursorAccount = { status: null, error: '' };
-  renderCursorStatus();
-  try {
-    const status = await window.tokenMonitor.cursor.status();
-    state.cursorAccount = { status, error: '' };
-  } catch (err) {
-    state.cursorAccount = { status: null, error: err.message };
-  }
-  renderCursorStatus();
-}
-
-function setCursorCheckboxesEnabled(enabled) {
-  const row = document.querySelector('#clientDisplayList .tool-preference-row[data-client="cursor"]');
-  const input = row?.querySelector('input[data-preference="track"]');
-  row?.classList.toggle('disabled', !enabled);
-  if (input) {
-    input.disabled = !enabled;
-    input.title = enabled ? '' : t('settings.cursor.loginRequired');
-  }
+  els.hubAccountsList.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-action][data-account-id]');
+    if (!button || state.hubAccountsBusy) return;
+    const accountId = String(button.dataset.accountId || '').trim();
+    if (!accountId) return;
+    state.hubAccountsBusy = true;
+    setHubAccountError('');
+    renderHubAccountList();
+    try {
+      if (button.dataset.action === 'remove') {
+        if (!window.confirm(t('settings.hubAccounts.removeConfirm'))) return;
+        await window.tokenMonitor.hubAccounts.remove(accountId);
+      } else if (button.dataset.action === 'refresh') {
+        await window.tokenMonitor.hubAccounts.refresh(accountId);
+      }
+      await refreshHubAccounts();
+    } catch (error) {
+      setHubAccountError(error?.message || String(error));
+    } finally {
+      state.hubAccountsBusy = false;
+      renderHubAccountList();
+    }
+  });
+  setHubAccountsExpanded(false);
+  renderHubAccountList();
 }
 
 let openCustomPricingForm = null;
@@ -10618,8 +9377,16 @@ function renderCustomPricing() {
 function setupCustomPricingUI() {
   const toggle = document.getElementById('customPricingSettingsToggle');
   if (!toggle) return;
-  toggle.addEventListener('click', () => setAccountGroupExpanded('customPricing', !state.customPricingExpanded, 'customPricingExpanded'));
-  setAccountGroupExpanded('customPricing', false, 'customPricingExpanded');
+  const details = document.getElementById('customPricingSettingsDetails');
+  const group = toggle.closest('.cursor-account-group');
+  const setExpanded = (expanded) => {
+    state.customPricingExpanded = Boolean(expanded);
+    toggle.setAttribute('aria-expanded', String(state.customPricingExpanded));
+    details?.classList.toggle('hidden', !state.customPricingExpanded);
+    group?.classList.toggle('expanded', state.customPricingExpanded);
+  };
+  toggle.addEventListener('click', () => setExpanded(!state.customPricingExpanded));
+  setExpanded(false);
 
   const form = document.getElementById('customPricingForm');
   const addButton = document.getElementById('customPricingAddButton');
@@ -10750,933 +9517,6 @@ function setupCustomPricingUI() {
   renderCustomPricing();
 }
 
-function setupCursorAccountUI() {
-  const codexToggle = document.getElementById('codexSettingsToggle');
-  if (codexToggle) {
-    codexToggle.addEventListener('click', () => setCodexAccountExpanded(!state.codexAccountExpanded));
-    setCodexAccountExpanded(false);
-    renderCodexAccounts();
-
-    const codexAddButton = document.getElementById('codexAddAccountButton');
-    const codexCancelButton = document.getElementById('codexCancelLoginButton');
-    const codexOpenUrlButton = document.getElementById('codexOpenLoginUrlButton');
-    const codexCopyUrlButton = document.getElementById('codexCopyLoginUrlButton');
-    const codexWorkspaceSelect = document.getElementById('codexWorkspaceSelect');
-    const codexConfirmWorkspaceButton = document.getElementById('codexConfirmWorkspaceButton');
-    const codexLoginDetails = document.getElementById('codexLoginDetails');
-    window.tokenMonitor.codex.onLoginStatus((status) => {
-      if (!status || !isCurrentCodexSignInFlow(status.flowId)) return;
-      if (status.phase === 'workspaceSelection') {
-        state.codexWorkspaceChoices = Array.isArray(status.workspaces) ? status.workspaces : [];
-        state.codexWorkspaceId = state.codexWorkspaceChoices.some((workspace) => workspace.id === status.currentWorkspaceId)
-          ? status.currentWorkspaceId
-          : state.codexWorkspaceChoices[0]?.id || '';
-        state.codexLoginStatus = t('settings.codex.chooseWorkspace');
-        renderCodexLoginStatus();
-        return;
-      }
-      if (status.phase !== 'output') return;
-      state.codexLoginOutput = (state.codexLoginOutput + String(status.text || '')).slice(-3000);
-      if (status.loginUrl) state.codexLoginUrl = status.loginUrl;
-      state.codexLoginStatus = t(state.codexLoginUrl ? 'settings.codex.loginWaiting' : 'settings.codex.loginStarting');
-      renderCodexLoginStatus();
-    });
-    codexAddButton.addEventListener('click', async () => {
-      if (state.codexSignInBusy) return;
-      const flowId = nextCodexSignInFlowId();
-      state.codexSignInFlowId = flowId;
-      state.codexSignInBusy = true;
-      state.codexLoginUrl = '';
-      state.codexLoginOutput = '';
-      state.codexWorkspaceChoices = [];
-      state.codexWorkspaceId = '';
-      state.codexLoginStatus = t('settings.codex.loginStarting');
-      state.codexAccountError = '';
-      if (codexLoginDetails) codexLoginDetails.open = false;
-      renderCodexLoginStatus();
-      renderCodexAccounts();
-      try {
-        const result = await window.tokenMonitor.codex.addAccount({ flowId });
-        if (!isCurrentCodexSignInFlow(result?.flowId || flowId)) return;
-        if (!result?.ok) {
-          if (result?.outcome === 'cancelled') return;
-          state.codexAccountError = result?.error || t('settings.codex.loginFailed');
-          state.codexLoginStatus = t('settings.codex.loginFailed');
-          if (codexLoginDetails && state.codexLoginOutput) codexLoginDetails.open = true;
-          setCodexAccountExpanded(true);
-        } else {
-          state.codexAccountError = '';
-          state.codexLoginStatus = t('settings.codex.loginSuccess');
-          renderCodexLoginStatus();
-          state.settings.codexManagedAccounts = await window.tokenMonitor.codex.accounts();
-          await refreshStats({ force: true });
-          state.codexLoginStatus = '';
-          state.codexLoginOutput = '';
-          state.codexWorkspaceChoices = [];
-          state.codexWorkspaceId = '';
-        }
-      } catch (err) {
-        if (!isCurrentCodexSignInFlow(flowId)) return;
-        state.codexAccountError = err.message;
-        state.codexLoginStatus = t('settings.codex.loginFailed');
-        if (codexLoginDetails && state.codexLoginOutput) codexLoginDetails.open = true;
-      } finally {
-        if (isCurrentCodexSignInFlow(flowId)) {
-          state.codexSignInBusy = false;
-          state.codexSignInFlowId = '';
-          state.codexLoginUrl = '';
-          state.codexWorkspaceChoices = [];
-          state.codexWorkspaceId = '';
-          renderCodexLoginStatus();
-          renderCodexAccounts();
-        }
-      }
-    });
-
-    codexCancelButton.addEventListener('click', async () => {
-      const flowId = state.codexSignInFlowId;
-      if (!isCurrentCodexSignInFlow(flowId)) return;
-      const result = await window.tokenMonitor.codex.cancelLogin({ flowId });
-      if (!result?.cancelled || !isCurrentCodexSignInFlow(flowId)) return;
-      state.codexSignInBusy = false;
-      state.codexSignInFlowId = '';
-      state.codexLoginUrl = '';
-      state.codexLoginStatus = '';
-      state.codexLoginOutput = '';
-      state.codexWorkspaceChoices = [];
-      state.codexWorkspaceId = '';
-      state.codexAccountError = '';
-      if (codexLoginDetails) codexLoginDetails.open = false;
-      renderCodexLoginStatus();
-      renderCodexAccounts();
-    });
-
-    codexWorkspaceSelect.addEventListener('change', () => {
-      state.codexWorkspaceId = codexWorkspaceSelect.value;
-    });
-
-    codexConfirmWorkspaceButton.addEventListener('click', async () => {
-      const flowId = state.codexSignInFlowId;
-      const workspaceId = state.codexWorkspaceId;
-      if (!isCurrentCodexSignInFlow(flowId) || !workspaceId) return;
-      codexConfirmWorkspaceButton.disabled = true;
-      try {
-        const result = await window.tokenMonitor.codex.selectWorkspace({ flowId, workspaceId });
-        if (!result?.ok || !isCurrentCodexSignInFlow(flowId)) return;
-        state.codexWorkspaceChoices = [];
-        state.codexWorkspaceId = '';
-        state.codexLoginStatus = t('settings.codex.loginLoadingAccount');
-        renderCodexLoginStatus();
-      } finally {
-        codexConfirmWorkspaceButton.disabled = false;
-      }
-    });
-
-    codexOpenUrlButton.addEventListener('click', async () => {
-      if (!state.codexLoginUrl) return;
-      const result = await window.tokenMonitor.openExternal(state.codexLoginUrl);
-      if (!result?.ok) {
-        state.codexAccountError = result?.error || t('settings.codex.openLoginUrlFailed');
-        renderCodexAccounts();
-      }
-    });
-
-    codexCopyUrlButton.addEventListener('click', () => {
-      if (state.codexLoginUrl) copyToClipboard(state.codexLoginUrl, codexCopyUrlButton);
-    });
-
-    renderCodexLoginStatus();
-
-    document.getElementById('codexRefreshAccountsButton').addEventListener('click', () => {
-      refreshCodexAccounts();
-    });
-  }
-
-  document.getElementById('cursorSettingsToggle').addEventListener('click', () => {
-    setCursorAccountExpanded(!state.cursorAccountExpanded);
-  });
-  setCursorAccountExpanded(false);
-
-  document.getElementById('cursorLoginButton').addEventListener('click', () => {
-    window.tokenMonitor.openExternal('https://cursor.com/settings');
-  });
-
-  document.getElementById('cursorLogoutButton').addEventListener('click', async () => {
-    await window.tokenMonitor.cursor.logout();
-    await refreshCursorStatus();
-    await refreshStats({ force: true });
-  });
-
-  document.getElementById('cursorRefreshButton').addEventListener('click', () => {
-    refreshCursorStatus();
-  });
-
-  document.getElementById('cursorManualSubmit').addEventListener('click', async () => {
-    const input = document.getElementById('cursorManualInput');
-    const errorEl = document.getElementById('cursorErrorMessage');
-    errorEl.classList.add('hidden');
-    const result = await window.tokenMonitor.cursor.loginManual(input.value);
-    if (!result.ok) {
-      errorEl.textContent = t('settings.cursor.loginFailed', { message: result.error });
-      errorEl.classList.remove('hidden');
-      return;
-    }
-    input.value = '';
-    await refreshCursorStatus();
-    setCursorAccountExpanded(false);
-    await refreshStats({ force: true });
-  });
-
-  refreshCursorStatus();
-
-  const opencodeToggle = document.getElementById('opencodeSettingsToggle');
-  if (opencodeToggle) {
-    opencodeToggle.addEventListener('click', () => {
-      const expanding = document.getElementById('opencodeSettingsDetails').classList.contains('hidden');
-      setOpencodeCookieExpanded(expanding);
-      if (expanding) renderOpenCodeProfiles();
-    });
-
-    const addToggle = document.getElementById('opencodeAddToggle');
-    const addDetails = document.getElementById('opencodeAddDetails');
-    function setOpenCodeAddExpanded(expanded) {
-      const next = Boolean(expanded);
-      addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
-      addDetails?.classList.toggle('hidden', !next);
-      document.getElementById('opencodeAddForm')?.classList.toggle('expanded', next);
-    }
-    addToggle?.addEventListener('click', () => setOpenCodeAddExpanded(addDetails?.classList.contains('hidden')));
-
-    document.getElementById('opencodeOpenBrowser')?.addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://opencode.ai/auth');
-    });
-
-    document.getElementById('opencodeCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('opencodeCookieInput');
-      const nameInput = document.getElementById('opencodeProfileName');
-      const errorEl = document.getElementById('opencodeErrorMessage');
-      const name = (nameInput.value || '').trim() || 'default';
-      const cookie = input.value;
-
-      errorEl.classList.add('hidden');
-
-      const result = await window.tokenMonitor.opencode.saveProfile(name, cookie);
-      if (result.ok) {
-        input.value = '';
-        nameInput.value = '';
-        renderOpenCodeProfiles();
-        updateOpenCodeProfilesStatus();
-        renderSettingsSummaries();
-      } else {
-        errorEl.textContent = result.error || t('settings.opencode.saveFailedShort');
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const openrouterToggle = document.getElementById('openrouterSettingsToggle');
-  if (openrouterToggle) {
-    openrouterToggle.addEventListener('click', () => {
-      const expanding = !state.openrouterAccountExpanded;
-      setOpenrouterAccountExpanded(expanding);
-      if (expanding) renderOpenRouterProfiles();
-    });
-    setOpenrouterAccountExpanded(false);
-
-    const addToggle = document.getElementById('openrouterAddToggle');
-    const addDetails = document.getElementById('openrouterAddDetails');
-    addToggle?.addEventListener('click', () => {
-      const expanded = addDetails?.classList.contains('hidden');
-      addToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-      addDetails?.classList.toggle('hidden', !expanded);
-      document.getElementById('openrouterAddForm')?.classList.toggle('expanded', expanded);
-    });
-    document.getElementById('openrouterOpenBrowser')?.addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://openrouter.ai/settings/keys');
-    });
-    document.getElementById('openrouterProfileSubmit')?.addEventListener('click', async () => {
-      const nameInput = document.getElementById('openrouterProfileName');
-      const keyInput = document.getElementById('openrouterApiKeyInput');
-      const errorEl = document.getElementById('openrouterErrorMessage');
-      const name = String(nameInput?.value || '').trim() || 'default';
-      const apiKey = String(keyInput?.value || '').trim();
-      errorEl?.classList.add('hidden');
-      if (!apiKey) {
-        if (errorEl) {
-          errorEl.textContent = t('settings.openrouter.statusNotSet');
-          errorEl.classList.remove('hidden');
-        }
-        return;
-      }
-      const result = await window.tokenMonitor.openrouter.saveProfile(name, apiKey);
-      if (result?.ok) {
-        nameInput.value = '';
-        keyInput.value = '';
-        renderOpenRouterProfiles();
-        await refreshStats({ force: true });
-      } else if (errorEl) {
-        errorEl.textContent = openrouterProfileErrorText(result);
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const deepseekToggle = document.getElementById('deepseekSettingsToggle');
-  if (deepseekToggle) {
-    deepseekToggle.addEventListener('click', () => setDeepseekAccountExpanded(!state.deepseekAccountExpanded));
-    setDeepseekAccountExpanded(false);
-    renderDeepseekStatus();
-
-    document.getElementById('deepseekOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://platform.deepseek.com/api_keys');
-    });
-
-    document.getElementById('deepseekLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ deepseekApiKey: '' });
-      clearDeepseekPendingCheck();
-      clearDeepseekProviderStatus();
-      renderDeepseekStatus();
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('deepseekRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('deepseekApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('deepseekApiKeyInput');
-      const errorEl = document.getElementById('deepseekErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.deepseek.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markDeepseekKeyCheckPending();
-        await saveSettings({ deepseekApiKey: input.value });
-        input.value = '';
-        renderDeepseekStatus();
-        await refreshStats({ force: true });
-        if (deepseekAccountLinked()) setDeepseekAccountExpanded(false);
-        else setDeepseekAccountExpanded(true);
-        renderDeepseekStatus();
-      } catch (err) {
-        clearDeepseekPendingCheck();
-        errorEl.textContent = t('settings.deepseek.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-  const minimaxToggle = document.getElementById('minimaxSettingsToggle');
-  if (minimaxToggle) {
-    minimaxToggle.addEventListener('click', () => setMinimaxAccountExpanded(!state.minimaxAccountExpanded));
-    setMinimaxAccountExpanded(false);
-    renderMinimaxStatus();
-
-    document.getElementById('minimaxOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(minimaxPlatformUrl());
-    });
-
-    document.getElementById('minimaxLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ minimaxApiKey: '' });
-      clearMinimaxPendingCheck();
-      clearMinimaxProviderStatus();
-      renderMinimaxStatus();
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('minimaxRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('minimaxApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('minimaxApiKeyInput');
-      const errorEl = document.getElementById('minimaxErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.minimax.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markMinimaxKeyCheckPending();
-        await saveSettings({ minimaxApiKey: input.value });
-        input.value = '';
-        renderMinimaxStatus();
-        await refreshStats({ force: true });
-        if (minimaxAccountLinked()) setMinimaxAccountExpanded(false);
-        else setMinimaxAccountExpanded(true);
-        renderMinimaxStatus();
-      } catch (err) {
-        clearMinimaxPendingCheck();
-        errorEl.textContent = t('settings.minimax.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const zaiToggle = document.getElementById('zaiSettingsToggle');
-  if (zaiToggle) {
-    const zaiApiRegionInput = document.getElementById('zaiApiRegionInput');
-    if (zaiApiRegionInput) zaiApiRegionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
-    zaiApiRegionInput?.addEventListener('change', () => void saveSettings({ zaiApiRegion: zaiApiRegionInput.value || 'global' }));
-    zaiToggle.addEventListener('click', () => setExternalAccountExpanded('zai', !state.zaiAccountExpanded));
-    setExternalAccountExpanded('zai', false);
-    renderExternalProviderStatus('zai');
-
-    document.getElementById('zaiOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(zaiPlatformUrl());
-    });
-
-    document.getElementById('zaiLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ zaiApiKey: '' });
-      clearExternalProviderCheckPending('zai');
-      clearExternalProviderPendingStatus('zai');
-      renderExternalProviderStatus('zai');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('zaiApiKeyInput');
-      const regionInput = document.getElementById('zaiApiRegionInput');
-      const errorEl = document.getElementById('zaiErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.zai.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('zai');
-        await saveSettings({ zaiApiKey: input.value, zaiApiRegion: regionInput?.value || 'global' });
-        input.value = '';
-        renderExternalProviderStatus('zai');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('zai', !externalProviderAccountLinked('zai'));
-        renderExternalProviderStatus('zai');
-      } catch (err) {
-        clearExternalProviderCheckPending('zai');
-        errorEl.textContent = t('settings.zai.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const zaiteamToggle = document.getElementById('zaiteamSettingsToggle');
-  if (zaiteamToggle) {
-    zaiteamToggle.addEventListener('click', () => setExternalAccountExpanded('zaiteam', !state.zaiteamAccountExpanded));
-    setExternalAccountExpanded('zaiteam', false);
-    renderExternalProviderStatus('zaiteam');
-
-    document.getElementById('zaiteamOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(zaiteamPlatformUrl());
-    });
-
-    document.getElementById('zaiteamLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ zaiTeamApiKey: '', zaiTeamOrganizationId: '', zaiTeamProjectId: '' });
-      clearExternalProviderCheckPending('zaiteam');
-      clearExternalProviderPendingStatus('zaiteam');
-      renderExternalProviderStatus('zaiteam');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiteamRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiteamApiKeySubmit').addEventListener('click', async () => {
-      const keyInput = document.getElementById('zaiteamApiKeyInput');
-      const orgInput = document.getElementById('zaiteamOrganizationIdInput');
-      const projectInput = document.getElementById('zaiteamProjectIdInput');
-      const errorEl = document.getElementById('zaiteamErrorMessage');
-      errorEl.classList.add('hidden');
-      const apiKey = String(keyInput.value || '').trim();
-      const organizationId = String(orgInput.value || '').trim();
-      const projectId = String(projectInput.value || '').trim();
-      if (!apiKey || !organizationId || !projectId) {
-        errorEl.textContent = t('settings.zaiteam.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('zaiteam');
-        await saveSettings({ zaiTeamApiKey: apiKey, zaiTeamOrganizationId: organizationId, zaiTeamProjectId: projectId });
-        keyInput.value = '';
-        orgInput.value = '';
-        projectInput.value = '';
-        renderExternalProviderStatus('zaiteam');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('zaiteam', !externalProviderAccountLinked('zaiteam'));
-        renderExternalProviderStatus('zaiteam');
-      } catch (err) {
-        clearExternalProviderCheckPending('zaiteam');
-        errorEl.textContent = t('settings.zaiteam.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const volcengineToggle = document.getElementById('volcengineSettingsToggle');
-  if (volcengineToggle) {
-    volcengineToggle.addEventListener('click', () => setExternalAccountExpanded('volcengine', !state.volcengineAccountExpanded));
-    setExternalAccountExpanded('volcengine', false);
-    renderExternalProviderStatus('volcengine');
-
-    document.getElementById('volcengineOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(volcenginePlatformUrl());
-    });
-
-    document.getElementById('volcengineLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ volcengineAccessKeyId: '', volcengineSecretAccessKey: '', volcengineRegion: '' });
-      clearExternalProviderCheckPending('volcengine');
-      clearExternalProviderPendingStatus('volcengine');
-      renderExternalProviderStatus('volcengine');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('volcengineRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('volcengineCredentialsSubmit').addEventListener('click', async () => {
-      const accessKeyInput = document.getElementById('volcengineAccessKeyInput');
-      const secretInput = document.getElementById('volcengineSecretAccessKeyInput');
-      const regionInput = document.getElementById('volcengineRegionInput');
-      const errorEl = document.getElementById('volcengineErrorMessage');
-      errorEl.classList.add('hidden');
-      const accessKeyValue = String(accessKeyInput.value || '').trim();
-      const secretValue = String(secretInput.value || '').trim();
-      if (!accessKeyValue || (/^AKLT/i.test(accessKeyValue) && !secretValue)) {
-        errorEl.textContent = t('settings.volcengine.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('volcengine');
-        await saveSettings({
-          volcengineAccessKeyId: accessKeyInput.value,
-          volcengineSecretAccessKey: secretInput.value,
-          volcengineRegion: regionInput.value || 'cn-beijing'
-        });
-        accessKeyInput.value = '';
-        secretInput.value = '';
-        renderExternalProviderStatus('volcengine');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('volcengine', !externalProviderAccountLinked('volcengine'));
-        renderExternalProviderStatus('volcengine');
-      } catch (err) {
-        clearExternalProviderCheckPending('volcengine');
-        errorEl.textContent = t('settings.volcengine.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const qoderToggle = document.getElementById('qoderSettingsToggle');
-  if (qoderToggle) {
-    qoderToggle.addEventListener('click', () => setExternalAccountExpanded('qoder', !state.qoderAccountExpanded));
-    setExternalAccountExpanded('qoder', false);
-    renderExternalProviderStatus('qoder');
-
-    const qoderSiteInput = document.getElementById('qoderSiteInput');
-    if (qoderSiteInput) qoderSiteInput.value = state.settings?.qoderSite === 'cn' ? 'cn' : 'global';
-    updateQoderUsagePageHint();
-    qoderSiteInput?.addEventListener('change', () => {
-      updateQoderUsagePageHint();
-      void saveSettings({ qoderSite: qoderSiteInput.value || 'global' });
-    });
-
-    document.getElementById('qoderOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(qoderPlatformUrl());
-    });
-
-    document.getElementById('qoderLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ qoderCookie: '' });
-      clearExternalProviderCheckPending('qoder');
-      clearExternalProviderPendingStatus('qoder');
-      renderExternalProviderStatus('qoder');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('qoderRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('qoderCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('qoderCookieInput');
-      const siteInput = document.getElementById('qoderSiteInput');
-      const errorEl = document.getElementById('qoderErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.qoder.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('qoder');
-        await saveSettings({ qoderCookie: input.value, qoderSite: siteInput?.value || 'global' });
-        input.value = '';
-        renderExternalProviderStatus('qoder');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('qoder', !externalProviderAccountLinked('qoder'));
-        renderExternalProviderStatus('qoder');
-      } catch (err) {
-        clearExternalProviderCheckPending('qoder');
-        errorEl.textContent = t('settings.qoder.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const ollamaToggle = document.getElementById('ollamaSettingsToggle');
-  if (ollamaToggle) {
-    ollamaToggle.addEventListener('click', () => setExternalAccountExpanded('ollama', !state.ollamaAccountExpanded));
-    setExternalAccountExpanded('ollama', false);
-    renderExternalProviderStatus('ollama');
-
-    document.getElementById('ollamaOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(ollamaPlatformUrl());
-    });
-    document.getElementById('ollamaLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ ollamaCookie: '' });
-      clearExternalProviderCheckPending('ollama');
-      clearExternalProviderPendingStatus('ollama');
-      renderExternalProviderStatus('ollama');
-      await refreshStats({ force: true });
-    });
-    document.getElementById('ollamaRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-    document.getElementById('ollamaCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('ollamaCookieInput');
-      const errorEl = document.getElementById('ollamaErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.ollama.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('ollama');
-        renderExternalProviderStatus('ollama');
-        const validation = await window.tokenMonitor.ollama.validateCookie(input.value);
-        if (!validation?.ok) {
-          clearExternalProviderCheckPending('ollama');
-          renderExternalProviderStatus('ollama');
-          errorEl.textContent = ollamaValidationError(validation);
-          errorEl.classList.remove('hidden');
-          return;
-        }
-        await saveSettings({
-          ollamaCookie: input.value,
-          limitProviders: limitProviderSelectionIncluding('ollama'),
-          limitsEnabled: true
-        });
-        if (!state.settings?.ollamaCookieConfigured) {
-          clearExternalProviderCheckPending('ollama');
-          renderExternalProviderStatus('ollama');
-          errorEl.textContent = t('settings.ollama.validationInvalid');
-          errorEl.classList.remove('hidden');
-          return;
-        }
-        input.value = '';
-        renderExternalProviderStatus('ollama');
-      } catch (err) {
-        clearExternalProviderCheckPending('ollama');
-        renderExternalProviderStatus('ollama');
-        errorEl.textContent = t('settings.ollama.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const kimiToggle = document.getElementById('kimiSettingsToggle');
-  if (kimiToggle) {
-    kimiToggle.addEventListener('click', () => setExternalAccountExpanded('kimi', !state.kimiAccountExpanded));
-    setExternalAccountExpanded('kimi', false);
-    renderExternalProviderStatus('kimi');
-
-    document.getElementById('kimiOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(kimiPlatformUrl());
-    });
-
-    document.getElementById('kimiLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ kimiApiKey: '', kimiWebAccessToken: '' });
-      clearExternalProviderCheckPending('kimi');
-      clearExternalProviderPendingStatus('kimi');
-      renderExternalProviderStatus('kimi');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('kimiRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('kimiWebAccessTokenSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('kimiWebAccessTokenInput');
-      const errorEl = document.getElementById('kimiErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.kimi.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('kimi');
-        await saveSettings({ kimiWebAccessToken: input.value });
-        input.value = '';
-        renderExternalProviderStatus('kimi');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('kimi', !externalProviderAccountLinked('kimi'));
-        renderExternalProviderStatus('kimi');
-      } catch (err) {
-        clearExternalProviderCheckPending('kimi');
-        errorEl.textContent = t('settings.kimi.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-
-    document.getElementById('kimiApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('kimiApiKeyInput');
-      const errorEl = document.getElementById('kimiErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.kimi.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('kimi');
-        await saveSettings({ kimiApiKey: input.value });
-        input.value = '';
-        renderExternalProviderStatus('kimi');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('kimi', !externalProviderAccountLinked('kimi'));
-        renderExternalProviderStatus('kimi');
-      } catch (err) {
-        clearExternalProviderCheckPending('kimi');
-        errorEl.textContent = t('settings.kimi.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const mimoToggle = document.getElementById('mimoSettingsToggle');
-  if (mimoToggle) {
-    mimoToggle.addEventListener('click', () => setMimoAccountExpanded(!state.mimoAccountExpanded));
-
-    const addToggle = document.getElementById('mimoAddToggle');
-    const addDetails = document.getElementById('mimoAddDetails');
-    function setMimoAddExpanded(expanded) {
-      const next = Boolean(expanded);
-      addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
-      addDetails?.classList.toggle('hidden', !next);
-      document.getElementById('mimoManualPanel')?.classList.toggle('expanded', next);
-    }
-    addToggle?.addEventListener('click', () => setMimoAddExpanded(addDetails?.classList.contains('hidden')));
-    setMimoAccountExpanded(false);
-    renderMimoStatus();
-
-    window.tokenMonitor.mimo.onAccounts((accounts) => {
-      state.settings.mimoManagedAccounts = accounts || [];
-      renderMimoStatus();
-    });
-
-    window.tokenMonitor.mimo.accounts().then((accounts) => {
-      state.settings.mimoManagedAccounts = accounts || [];
-      renderMimoStatus();
-    }).catch(() => {});
-
-    document.getElementById('mimoOpenConsoleButton').addEventListener('click', async () => {
-      const result = await window.tokenMonitor.mimo.openConsole();
-      if (!result?.ok) {
-        state.mimoAccountError = result?.error || t('settings.mimo.openFailed');
-        renderMimoStatus();
-        return;
-      }
-      state.mimoAccountError = '';
-      renderMimoStatus();
-    });
-
-    document.getElementById('mimoSaveAccountButton').addEventListener('click', async () => {
-      const input = document.getElementById('mimoCookieInput');
-      const saveButton = document.getElementById('mimoSaveAccountButton');
-      saveButton.disabled = true;
-      saveButton.textContent = t('settings.mimo.checking');
-      let result;
-      try {
-        result = await window.tokenMonitor.mimo.addAccount(input.value);
-      } catch (_) {
-        result = { ok: false, errorCode: 'validationUnavailable' };
-      } finally {
-        saveButton.disabled = false;
-        saveButton.textContent = t('settings.mimo.saveAccount');
-      }
-      if (!result?.ok) {
-        if (result?.errorCode === 'missingRequiredCookies') {
-          state.mimoAccountError = t('settings.mimo.missingCookies', { cookies: (result.missingCookies || []).join(', ') });
-        } else if (result?.errorCode === 'invalidCookie') {
-          state.mimoAccountError = t('settings.mimo.invalidCookie');
-        } else if (result?.errorCode === 'validationRateLimited') {
-          state.mimoAccountError = t('settings.mimo.validationRateLimited');
-        } else if (result?.errorCode === 'validationUnavailable') {
-          state.mimoAccountError = t('settings.mimo.validationUnavailable');
-        } else if (result?.errorCode === 'credentialStorageUnavailable') {
-          state.mimoAccountError = t('settings.mimo.credentialStorageUnavailable');
-        } else {
-          state.mimoAccountError = result?.error || t('settings.mimo.addFailed');
-        }
-        renderMimoStatus();
-        return;
-      }
-      input.value = '';
-      state.mimoAccountError = '';
-      state.settings.mimoManagedAccounts = await window.tokenMonitor.mimo.accounts();
-      renderMimoStatus();
-      setMimoAddExpanded(false);
-      await refreshStats({ force: true });
-    });
-  }
-  const copilotToggle = document.getElementById('copilotSettingsToggle');
-  if (copilotToggle) {
-    copilotToggle.addEventListener('click', () => setCopilotAccountExpanded(!state.copilotAccountExpanded));
-    document.getElementById('copilotManualToggle')?.addEventListener('click', () => {
-      const details = document.getElementById('copilotManualDetails');
-      setCopilotManualExpanded(details?.classList.contains('hidden'));
-    });
-    setCopilotAccountExpanded(false);
-    setCopilotManualExpanded(false);
-    renderCopilotStatus();
-
-    const errorEl = document.getElementById('copilotErrorMessage');
-    const setCopilotError = (message) => {
-      state.copilotErrorMessage = message || '';
-      if (errorEl) {
-        errorEl.textContent = state.copilotErrorMessage;
-        errorEl.classList.toggle('hidden', !state.copilotErrorMessage);
-      }
-    };
-
-    window.tokenMonitor.copilot?.onLoginStatus?.((status) => {
-      if (!status) return;
-      if (!isCurrentCopilotSignInFlow(status.flowId)) return;
-      if (status.phase === 'authorize') {
-        state.copilotAuthorizeMessage = t('settings.copilot.authorize', { code: status.userCode || '' });
-        state.copilotLoginStatus = state.copilotAuthorizeMessage;
-      } else if (status.phase === 'polling') {
-        state.copilotLoginStatus = [state.copilotAuthorizeMessage, t('settings.copilot.polling')].filter(Boolean).join('\n\n');
-      } else if (status.phase === 'success') {
-        state.copilotSignInCancelable = false;
-        state.copilotAuthorizeMessage = '';
-        state.copilotLoginStatus = t('settings.copilot.loginSuccess');
-      } else if (status.phase === 'error') {
-        state.copilotSignInCancelable = false;
-        state.copilotAuthorizeMessage = '';
-        state.copilotLoginStatus = '';
-        setCopilotError(status.error || t('settings.copilot.loginFailed'));
-      } else {
-        state.copilotAuthorizeMessage = '';
-        state.copilotLoginStatus = t('settings.copilot.loginStarting');
-      }
-      renderCopilotStatus();
-    });
-
-    document.getElementById('copilotSignInButton').addEventListener('click', async () => {
-      if (state.copilotSignInBusy) return;
-      const flowId = nextCopilotSignInFlowId();
-      state.copilotSignInFlowId = flowId;
-      state.copilotSignInBusy = true;
-      state.copilotSignInCancelable = true;
-      state.copilotAuthorizeMessage = '';
-      state.copilotLoginStatus = t('settings.copilot.loginStarting');
-      setCopilotError('');
-      setCopilotManualExpanded(false);
-      renderCopilotStatus();
-      try {
-        const result = await window.tokenMonitor.copilot.signIn({ flowId });
-        if (!isCurrentCopilotSignInFlow(result?.flowId || flowId)) return;
-        if (!result?.ok) {
-          setCopilotError(result?.error || t('settings.copilot.loginFailed'));
-          setCopilotAccountExpanded(true);
-        } else {
-          state.copilotSignInCancelable = false;
-          markCopilotTokenCheckPending();
-          state.copilotAuthorizeMessage = '';
-          state.copilotLoginStatus = '';
-          renderCopilotStatus();
-          await refreshStats({ force: true });
-          if (copilotAccountLinked()) setCopilotAccountExpanded(false);
-        }
-      } catch (err) {
-        if (!isCurrentCopilotSignInFlow(flowId)) return;
-        setCopilotError(err.message);
-      } finally {
-        if (isCurrentCopilotSignInFlow(flowId)) {
-          state.copilotSignInBusy = false;
-          state.copilotSignInCancelable = false;
-          state.copilotSignInFlowId = '';
-          state.copilotAuthorizeMessage = '';
-          state.copilotLoginStatus = '';
-          renderCopilotStatus();
-        }
-      }
-    });
-
-    document.getElementById('copilotCancelSignInButton').addEventListener('click', async () => {
-      const flowId = state.copilotSignInFlowId;
-      await window.tokenMonitor.copilot.cancelSignIn({ flowId });
-      if (!isCurrentCopilotSignInFlow(flowId)) return;
-      state.copilotSignInBusy = false;
-      state.copilotSignInCancelable = false;
-      state.copilotSignInFlowId = '';
-      state.copilotAuthorizeMessage = '';
-      state.copilotLoginStatus = '';
-      renderCopilotStatus();
-    });
-
-    document.getElementById('copilotLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ copilotApiToken: '' });
-      clearCopilotPendingCheck();
-      clearCopilotProviderStatus();
-      renderCopilotStatus();
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('copilotRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('copilotApiTokenSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('copilotApiTokenInput');
-      setCopilotError('');
-      if (!String(input.value || '').trim()) {
-        setCopilotManualExpanded(true);
-        setCopilotError(t('settings.copilot.statusNotSet'));
-        return;
-      }
-      try {
-        markCopilotTokenCheckPending();
-        await saveSettings({ copilotApiToken: input.value });
-        input.value = '';
-        renderCopilotStatus();
-        await refreshStats({ force: true });
-        if (copilotAccountLinked()) setCopilotAccountExpanded(false);
-        else setCopilotAccountExpanded(true);
-        renderCopilotStatus();
-      } catch (err) {
-        clearCopilotPendingCheck();
-        setCopilotError(t('settings.copilot.saveFailed', { message: err.message }));
-      }
-    });
-  }
-
-}
-
 function initSettingsAnimationWrappers() {
   const selectors = [
     '.settings-section-details',
@@ -11717,7 +9557,7 @@ function initSettingsAnimationWrappers() {
 
 initSettingsAnimationWrappers();
 setupSettingsSections();
-setupCursorAccountUI();
+setupHubAccountsUI();
 setupCustomPricingUI();
 setupCustomRangeUI();
 init();

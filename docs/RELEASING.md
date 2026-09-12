@@ -52,6 +52,41 @@ Android 的 `versionName` 与桌面版本一致，`versionCode` 会同时编码�
 
 已安装的 Debian 版本通过应用内更新使用系统 `dpkg`/`apt` 完成升级，首次安装新版本时会按系统策略请求管理员权限；也可以手动执行 `sudo apt install ./Token-Monitor-<version>.deb`。
 
+## Debian App Center / APT 更新
+
+直接打开 GitHub Release 中的 `.deb` 是一次“本地文件安装”，它不会自动把 GitHub Release 当成 APT 软件源。此时 App Center 能显示应用已安装，但没有可比较的仓库候选版本，所以不会显示升级按钮；这不是桌面包的 `Package` 名称问题。包会保持稳定的 `token-monitor` 标识、`com.javis.tokenmonitor` 应用 ID 和可递增的 `0.45.0-rev.N` Debian 版本。
+
+要让 App Center 发现后续版本，发布端必须同时提供带签名的 APT 仓库，并在机器上一次性安装该仓库的公钥和 source 配置。仓库索引生成器是：
+
+```bash
+node scripts/build-apt-repository.js \
+  --input-dir dist \
+  --output-dir _site/apt \
+  --suite stable \
+  --signing-key <APT 发布密钥 ID> \
+  --require-signature
+```
+
+其中 `dist/` 应只放当前要发布的 `.deb`。生成结果包含 `Packages`、压缩索引、`Release`、`InRelease` 和 `Release.gpg`；没有签名密钥时只能用于本地结构验证，不能作为用户源发布。公钥必须通过 HTTPS 或其他可信渠道安装到 `/usr/share/keyrings/token-monitor-archive-keyring.gpg`，source 配置中的 `Signed-By` 不能改成 `trusted=yes`。
+
+GitHub Actions 的正式版 APT 部署需要两个 repository secrets：`TOKEN_MONITOR_APT_GPG_PRIVATE_KEY`（ASCII-armored 私钥）和 `TOKEN_MONITOR_APT_GPG_KEY_ID`（发布密钥 ID）。私钥只放在 Actions secret，不提交到仓库；Pages 会公开对应的 ASCII 公钥和指纹文件。
+
+首次配置仓库后应执行：
+
+```bash
+curl -fsSL https://igngserver.github.io/token-monitor-suite/apt/token-monitor-archive-keyring.asc \
+  | gpg --dearmor \
+  | sudo tee /usr/share/keyrings/token-monitor-archive-keyring.gpg >/dev/null
+curl -fsSL https://igngserver.github.io/token-monitor-suite/apt/token-monitor.sources \
+  | sudo tee /etc/apt/sources.list.d/token-monitor.sources >/dev/null
+sudo apt update
+apt-cache policy token-monitor
+```
+
+安装前应把下载的公钥指纹与同目录的 `token-monitor-archive-keyring-fingerprint.txt` 及正式发布说明进行人工核对。`apt-cache policy` 应同时显示当前安装版本和 `https://igngserver.github.io/token-monitor-suite/apt` 的候选版本；之后 App Center 才能把仓库里的新版本显示为可升级。现有从本地 `.deb` 安装的用户不需要卸载或改包名，配置 source 后执行一次 `sudo apt update` 即可迁移到仓库更新链路。
+
+发布验证会检查 `.deb` 的 `Package`、原始 Debian `Version`、架构、桌面入口和 AppStream 元数据；AppStream 元数据用于让 App Center 正确识别应用，APT 源和签名则负责提供升级候选版本。
+
 ## Windows 签名
 
 当前 Windows 安装包可以正常构建。未配置 `SIGNPATH_API_TOKEN` 时，Release workflow 会自动跳过 SignPath，发布**未签名**的 Windows 包（用户首次运行可能看到 SmartScreen 警告）。配置 SignPath 的 `SIGNPATH_API_TOKEN` secret 后，同一 workflow 会走 SignPath 双阶段签名（应用本体 + 安装包/便携版）。

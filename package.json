@@ -1,7 +1,7 @@
 {
   "name": "token-monitor",
   "productName": "Token Monitor",
-  "version": "0.45.0-rev.27",
+  "version": "0.45.0-rev.28",
   "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
   "main": "src/electron/main.js",
   "scripts": {
@@ -26,6 +26,8 @@
     "dist:mac:widget:x64": "TOKEN_MONITOR_WIDGET_ENABLED=1 TOKEN_MONITOR_WIDGET_DISTRIBUTION=1 TOKEN_MONITOR_WIDGET_ARCH=x64 npm run build:mac-widget && TOKEN_MONITOR_WIDGET_ENABLED=1 TOKEN_MONITOR_WIDGET_DISTRIBUTION=1 TOKEN_MONITOR_WIDGET_ARCH=x64 node scripts/macos-packaging.js && TOKEN_MONITOR_WIDGET_ENABLED=1 TOKEN_MONITOR_WIDGET_DISTRIBUTION=1 TOKEN_MONITOR_WIDGET_ARCH=x64 electron-builder --config scripts/electron-builder.config.js --mac --x64 --publish never",
     "dist:win": "electron-builder --config scripts/electron-builder.config.js --win --x64 --publish never",
     "dist:linux": "electron-builder --config scripts/electron-builder.config.js --linux --x64 --publish never",
+    "verify:deb": "node scripts/verify-deb-package.js",
+    "build:apt": "node scripts/build-apt-repository.js",
     "verify:release-artifact-names": "node scripts/verify-updater-artifact-names.js dist",
     "verify:release-version": "node scripts/verify-release-version.js",
     "package:hub-compose": "node scripts/package-hub-compose.js",

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.javis.tokenmonitor.desktop</id>
+  <name>Token Monitor</name>
+  <summary>Live token and cost widget for AI coding tools</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="com.javis.tokenmonitor">
+    <name>IGNGserver</name>
+  </developer>
+  <description>
+    <p>Token Monitor monitors local AI coding-tool usage, estimates costs and limits, and can synchronize summaries across devices.</p>
+  </description>
+  <categories>
+    <category>Development</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <url type="homepage">https://github.com/IGNGserver/token-monitor-suite</url>
+  <url type="bugtracker">https://github.com/IGNGserver/token-monitor-suite/issues</url>
+  <launchable type="desktop-id">token-monitor.desktop</launchable>
+  <icon type="stock">token-monitor</icon>
+  <provides>
+    <binary>token-monitor</binary>
+  </provides>
+  <releases>
+    <release version="__VERSION__" date="__RELEASE_DATE__" />
+  </releases>
+</component>

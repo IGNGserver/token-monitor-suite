@@ -3,11 +3,11 @@
 const crypto = require('node:crypto');
 const { fetchBufferedWithTimeout } = require('../shared/http');
 
-// Standard OpenAI Codex CLI OAuth Client ID
-const CODEX_OAUTH_CLIENT_ID = 'app-65476a39b3d0';
+// Official OpenAI Codex CLI OAuth Client ID
+const CODEX_OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const CODEX_AUTH_URL = 'https://auth.openai.com/oauth/authorize';
 const CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token';
-const CODEX_REDIRECT_URI = 'http://localhost:8080/callback';
+const CODEX_REDIRECT_URI = 'http://localhost:1455/auth/callback';
 
 // Codeium / Antigravity Auth Base URL
 const AGY_AUTH_URL = 'https://codeium.com/profile';
@@ -51,10 +51,13 @@ function createOAuthSessionManager({ now = Date.now, ttlMs = SESSION_TTL_MS } = 
         response_type: 'code',
         client_id: CODEX_OAUTH_CLIENT_ID,
         redirect_uri: CODEX_REDIRECT_URI,
-        scope: 'openid profile email offline_access model.request',
+        scope: 'openid profile email offline_access api.connectors.read api.connectors.invoke',
         code_challenge: challenge,
         code_challenge_method: 'S256',
-        state
+        id_token_add_organizations: 'true',
+        codex_cli_simplified_flow: 'true',
+        state,
+        originator: 'codex_cli_rs'
       });
       authUrl = `${CODEX_AUTH_URL}?${params.toString()}`;
     } else if (provider === 'antigravity') {

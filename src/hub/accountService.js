@@ -73,6 +73,48 @@ function field(credential, ...names) {
   return '';
 }
 
+const SAFE_CREDENTIAL_METADATA_FIELDS = [
+  'site',
+  'region',
+  'organizationId',
+  'projectId',
+  'adapter',
+  'baseUrl',
+  'enterpriseHost',
+  'endpoint',
+  'accountId',
+  'accessKeyId'
+];
+
+function credentialMetadata(credential) {
+  const profile = credential?.profile && typeof credential.profile === 'object'
+    ? credential.profile
+    : null;
+  const metadata = {};
+  for (const name of SAFE_CREDENTIAL_METADATA_FIELDS) {
+    const direct = field(credential, name);
+    const value = direct === '' && profile ? field(profile, name) : direct;
+    if (value === '' || value === null || value === undefined || typeof value === 'object') continue;
+    metadata[name] = cleanText(value, 512);
+  }
+  return Object.keys(metadata).length > 0 ? metadata : null;
+}
+
+function mergeCredential(existingCredential, incomingCredential, provider) {
+  if (provider !== 'thirdparty') return { ...existingCredential, ...incomingCredential };
+  const existingProfile = existingCredential?.profile && typeof existingCredential.profile === 'object'
+    ? existingCredential.profile
+    : null;
+  if (!existingProfile) return { ...existingCredential, ...incomingCredential };
+  const incomingProfile = incomingCredential?.profile && typeof incomingCredential.profile === 'object'
+    ? incomingCredential.profile
+    : incomingCredential;
+  return {
+    ...existingCredential,
+    profile: { ...existingProfile, ...incomingProfile }
+  };
+}
+
 function ipv4IsNonPublic(hostname) {
   const octets = hostname.split('.').map((part) => Number(part));
   if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
@@ -349,14 +391,24 @@ function createHubAccountService({
     return { account, snapshot };
   }
 
-  async function listAccounts() {
+  async function listAccounts({ includeCredentialMetadata = false } = {}) {
     const accounts = await store.listHubAccounts();
     const result = [];
     for (const account of accounts) {
       const snapshot = typeof store.getHubAccountSnapshot === 'function'
         ? await store.getHubAccountSnapshot(account.id)
         : null;
-      result.push(publicAccount(account, snapshot));
+      let metadata = null;
+      if (includeCredentialMetadata) {
+        try {
+          const envelope = await store.getHubAccountCredential(account.id);
+          metadata = credentialMetadata(decryptCredential(envelope, credentialKey));
+        } catch (error) {
+          logger.warn?.(`[hub-accounts] metadata unavailable for ${account.id}: ${error.message}`);
+        }
+      }
+      const visible = publicAccount(account, snapshot);
+      result.push(metadata ? { ...visible, credentialMetadata: metadata } : visible);
     }
     return result;
   }
@@ -597,7 +649,15 @@ function createHubAccountService({
     if (patch.label !== undefined) next.label = cleanText(patch.label, MAX_ACCOUNT_LABEL_LENGTH);
     if (patch.enabled !== undefined) next.enabled = Boolean(patch.enabled);
     if (patch.credential !== undefined) {
-      const credential = credentialObject(patch.credential);
+      const incomingCredential = credentialObject(patch.credential);
+      let existingCredential = {};
+      if (patch.credentialMode !== 'replace') {
+        const envelope = await store.getHubAccountCredential(id);
+        existingCredential = decryptCredential(envelope, credentialKey) || {};
+      }
+      const credential = patch.credentialMode === 'replace'
+        ? incomingCredential
+        : mergeCredential(existingCredential, incomingCredential, entry.account.provider);
       const probed = await probeAccount({ ...entry.account, ...next }, credential);
       const row = probed.row;
       const storedCredential = probed.credential;

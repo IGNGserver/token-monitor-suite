@@ -176,6 +176,9 @@ const state = {
   subscriptionsLoading: false,
   subscriptionsError: null,
   subscriptionsSaving: false,
+  subscriptionsConflict: false,
+  subscriptionsPending: null,
+  subscriptionEditId: '',
   pricing: null,
   pricingLoading: false,
   pricingError: null,
@@ -200,7 +203,27 @@ const state = {
   stopStream: null,
   toastTimer: null,
   navOpen: false,
+  overlayFocus: {
+    settings: null,
+    range: null
+  },
   deferredInstall: null,
+  formDrafts: new Map(),
+  managementRequestSeq: {
+    subscriptions: 0,
+    pricing: 0,
+    accounts: 0
+  },
+  managementControllers: {
+    subscriptions: null,
+    pricing: null,
+    accounts: null
+  },
+  managementPromises: {
+    subscriptions: null,
+    pricing: null,
+    accounts: null
+  },
   pwaDismissed: localStorage.getItem('token-monitor.hub.pwaDismissed') === '1'
 };
 
@@ -301,10 +324,55 @@ function showAuth(show) {
   }
 }
 
+const OVERLAY_FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function overlayFocusable(root) {
+  if (!root) return [];
+  return [...root.querySelectorAll(OVERLAY_FOCUSABLE)]
+    .filter((element) => !element.hidden && !element.closest('[hidden], .hidden'));
+}
+
+function restoreOverlayFocus(key) {
+  const opener = state.overlayFocus[key];
+  state.overlayFocus[key] = null;
+  if (!opener || !opener.isConnected || opener.disabled) return;
+  opener.focus({ preventScroll: true });
+}
+
+function trapOverlayFocus(event) {
+  const root = !els.rangePopover.classList.contains('hidden')
+    ? els.rangePopover.querySelector('.popover-card')
+    : !els.settingsDrawer.classList.contains('hidden')
+      ? els.settingsDrawer.querySelector('.drawer-panel')
+      : null;
+  if (!root || event.key !== 'Tab') return false;
+  const focusable = overlayFocusable(root);
+  if (!focusable.length) {
+    event.preventDefault();
+    root.focus();
+    return true;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || !root.contains(document.activeElement))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || !root.contains(document.activeElement))) {
+    event.preventDefault();
+    first.focus();
+  }
+  return true;
+}
+
 function openSettings(open) {
-  els.settingsDrawer.classList.toggle('hidden', !open);
-  els.settingsDrawer.setAttribute('aria-hidden', open ? 'false' : 'true');
-  if (open) {
+  const nextOpen = Boolean(open);
+  const wasOpen = !els.settingsDrawer.classList.contains('hidden');
+  if (nextOpen && !wasOpen) state.overlayFocus.settings = document.activeElement;
+  els.settingsDrawer.classList.toggle('hidden', !nextOpen);
+  els.settingsDrawer.setAttribute('aria-hidden', nextOpen ? 'false' : 'true');
+  els.settingsOpen?.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+  els.settingsOpenTop?.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+  if (nextOpen) {
     els.languageSelect.value = state.prefs.language || 'auto';
     els.themeSelect.value = state.prefs.theme || 'system';
     els.currencySelect.value = state.prefs.currency || 'USD';
@@ -312,6 +380,9 @@ function openSettings(open) {
       els.homeLimitAccountCount.value = String(clampHomeLimitAccountCount(state.prefs.homeLimitAccountCount, 3));
     }
     els.settingsSecret.value = state.secret || '';
+    els.languageSelect.focus({ preventScroll: true });
+  } else if (wasOpen) {
+    restoreOverlayFocus('settings');
   }
 }
 
@@ -363,8 +434,13 @@ function refreshPwaUi() {
 }
 
 function openRange(open) {
-  els.rangePopover.classList.toggle('hidden', !open);
-  if (open) {
+  const nextOpen = Boolean(open);
+  const wasOpen = !els.rangePopover.classList.contains('hidden');
+  if (nextOpen && !wasOpen) state.overlayFocus.range = document.activeElement;
+  els.rangePopover.classList.toggle('hidden', !nextOpen);
+  els.rangePopover.setAttribute('aria-hidden', nextOpen ? 'false' : 'true');
+  els.customRangeBtn?.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+  if (nextOpen) {
     const now = new Date();
     const start = state.customRange?.from
       ? new Date(state.customRange.from)
@@ -373,6 +449,9 @@ function openRange(open) {
     els.rangeFrom.value = toDatetimeLocalValue(start);
     els.rangeTo.value = toDatetimeLocalValue(end);
     els.rangeError.classList.add('hidden');
+    els.rangeFrom.focus({ preventScroll: true });
+  } else if (wasOpen) {
+    restoreOverlayFocus('range');
   }
 }
 
@@ -395,11 +474,11 @@ function renderChrome() {
 
   els.periodTabs.innerHTML = [
     ...PERIODS.map((period) => `
-      <button type="button" class="period-tab ${!state.customPeriod && state.prefs.period === period ? 'active' : ''}" data-period="${period}">
+      <button type="button" role="tab" aria-selected="${!state.customPeriod && state.prefs.period === period ? 'true' : 'false'}" class="period-tab ${!state.customPeriod && state.prefs.period === period ? 'active' : ''}" data-period="${period}">
         ${tr(`period.${period}`)}
       </button>
     `),
-    state.customPeriod ? `<button type="button" class="period-tab active" data-period="custom">${tr('period.custom')}</button>` : ''
+    state.customPeriod ? `<button type="button" role="tab" aria-selected="true" class="period-tab active" data-period="custom">${tr('period.custom')}</button>` : ''
   ].join('');
 
   els.pageTitle.textContent = tr(`nav.${state.prefs.view}`);
@@ -473,6 +552,176 @@ function escapeHtml(value) {
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
+}
+
+function draftKeyForForm(form) {
+  return String(form?.dataset?.draftKey || '').trim();
+}
+
+function formFieldSnapshot(form) {
+  const fields = {};
+  form?.querySelectorAll?.('[name]').forEach((control) => {
+    const name = String(control.name || '').trim();
+    if (!name || name === 'provider' || name === 'oauthSessionId') return;
+    if (control.type === 'checkbox' || control.type === 'radio') {
+      fields[name] = { checked: Boolean(control.checked) };
+    } else if (control.multiple) {
+      fields[name] = { value: [...control.selectedOptions].map((option) => option.value) };
+    } else {
+      fields[name] = { value: control.value };
+    }
+  });
+  return fields;
+}
+
+function rememberFormDraft(target) {
+  const form = target?.closest?.('form[data-draft-key]');
+  const key = draftKeyForForm(form);
+  if (!form || !key) return;
+  const hasTopUpLedger = Boolean(form.querySelector('[data-topup-ledger]'));
+  const previous = state.formDrafts.get(key);
+  const topUpRows = [...form.querySelectorAll('[data-topup-row]')].map((row) => ({
+    id: row.getAttribute('data-topup-id') || '',
+    date: row.querySelector('[data-topup-date]')?.value || '',
+    amount: row.querySelector('[data-topup-amount]')?.value || ''
+  }));
+  state.formDrafts.set(key, {
+    dirty: true,
+    fields: formFieldSnapshot(form),
+    topUpRows: hasTopUpLedger ? topUpRows : (previous?.topUpRows || []),
+    topUpRowsPresent: hasTopUpLedger || Boolean(previous?.topUpRowsPresent)
+  });
+}
+
+function clearFormDraft(key) {
+  if (key) state.formDrafts.delete(String(key));
+}
+
+function hasDirtyFormDraft(prefix) {
+  return [...state.formDrafts.entries()].some(([key, draft]) => key.startsWith(prefix) && draft?.dirty);
+}
+
+function restoreFormDrafts() {
+  els.content.querySelectorAll('form[data-draft-key]').forEach((form) => {
+    const draft = state.formDrafts.get(draftKeyForForm(form));
+    if (!draft?.dirty || !draft.fields) return;
+    for (const control of form.querySelectorAll('[name]')) {
+      const name = String(control.name || '').trim();
+      const value = draft.fields[name];
+      if (!name || !value || name === 'provider' || name === 'oauthSessionId') continue;
+      if (control.type === 'checkbox' || control.type === 'radio') {
+        control.checked = Boolean(value.checked);
+      } else if (control.multiple && Array.isArray(value.value)) {
+        const selected = new Set(value.value);
+        for (const option of control.options) option.selected = selected.has(option.value);
+      } else if (value.value !== undefined) {
+        control.value = value.value;
+      }
+    }
+  });
+}
+
+function describeActiveElement(element) {
+  if (!element || element === document.body || element === document.documentElement) return null;
+  if (element.id) return { kind: 'id', id: element.id };
+  const form = element.closest?.('form[data-draft-key]');
+  if (form) {
+    if (element.matches('[data-account-provider-trigger]')) return { kind: 'account-provider-trigger', key: draftKeyForForm(form) };
+    if (element.matches('[data-account-provider-option]')) {
+      return {
+        kind: 'account-provider-option',
+        key: draftKeyForForm(form),
+        provider: element.getAttribute('data-account-provider-option') || ''
+      };
+    }
+    if (element.name) {
+      const controls = [...form.querySelectorAll('[name]')].filter((control) => control.name === element.name);
+      return {
+        kind: 'form-control',
+        key: draftKeyForForm(form),
+        name: element.name,
+        index: Math.max(0, controls.indexOf(element)),
+        selectionStart: typeof element.selectionStart === 'number' ? element.selectionStart : null,
+        selectionEnd: typeof element.selectionEnd === 'number' ? element.selectionEnd : null,
+        selectionDirection: element.selectionDirection || 'none'
+      };
+    }
+  }
+  const dataAttributes = [
+    'data-view',
+    'data-period',
+    'data-select-tool',
+    'data-select-device',
+    'data-device-period',
+    'data-stack',
+    'data-range',
+    'data-trends-metric'
+  ];
+  for (const attribute of dataAttributes) {
+    if (element.hasAttribute?.(attribute)) return { kind: 'data', attribute, value: element.getAttribute(attribute) || '' };
+  }
+  return null;
+}
+
+function findActiveElement(snapshot) {
+  if (!snapshot) return null;
+  if (snapshot.kind === 'id') return document.getElementById(snapshot.id);
+  if (snapshot.kind === 'account-provider-trigger') {
+    return [...els.content.querySelectorAll('form[data-draft-key]')]
+      .find((form) => draftKeyForForm(form) === snapshot.key)
+      ?.querySelector('[data-account-provider-trigger]') || null;
+  }
+  if (snapshot.kind === 'account-provider-option') {
+    const form = [...els.content.querySelectorAll('form[data-draft-key]')]
+      .find((entry) => draftKeyForForm(entry) === snapshot.key);
+    return [...(form?.querySelectorAll('[data-account-provider-option]') || [])]
+      .find((option) => option.getAttribute('data-account-provider-option') === snapshot.provider) || null;
+  }
+  if (snapshot.kind === 'form-control') {
+    const form = [...els.content.querySelectorAll('form[data-draft-key]')]
+      .find((entry) => draftKeyForForm(entry) === snapshot.key);
+    if (!form) return null;
+    return [...form.querySelectorAll('[name]')]
+      .filter((control) => control.name === snapshot.name)[snapshot.index] || null;
+  }
+  if (snapshot.kind === 'data') {
+    return [...els.content.querySelectorAll(`[${snapshot.attribute}]`)]
+      .find((element) => (element.getAttribute(snapshot.attribute) || '') === snapshot.value) || null;
+  }
+  return null;
+}
+
+function captureRenderState() {
+  els.content.querySelectorAll('form[data-draft-key]').forEach((form) => {
+    const key = draftKeyForForm(form);
+    const draft = state.formDrafts.get(key);
+    if (draft?.dirty) draft.fields = formFieldSnapshot(form);
+  });
+  const active = document.activeElement;
+  return {
+    active: describeActiveElement(active),
+    scrollY: active && (active === els.content || els.content.contains(active)) ? window.scrollY : null
+  };
+}
+
+function restoreRenderState(snapshot) {
+  restoreFormDrafts();
+  const active = findActiveElement(snapshot?.active);
+  if (active && !active.disabled) {
+    active.focus({ preventScroll: true });
+    if (snapshot.active.kind === 'form-control'
+      && typeof snapshot.active.selectionStart === 'number'
+      && typeof active.setSelectionRange === 'function') {
+      try {
+        active.setSelectionRange(snapshot.active.selectionStart, snapshot.active.selectionEnd, snapshot.active.selectionDirection);
+      } catch (_) {
+        // Some input types reject selection ranges; focus preservation still applies.
+      }
+    }
+  }
+  if (typeof snapshot?.scrollY === 'number' && typeof window.scrollTo === 'function') {
+    window.scrollTo({ top: snapshot.scrollY, behavior: 'auto' });
+  }
 }
 
 function segButtons(options, current, dataAttr) {
@@ -980,6 +1229,32 @@ function subscriptionField(record, key, fallback = '') {
   return escapeHtml(value === undefined || value === null ? fallback : value);
 }
 
+function subscriptionTopUpRows(record, draft, enabled) {
+  if (!enabled) return [];
+  if (draft?.dirty && draft.topUpRowsPresent) {
+    return Array.isArray(draft.topUpRows) ? draft.topUpRows : [];
+  }
+  const rows = Array.isArray(record?.topUps)
+    ? record.topUps.map((entry, index) => ({
+      id: String(entry?.id || `top_existing_${index}`),
+      date: String(entry?.date || ''),
+      amount: Number.isFinite(Number(entry?.amountMinor)) ? (Number(entry.amountMinor) / 100).toFixed(2) : ''
+    }))
+    : [];
+  return rows.length ? rows : [{ id: 'top_new_0', date: '', amount: '' }];
+}
+
+function subscriptionTopUpRowHtml(row) {
+  const id = String(row?.id || `top_${Date.now()}`);
+  const date = escapeHtml(row?.date || '');
+  const amount = escapeHtml(row?.amount ?? '');
+  return `<div class="topup-row" data-topup-row data-topup-id="${escapeHtml(id)}">
+    <label class="field"><span>${tr('subscriptions.topupDate')}</span><input name="topupDate_${escapeHtml(id)}" data-topup-date type="date" value="${date}" /></label>
+    <label class="field"><span>${tr('subscriptions.topupAmount')}</span><input name="topupAmount_${escapeHtml(id)}" data-topup-amount type="number" min="0" step="0.01" value="${amount}" /></label>
+    <button type="button" class="ghost-btn topup-remove" data-topup-remove>${tr('subscriptions.topupRemove')}</button>
+  </div>`;
+}
+
 function renderSubscriptions() {
   if (state.subscriptionsLoading && !state.subscriptions) return loadingHtml();
   if (state.subscriptionsError && !state.subscriptions) {
@@ -988,11 +1263,23 @@ function renderSubscriptions() {
   const records = subscriptionRecords();
   const totals = subscriptionMonthlyTotals(records);
   const editing = records.find((record) => record.id === state.subscriptionEditId) || null;
-  const firstTopUp = editing?.topUps?.[0] || null;
-  const amount = editing?.kind === 'topup' ? Number(firstTopUp?.amountMinor || 0) / 100 : Number(editing?.amountMinor || 0) / 100;
+  const canManage = state.authorization?.scopes?.includes('admin');
+  const subscriptionDraftKey = `subscription:${state.subscriptionEditId || 'new'}`;
+  const subscriptionDraft = state.formDrafts.get(subscriptionDraftKey);
+  const draftKind = subscriptionDraft?.dirty ? String(subscriptionDraft.fields?.kind?.value || '') : '';
+  const formKind = draftKind === 'topup' || (!draftKind && editing?.kind === 'topup') ? 'topup' : 'subscription';
+  const formIsTopUp = formKind === 'topup';
+  const topUpRows = subscriptionTopUpRows(editing, subscriptionDraft, formIsTopUp);
+  const firstTopUp = topUpRows[0] || null;
+  const amount = formIsTopUp
+    ? Number(firstTopUp?.amount || 0)
+    : Number(editing?.amountMinor || 0) / 100;
   const summary = Object.entries(totals).length
     ? Object.entries(totals).map(([currency, minor]) => `<div class="summary-chip"><span class="summary-label">${escapeHtml(tr('subscriptions.monthly'))} · ${currency}</span><strong>${escapeHtml(formatSubscriptionMoney(minor, currency))}</strong></div>`).join('')
     : `<div class="summary-chip"><span class="summary-label">${tr('subscriptions.monthly')}</span><strong>—</strong></div>`;
+  const conflictNotice = state.subscriptionsConflict
+    ? `<div class="notice warn management-conflict" role="alert"><span>${escapeHtml(tr('subscriptions.conflict'))}</span><button type="button" class="ghost-btn" data-subscription-reload-latest>${tr('subscriptions.reloadLatest')}</button></div>`
+    : '';
   const list = records.length
     ? `<div class="management-list">${records.map((record) => {
       const topUp = record.kind === 'topup';
@@ -1012,21 +1299,21 @@ function renderSubscriptions() {
           <div class="row-copy"><div class="row-name">${escapeHtml(record.provider || tr('subscriptions.untitled'))}</div><div class="row-sub">${escapeHtml(detail || tr('subscriptions.noDetails'))}</div></div>
         </div>
         <div class="row-metrics"><div class="row-value">${escapeHtml(formatSubscriptionMoney(recordAmount, record.currency))}</div><div class="row-cost">${escapeHtml(record.currency || 'USD')}</div></div>
-        <div class="management-actions"><button type="button" class="ghost-btn" data-subscription-edit="${escapeHtml(record.id)}">${tr('actions.edit')}</button><button type="button" class="danger-btn" data-subscription-delete="${escapeHtml(record.id)}">${tr('actions.delete')}</button></div>
+        ${canManage ? `<div class="management-actions"><button type="button" class="ghost-btn" data-subscription-edit="${escapeHtml(record.id)}">${tr('actions.edit')}</button><button type="button" class="danger-btn" data-subscription-delete="${escapeHtml(record.id)}">${tr('actions.delete')}</button></div>` : ''}
       </article>`;
     }).join('')}</div>`
     : emptyHtml('subscriptions.empty');
-  const form = `<form class="management-form" data-subscription-form>
+  const form = `<form class="management-form" data-subscription-form data-draft-key="${escapeHtml(subscriptionDraftKey)}">
     <div class="form-section-head"><div><h3>${editing ? tr('subscriptions.edit') : tr('subscriptions.add')}</h3><p class="muted tiny">${tr('subscriptions.formHint')}</p></div>${editing ? `<button type="button" class="ghost-btn" data-subscription-reset>${tr('actions.cancel')}</button>` : ''}</div>
     <div class="form-grid">
       <label class="field"><span>${tr('subscriptions.provider')}</span><input name="provider" required value="${subscriptionField(editing, 'provider')}" placeholder="codex" /></label>
-      <label class="field"><span>${tr('subscriptions.kind')}</span><select name="kind"><option value="subscription"${editing?.kind !== 'topup' ? ' selected' : ''}>${tr('subscriptions.plan')}</option><option value="topup"${editing?.kind === 'topup' ? ' selected' : ''}>${tr('subscriptions.topup')}</option></select></label>
+      <label class="field"><span>${tr('subscriptions.kind')}</span><select name="kind" data-subscription-kind><option value="subscription"${!formIsTopUp ? ' selected' : ''}>${tr('subscriptions.plan')}</option><option value="topup"${formIsTopUp ? ' selected' : ''}>${tr('subscriptions.topup')}</option></select></label>
       <label class="field"><span>${tr('subscriptions.planName')}</span><input name="planName" value="${subscriptionField(editing, 'planName')}" placeholder="Pro" /></label>
-      <label class="field"><span>${tr('subscriptions.amount')}</span><input name="amount" type="number" min="0" step="0.01" value="${escapeHtml(amount || '')}" required /></label>
+      ${!formIsTopUp ? `<label class="field"><span>${tr('subscriptions.amount')}</span><input name="amount" type="number" min="0" step="0.01" value="${escapeHtml(amount || '')}" required /></label>` : ''}
       <label class="field"><span>${tr('subscriptions.currency')}</span><select name="currency">${['USD', 'CNY', 'TWD', 'HKD'].map((code) => `<option value="${code}"${(editing?.currency || 'USD') === code ? ' selected' : ''}>${code}</option>`).join('')}</select></label>
       <label class="field"><span>${tr('subscriptions.interval')}</span><select name="interval"><option value="month"${editing?.interval !== 'year' ? ' selected' : ''}>${tr('subscriptions.monthly')}</option><option value="year"${editing?.interval === 'year' ? ' selected' : ''}>${tr('subscriptions.yearly')}</option></select></label>
       <label class="field"><span>${tr('subscriptions.intervalCount')}</span><input name="intervalCount" type="number" min="1" max="24" step="1" value="${subscriptionField(editing, 'intervalCount', '1')}" /></label>
-      <label class="field"><span>${tr('subscriptions.startDate')}</span><input name="startDate" type="date" value="${subscriptionField(editing?.kind === 'topup' ? firstTopUp : editing, editing?.kind === 'topup' ? 'date' : 'startDate')}" /></label>
+      ${formIsTopUp ? `<div class="field field-wide topup-ledger" data-topup-ledger><div class="topup-ledger-head"><span>${tr('subscriptions.topupLedger')}</span><button type="button" class="ghost-btn" data-topup-add>${tr('subscriptions.topupAdd')}</button></div>${topUpRows.map(subscriptionTopUpRowHtml).join('')}</div>` : `<label class="field"><span>${tr('subscriptions.startDate')}</span><input name="startDate" type="date" value="${subscriptionField(editing, 'startDate')}" /></label>`}
       <label class="field"><span>${tr('subscriptions.nextRenewal')}</span><input name="nextRenewalOverride" type="date" value="${subscriptionField(editing, 'nextRenewalOverride')}" /></label>
       <label class="field"><span>${tr('subscriptions.endDate')}</span><input name="endDate" type="date" value="${subscriptionField(editing, 'endDate')}" /></label>
       <label class="field"><span>${tr('subscriptions.accountEmail')}</span><input name="accountEmail" type="email" value="${subscriptionField(editing?.binding, 'accountEmail')}" /></label>
@@ -1036,8 +1323,8 @@ function renderSubscriptions() {
     <label class="check-row"><input name="autoRenew" type="checkbox"${editing?.autoRenew !== false ? ' checked' : ''} /><span>${tr('subscriptions.autoRenew')}</span></label>
     <div class="drawer-actions"><button type="submit" class="primary-btn"${state.subscriptionsSaving ? ' disabled' : ''}>${state.subscriptionsSaving ? tr('actions.saving') : tr('actions.save')}</button></div>
   </form>`;
-  const management = state.authorization?.scopes?.includes('admin') ? panel(tr('subscriptions.manage'), form) : '';
-  return `${renderCompletenessNotice(viewStats(), state.prefs.period)}${panel(tr('subscriptions.title'), `<div class="summary-grid subscription-summary">${summary}</div>${list}`)}${management}`;
+  const management = canManage ? panel(tr('subscriptions.manage'), form) : '';
+  return `${renderCompletenessNotice(viewStats(), state.prefs.period)}${conflictNotice}${panel(tr('subscriptions.title'), `<div class="summary-grid subscription-summary">${summary}</div>${list}`)}${management}`;
 }
 
 function renderPricing() {
@@ -1054,7 +1341,8 @@ function renderPricing() {
 function pricingForm(entry) {
   const model = entry?.model || '';
   const value = (field) => escapeHtml(entry?.[field] ?? '');
-  return `<form class="pricing-form" data-pricing-form data-pricing-model="${escapeHtml(model)}">
+  const draftKey = `pricing:${model || 'new'}`;
+  return `<form class="pricing-form" data-pricing-form data-pricing-model="${escapeHtml(model)}" data-draft-key="${escapeHtml(draftKey)}">
     <div class="pricing-form-head"><div><h3>${escapeHtml(model || tr('pricing.newModel'))}</h3><p class="muted tiny">${entry?.source ? `${escapeHtml(entry.source)} · ${escapeHtml(entry.updatedAt || '')}` : tr('pricing.formHint')}</p></div>${entry ? `<button type="button" class="ghost-btn" data-pricing-upstream="${escapeHtml(model)}">${tr('pricing.fetch')}</button>` : ''}</div>
     <div class="form-grid pricing-grid">
       <label class="field${entry ? '' : ' field-wide'}"><span>${tr('pricing.model')}</span><input name="model" required value="${escapeHtml(model)}" placeholder="gpt-5"${entry ? ' readonly' : ''} /></label>
@@ -1305,14 +1593,17 @@ function renderTrends() {
 }
 
 function render() {
+  const renderState = captureRenderState();
   if (state.prefs.view !== 'accounts') state.accountProviderMenuOpen = false;
   renderChrome();
   if (state.loading && !state.stats) {
     els.content.innerHTML = loadingHtml();
+    restoreRenderState(renderState);
     return;
   }
   if (state.error && !state.stats) {
     els.content.innerHTML = `<section class="error-card"><div class="error-kicker">Token Monitor</div><h2>${escapeHtml(tr('error.title'))}</h2><p>${escapeHtml(state.error.message || tr('error.generic'))}</p><button type="button" class="primary-btn" data-retry-dashboard>${tr('actions.retry')}</button></section>`;
+    restoreRenderState(renderState);
     return;
   }
   renderHero();
@@ -1376,6 +1667,7 @@ function render() {
       html = renderHome();
   }
   els.content.innerHTML = html;
+  restoreRenderState(renderState);
 }
 
 async function ensureHistory({ force = false } = {}) {
@@ -1417,7 +1709,9 @@ function applyStatsSnapshot(stats) {
       void ensureHistory({ force: true }).then(() => render());
     }
   }
-  if (subscriptionsChanged && state.subscriptions) void loadSubscriptions({ force: true });
+  if (subscriptionsChanged && state.subscriptions) {
+    void loadSubscriptions({ force: true, preserveDraft: hasDirtyFormDraft('subscription:') });
+  }
   render();
 }
 
@@ -1446,60 +1740,119 @@ function connectStream() {
   });
 }
 
-async function loadSubscriptions({ force = false } = {}) {
+function startManagementRequest(kind) {
+  state.managementControllers[kind]?.abort();
+  const controller = new AbortController();
+  const seq = (state.managementRequestSeq[kind] || 0) + 1;
+  state.managementRequestSeq[kind] = seq;
+  state.managementControllers[kind] = controller;
+  return { controller, seq };
+}
+
+function isCurrentManagementRequest(kind, seq) {
+  return state.managementRequestSeq[kind] === seq;
+}
+
+function isAbortError(error) {
+  return error?.name === 'AbortError' || error?.code === 'ABORT_ERR';
+}
+
+async function loadSubscriptions({ force = false, preserveDraft = false } = {}) {
   if (!force && state.subscriptions) return state.subscriptions;
-  if (state.subscriptionsLoading) return state.subscriptions;
+  if (!force && state.subscriptionsLoading) return state.managementPromises.subscriptions || state.subscriptions;
+  const { controller, seq } = startManagementRequest('subscriptions');
   state.subscriptionsLoading = true;
   state.subscriptionsError = null;
-  try {
-    state.subscriptions = await fetchJson('/api/subscriptions', { secret: state.secret });
-    return state.subscriptions;
-  } catch (error) {
-    state.subscriptionsError = error;
-    if (error.status === 401) showAuth(true);
-    return null;
-  } finally {
-    state.subscriptionsLoading = false;
-    if (state.prefs.view === 'subscriptions') render();
-  }
+  const keepDraft = Boolean(preserveDraft || hasDirtyFormDraft('subscription:'));
+  const request = (async () => {
+    try {
+      const next = await fetchJson('/api/subscriptions', { secret: state.secret, signal: controller.signal });
+      if (!isCurrentManagementRequest('subscriptions', seq)) return state.subscriptions;
+      if (keepDraft && state.subscriptions) {
+        state.subscriptionsPending = next;
+        state.subscriptionsConflict = true;
+      } else {
+        state.subscriptions = next;
+        state.subscriptionsPending = null;
+        state.subscriptionsConflict = false;
+      }
+      return state.subscriptions;
+    } catch (error) {
+      if (!isCurrentManagementRequest('subscriptions', seq) || isAbortError(error)) return state.subscriptions;
+      state.subscriptionsError = error;
+      if (error.status === 401) showAuth(true);
+      return null;
+    } finally {
+      if (isCurrentManagementRequest('subscriptions', seq)) {
+        state.subscriptionsLoading = false;
+        state.managementControllers.subscriptions = null;
+        state.managementPromises.subscriptions = null;
+        if (state.prefs.view === 'subscriptions') render();
+      }
+    }
+  })();
+  state.managementPromises.subscriptions = request;
+  return request;
 }
 
 async function loadPricing({ force = false } = {}) {
   if (!force && state.pricing) return state.pricing;
-  if (state.pricingLoading) return state.pricing;
+  if (!force && state.pricingLoading) return state.managementPromises.pricing || state.pricing;
+  const { controller, seq } = startManagementRequest('pricing');
   state.pricingLoading = true;
   state.pricingError = null;
-  try {
-    const payload = await fetchJson('/api/pricing', { secret: state.secret });
-    state.pricing = Array.isArray(payload?.pricing) ? payload.pricing : [];
-    return state.pricing;
-  } catch (error) {
-    state.pricingError = error;
-    if (error.status === 401) showAuth(true);
-    return null;
-  } finally {
-    state.pricingLoading = false;
-    if (state.prefs.view === 'pricing') render();
-  }
+  const request = (async () => {
+    try {
+      const payload = await fetchJson('/api/pricing', { secret: state.secret, signal: controller.signal });
+      if (!isCurrentManagementRequest('pricing', seq)) return state.pricing;
+      state.pricing = Array.isArray(payload?.pricing) ? payload.pricing : [];
+      return state.pricing;
+    } catch (error) {
+      if (!isCurrentManagementRequest('pricing', seq) || isAbortError(error)) return state.pricing;
+      state.pricingError = error;
+      if (error.status === 401) showAuth(true);
+      return null;
+    } finally {
+      if (isCurrentManagementRequest('pricing', seq)) {
+        state.pricingLoading = false;
+        state.managementControllers.pricing = null;
+        state.managementPromises.pricing = null;
+        if (state.prefs.view === 'pricing') render();
+      }
+    }
+  })();
+  state.managementPromises.pricing = request;
+  return request;
 }
 
 async function loadAccounts({ force = false } = {}) {
   if (!force && state.accounts) return state.accounts;
-  if (state.accountsLoading) return state.accounts;
+  if (!force && state.accountsLoading) return state.managementPromises.accounts || state.accounts;
+  const { controller, seq } = startManagementRequest('accounts');
   state.accountsLoading = true;
   state.accountsError = null;
-  try {
-    const payload = await fetchJson('/api/accounts', { secret: state.secret });
-    state.accounts = Array.isArray(payload?.accounts) ? payload.accounts : [];
-    return state.accounts;
-  } catch (error) {
-    state.accountsError = error;
-    if (error.status === 401) showAuth(true);
-    return null;
-  } finally {
-    state.accountsLoading = false;
-    if (state.prefs.view === 'accounts') render();
-  }
+  const request = (async () => {
+    try {
+      const payload = await fetchJson('/api/accounts', { secret: state.secret, signal: controller.signal });
+      if (!isCurrentManagementRequest('accounts', seq)) return state.accounts;
+      state.accounts = Array.isArray(payload?.accounts) ? payload.accounts : [];
+      return state.accounts;
+    } catch (error) {
+      if (!isCurrentManagementRequest('accounts', seq) || isAbortError(error)) return state.accounts;
+      state.accountsError = error;
+      if (error.status === 401) showAuth(true);
+      return null;
+    } finally {
+      if (isCurrentManagementRequest('accounts', seq)) {
+        state.accountsLoading = false;
+        state.managementControllers.accounts = null;
+        state.managementPromises.accounts = null;
+        if (state.prefs.view === 'accounts') render();
+      }
+    }
+  })();
+  state.managementPromises.accounts = request;
+  return request;
 }
 
 function accountRecords() {
@@ -1511,6 +1864,11 @@ function accountField(record, key, fallback = '') {
   return escapeHtml(value === undefined || value === null ? fallback : value);
 }
 
+function accountCredentialField(record, key, fallback = '') {
+  const value = record?.credentialMetadata?.[key];
+  return escapeHtml(value === undefined || value === null ? fallback : value);
+}
+
 function renderAccounts() {
   if (state.accountsLoading && !state.accounts) return loadingHtml();
   if (state.accountsError && !state.accounts) {
@@ -1519,6 +1877,7 @@ function renderAccounts() {
   const records = accountRecords();
   const editing = records.find((record) => record.id === state.accountEditId) || null;
   const currentProvider = editing?.provider || state.accountSelectedProvider || 'deepseek';
+  const canManage = state.authorization?.scopes?.includes('admin');
 
   const healthyCount = records.filter((r) => r.enabled !== false && r.status === 'ok').length;
   const errorCount = records.filter((r) => r.enabled !== false && r.status && r.status !== 'ok').length;
@@ -1571,12 +1930,12 @@ function renderAccounts() {
             ${errorDetail}
           </div>
         </div>
-        <div class="management-actions">
+        ${canManage ? `<div class="management-actions">
           <button type="button" class="ghost-btn" data-account-refresh="${escapeHtml(record.id)}" ${state.accountsSaving ? 'disabled' : ''}>${tr('accounts.refresh')}</button>
           <button type="button" class="ghost-btn" data-account-toggle="${escapeHtml(record.id)}" ${state.accountsSaving ? 'disabled' : ''}>${record.enabled === false ? tr('accounts.enabled') : tr('accounts.statusDisabled')}</button>
           <button type="button" class="ghost-btn" data-account-edit="${escapeHtml(record.id)}">${tr('actions.edit')}</button>
           <button type="button" class="danger-btn" data-account-delete="${escapeHtml(record.id)}">${tr('actions.delete')}</button>
-        </div>
+        </div>` : ''}
       </article>`;
     }).join('')}</div>`
     : emptyHtml('accounts.empty');
@@ -1603,7 +1962,7 @@ function renderAccounts() {
         </span>
         <span class="account-select-chevron">${uiIcon('chevronDown')}</span>
       </button>
-      <div id="account-provider-menu" class="account-select-menu" role="listbox" aria-label="${escapeHtml(tr('accounts.provider'))}"${providerMenuOpen ? '' : ' hidden'}>
+      <div id="account-provider-menu" class="account-select-menu" data-account-provider-menu role="listbox" aria-label="${escapeHtml(tr('accounts.provider'))}"${providerMenuOpen ? '' : ' hidden'}>
         ${providerOptionsHtml}
       </div>
     </div>`;
@@ -1629,19 +1988,19 @@ function renderAccounts() {
       simpleFieldsHtml = `
         <label class="field field-wide"><span>${tr('accounts.codexAuthJson')}</span><textarea name="authJson" rows="3" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(tr('accounts.codexAuthJsonPlaceholder'))}"></textarea></label>
         <label class="field"><span>${tr('accounts.accessToken')}</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.codexAccessTokenPlaceholder'))}" /></label>
-        <label class="field"><span>Account ID (optional)</span><input name="accountId" spellcheck="false" placeholder="chatgpt_account_id" /></label>
+        <label class="field"><span>Account ID (optional)</span><input name="accountId" value="${accountCredentialField(editing, 'accountId')}" spellcheck="false" placeholder="chatgpt_account_id" /></label>
       `;
       break;
     case 'antigravity':
       simpleFieldsHtml = `
-        <label class="field"><span>${tr('accounts.agyEndpoint')}</span><input name="endpoint" type="url" spellcheck="false" placeholder="http://127.0.0.1:port" ${isEditing ? '' : 'required'} /></label>
+        <label class="field"><span>${tr('accounts.agyEndpoint')}</span><input name="endpoint" type="url" value="${accountCredentialField(editing, 'endpoint')}" spellcheck="false" placeholder="http://127.0.0.1:port" ${isEditing ? '' : 'required'} /></label>
         <label class="field"><span>${tr('accounts.agyCsrfToken')}</span><input name="csrfToken" type="password" autocomplete="off" spellcheck="false" placeholder="csrf token" ${isEditing ? '' : 'required'} /></label>
       `;
       break;
     case 'qoder':
       simpleFieldsHtml = `
         <label class="field"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="cookie" ${isEditing ? '' : 'required'} /></label>
-        <label class="field"><span>${tr('accounts.site')}</span><select name="site"><option value="global">Global</option><option value="cn">China (CN)</option></select></label>
+        <label class="field"><span>${tr('accounts.site')}</span><select name="site"><option value="global"${accountCredentialField(editing, 'site', 'global') === 'global' ? ' selected' : ''}>Global</option><option value="cn"${accountCredentialField(editing, 'site') === 'cn' ? ' selected' : ''}>China (CN)</option></select></label>
       `;
       break;
     case 'mimo':
@@ -1652,35 +2011,35 @@ function renderAccounts() {
     case 'copilot':
       simpleFieldsHtml = `
         <label class="field"><span>${tr('accounts.accessToken')}</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="ghu_... / token" ${isEditing ? '' : 'required'} /></label>
-        <label class="field"><span>Enterprise Host (optional)</span><input name="enterpriseHost" spellcheck="false" placeholder="github.mycompany.com" /></label>
+        <label class="field"><span>Enterprise Host (optional)</span><input name="enterpriseHost" value="${accountCredentialField(editing, 'enterpriseHost')}" spellcheck="false" placeholder="github.mycompany.com" /></label>
       `;
       break;
     case 'volcengine':
       simpleFieldsHtml = `
-        <label class="field"><span>${tr('accounts.accessKeyId')}</span><input name="accessKeyId" spellcheck="false" placeholder="AKLT..." /></label>
+        <label class="field"><span>${tr('accounts.accessKeyId')}</span><input name="accessKeyId" value="${accountCredentialField(editing, 'accessKeyId')}" spellcheck="false" placeholder="AKLT..." /></label>
         <label class="field"><span>${tr('accounts.secretAccessKey')}</span><input name="secretAccessKey" type="password" autocomplete="off" spellcheck="false" placeholder="Secret Access Key" /></label>
         <label class="field"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Ark API Key (alternative)" /></label>
-        <label class="field"><span>${tr('accounts.region')}</span><input name="region" spellcheck="false" placeholder="cn-beijing" /></label>
+        <label class="field"><span>${tr('accounts.region')}</span><input name="region" value="${accountCredentialField(editing, 'region')}" spellcheck="false" placeholder="cn-beijing" /></label>
       `;
       break;
     case 'zaiteam':
       simpleFieldsHtml = `
         <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="API Key" ${isEditing ? '' : 'required'} /></label>
-        <label class="field"><span>Organization ID</span><input name="organizationId" spellcheck="false" placeholder="org_..." ${isEditing ? '' : 'required'} /></label>
-        <label class="field"><span>Project ID</span><input name="projectId" spellcheck="false" placeholder="proj_..." ${isEditing ? '' : 'required'} /></label>
+        <label class="field"><span>Organization ID</span><input name="organizationId" value="${accountCredentialField(editing, 'organizationId')}" spellcheck="false" placeholder="org_..." ${isEditing ? '' : 'required'} /></label>
+        <label class="field"><span>Project ID</span><input name="projectId" value="${accountCredentialField(editing, 'projectId')}" spellcheck="false" placeholder="proj_..." ${isEditing ? '' : 'required'} /></label>
       `;
       break;
     case 'thirdparty':
       simpleFieldsHtml = `
-        <label class="field"><span>${tr('accounts.thirdPartyAdapter')}</span><select name="adapter"><option value="newapi">New API / OneAPI</option><option value="custom">Custom</option></select></label>
-        <label class="field"><span>${tr('accounts.thirdPartyBaseUrl')}</span><input name="baseUrl" type="url" spellcheck="false" placeholder="https://api.example.com" ${isEditing ? '' : 'required'} /></label>
+        <label class="field"><span>${tr('accounts.thirdPartyAdapter')}</span><select name="adapter"><option value="newapi"${accountCredentialField(editing, 'adapter', 'newapi') === 'newapi' ? ' selected' : ''}>New API / OneAPI</option><option value="custom"${accountCredentialField(editing, 'adapter') === 'custom' ? ' selected' : ''}>Custom</option></select></label>
+        <label class="field"><span>${tr('accounts.thirdPartyBaseUrl')}</span><input name="baseUrl" type="url" value="${accountCredentialField(editing, 'baseUrl')}" spellcheck="false" placeholder="https://api.example.com" ${isEditing ? '' : 'required'} /></label>
         <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." ${isEditing ? '' : 'required'} /></label>
       `;
       break;
     case 'zai':
       simpleFieldsHtml = `
         <label class="field"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="API Key" ${isEditing ? '' : 'required'} /></label>
-        <label class="field"><span>${tr('accounts.region')}</span><select name="region"><option value="global">Global</option><option value="cn">China (BigModel)</option></select></label>
+        <label class="field"><span>${tr('accounts.region')}</span><select name="region"><option value="global"${accountCredentialField(editing, 'region', 'global') === 'global' ? ' selected' : ''}>Global</option><option value="cn"${accountCredentialField(editing, 'region') === 'cn' ? ' selected' : ''}>China (BigModel)</option></select></label>
       `;
       break;
     case 'kimi':
@@ -1744,11 +2103,13 @@ function renderAccounts() {
       </label>`;
   }
 
-  const form = `<form class="management-form account-form" data-account-form data-account-mode="${escapeHtml(effectiveMode)}">
+  const accountDraftKey = `account:${editing?.id || 'new'}`;
+  const form = `<form class="management-form account-form" data-account-form data-account-mode="${escapeHtml(effectiveMode)}" data-draft-key="${escapeHtml(accountDraftKey)}">
     <div class="form-section-head">
       <div>
         <h3>${formTitle}</h3>
         <p class="muted tiny">${tr('accounts.hint')}</p>
+        ${isEditing ? `<p class="muted tiny">${tr('accounts.credentialKeepHint')}</p>` : ''}
       </div>
       <div class="account-form-head-actions">
         <div class="mode-toggle-group">
@@ -1827,6 +2188,7 @@ async function saveAccountFromForm(form) {
   const values = new FormData(form);
   const editing = state.accounts?.find((a) => a.id === state.accountEditId) || null;
   const mode = String(form.dataset.accountMode || state.accountFormMode || 'simple');
+  const draftKey = draftKeyForForm(form);
   const provider = editing ? editing.provider : String(values.get('provider') || '').trim().toLowerCase();
   const name = String(values.get('name') || '').trim();
   const label = String(values.get('label') || '').trim();
@@ -1856,6 +2218,7 @@ async function saveAccountFromForm(form) {
       state.accountFormMode = 'simple';
       state.accountSelectedProvider = 'deepseek';
       state.accountFormError = '';
+      clearFormDraft(draftKey);
       showToast(tr('accounts.updated'));
       await loadAccounts({ force: true });
       await refreshStats();
@@ -1945,7 +2308,10 @@ async function saveAccountFromForm(form) {
   try {
     if (editing) {
       const patch = { name, label, enabled };
-      if (credential) patch.credential = credential;
+      if (credential) {
+        patch.credential = credential;
+        patch.credentialMode = mode === 'json' ? 'replace' : 'merge';
+      }
       await fetchJson(`/api/accounts/${encodeURIComponent(editing.id)}`, {
         secret: state.secret,
         method: 'PATCH',
@@ -1959,6 +2325,7 @@ async function saveAccountFromForm(form) {
         body: { provider, name, label, credential }
       });
     }
+    clearFormDraft(draftKey);
     state.accountFormError = '';
     state.accountFormMode = 'simple';
     state.accountSelectedProvider = 'deepseek';
@@ -2028,6 +2395,7 @@ async function deleteAccount(accountId) {
       method: 'DELETE'
     });
     if (state.accountEditId === accountId) state.accountEditId = '';
+    clearFormDraft(`account:${accountId}`);
     showToast(tr('accounts.deleted'));
     await loadAccounts({ force: true });
     await refreshStats();
@@ -2110,13 +2478,23 @@ function subscriptionFromForm(form) {
   const id = String(state.subscriptionEditId || '').trim();
   const existing = subscriptionRecords().find((record) => record.id === id) || null;
   const kind = values.get('kind') === 'topup' ? 'topup' : 'subscription';
-  const startDate = String(values.get('startDate') || '').trim();
-  const amountMinor = Math.max(0, Math.round(Number(values.get('amount') || 0) * 100));
   if (!String(values.get('provider') || '').trim()) throw new Error(tr('subscriptions.providerRequired'));
-  if (!startDate) throw new Error(tr('subscriptions.dateRequired'));
-  const topUps = kind === 'topup'
-    ? [{ id: existing?.topUps?.[0]?.id || `top_${Date.now()}`, date: startDate, amountMinor }, ...(existing?.topUps || []).slice(1)]
-    : [];
+  let startDate = String(values.get('startDate') || '').trim();
+  let amountMinor = Math.max(0, Math.round(Number(values.get('amount') || 0) * 100));
+  let topUps = [];
+  if (kind === 'topup') {
+    const rows = [...form.querySelectorAll('[data-topup-row]')];
+    topUps = rows.map((row) => ({
+      id: row.getAttribute('data-topup-id') || `top_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      date: String(row.querySelector('[data-topup-date]')?.value || '').trim(),
+      amountMinor: Math.max(0, Math.round(Number(row.querySelector('[data-topup-amount]')?.value || 0) * 100))
+    }));
+    if (!topUps.length || topUps.some((entry) => !entry.date)) throw new Error(tr('subscriptions.dateRequired'));
+    amountMinor = topUps.reduce((sum, entry) => sum + entry.amountMinor, 0);
+    startDate = null;
+  } else if (!startDate) {
+    throw new Error(tr('subscriptions.dateRequired'));
+  }
   return {
     ...(existing || {}),
     id: id || undefined,
@@ -2142,6 +2520,7 @@ function subscriptionFromForm(form) {
 }
 
 async function saveSubscriptions(next) {
+  const draftKey = `subscription:${state.subscriptionEditId || 'new'}`;
   state.subscriptionsSaving = true;
   render();
   try {
@@ -2155,11 +2534,15 @@ async function saveSubscriptions(next) {
     });
     state.subscriptions = response;
     state.subscriptionEditId = '';
+    clearFormDraft(draftKey);
+    state.subscriptionsConflict = false;
+    state.subscriptionsPending = null;
     state.subscriptionsError = null;
     showToast(tr('toast.saved'));
   } catch (error) {
     if (error.status === 409 && error.payload?.subscriptions) {
-      state.subscriptions = error.payload;
+      state.subscriptionsPending = error.payload;
+      state.subscriptionsConflict = true;
       showToast(tr('subscriptions.conflict'));
     } else {
       state.subscriptionsError = error;
@@ -2179,6 +2562,7 @@ async function deleteSubscription(id) {
 
 async function savePricingForm(form) {
   const values = new FormData(form);
+  const draftKey = draftKeyForForm(form);
   const model = String(values.get('model') || '').trim();
   if (!model) return;
   const fields = ['inputPricePerMillion', 'outputPricePerMillion', 'cacheReadPricePerMillion', 'cacheWritePricePerMillion'];
@@ -2200,6 +2584,7 @@ async function savePricingForm(form) {
       body: prices
     });
     await loadPricing({ force: true });
+    clearFormDraft(draftKey);
     showToast(tr('toast.saved'));
   } catch (error) {
     showToast(error.message || tr('error.generic'));
@@ -2419,6 +2804,7 @@ function bindEvents() {
     }
     const accountReset = event.target.closest('[data-account-reset]');
     if (accountReset) {
+      clearFormDraft(`account:${state.accountEditId || 'new'}`);
       state.accountEditId = '';
       state.accountFormError = '';
       state.accountFormMode = 'simple';
@@ -2509,14 +2895,51 @@ function bindEvents() {
       });
       return;
     }
+    const topUpAdd = event.target.closest('[data-topup-add]');
+    if (topUpAdd) {
+      const form = topUpAdd.closest('[data-subscription-form]');
+      const ledger = form?.querySelector('[data-topup-ledger]');
+      if (!form || !ledger) return;
+      const id = `top_new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      ledger.insertAdjacentHTML('beforeend', subscriptionTopUpRowHtml({ id, date: '', amount: '' }));
+      rememberFormDraft(form);
+      ledger.querySelector(`[data-topup-id="${id}"] [data-topup-date]`)?.focus();
+      return;
+    }
+    const topUpRemove = event.target.closest('[data-topup-remove]');
+    if (topUpRemove) {
+      const form = topUpRemove.closest('[data-subscription-form]');
+      const row = topUpRemove.closest('[data-topup-row]');
+      if (!form || !row) return;
+      row.remove();
+      rememberFormDraft(form);
+      return;
+    }
     const subscriptionEdit = event.target.closest('[data-subscription-edit]');
     if (subscriptionEdit) {
       state.subscriptionEditId = subscriptionEdit.dataset.subscriptionEdit || '';
       render();
       return;
     }
+    const subscriptionReloadLatest = event.target.closest('[data-subscription-reload-latest]');
+    if (subscriptionReloadLatest) {
+      for (const key of state.formDrafts.keys()) {
+        if (key.startsWith('subscription:')) state.formDrafts.delete(key);
+      }
+      if (state.subscriptionsPending) {
+        state.subscriptions = state.subscriptionsPending;
+        state.subscriptionsPending = null;
+        state.subscriptionsConflict = false;
+        state.subscriptionEditId = '';
+        render();
+      } else {
+        void loadSubscriptions({ force: true });
+      }
+      return;
+    }
     const subscriptionReset = event.target.closest('[data-subscription-reset]');
     if (subscriptionReset) {
+      clearFormDraft(`subscription:${state.subscriptionEditId || 'new'}`);
       state.subscriptionEditId = '';
       render();
       return;
@@ -2612,7 +3035,17 @@ function bindEvents() {
     }
   });
 
+  els.content.addEventListener('input', (event) => {
+    rememberFormDraft(event.target);
+  });
+
   els.content.addEventListener('change', (event) => {
+    rememberFormDraft(event.target);
+    const subscriptionKind = event.target.closest('[data-subscription-kind]');
+    if (subscriptionKind) {
+      render();
+      return;
+    }
     const provider = event.target.closest('[data-limit-provider]');
     if (provider) {
       state.limitProvider = provider.value || '';
@@ -2719,7 +3152,18 @@ function bindEvents() {
     els.navScrim.addEventListener('click', () => openNav(false));
   }
   window.addEventListener('keydown', (event) => {
+    if (trapOverlayFocus(event)) return;
     if (event.key === 'Escape') {
+      if (!els.rangePopover.classList.contains('hidden')) {
+        event.preventDefault();
+        openRange(false);
+        return;
+      }
+      if (!els.settingsDrawer.classList.contains('hidden')) {
+        event.preventDefault();
+        openSettings(false);
+        return;
+      }
       openNav(false);
       setAccountProviderMenuOpen(false);
     }
@@ -2738,6 +3182,12 @@ function bindEvents() {
     openNav(false);
     openSettings(true);
   };
+  els.settingsOpen?.setAttribute('aria-controls', 'settingsDrawer');
+  els.settingsOpen?.setAttribute('aria-expanded', 'false');
+  els.settingsOpenTop?.setAttribute('aria-controls', 'settingsDrawer');
+  els.settingsOpenTop?.setAttribute('aria-expanded', 'false');
+  els.customRangeBtn?.setAttribute('aria-controls', 'rangePopover');
+  els.customRangeBtn?.setAttribute('aria-expanded', 'false');
   els.settingsOpen.addEventListener('click', openSettingsAndCloseNav);
   if (els.settingsOpenTop) {
     els.settingsOpenTop.addEventListener('click', openSettingsAndCloseNav);

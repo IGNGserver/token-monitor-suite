@@ -63,6 +63,37 @@ function errorMessageForApi(error) {
     .replace(/cookie|token|secret|api[_ -]?key|authorization/gi, '[redacted]');
 }
 
+function redactViewerAccount(account) {
+  const limits = account?.limits;
+  const safeLimits = limits && typeof limits === 'object'
+    ? (({
+      accountId,
+      accountKey,
+      webAccountKey,
+      accountKeyAliases,
+      accountEmail,
+      accountName,
+      accountLabel,
+      planLabel,
+      ...safe
+    }) => safe)(limits)
+    : limits;
+  return {
+    id: account?.id || '',
+    provider: account?.provider || '',
+    enabled: account?.enabled !== false,
+    status: account?.status || 'notConfigured',
+    lastErrorCode: account?.lastErrorCode || '',
+    lastErrorMessage: account?.lastErrorMessage || '',
+    lastAttemptAt: account?.lastAttemptAt || null,
+    lastSuccessAt: account?.lastSuccessAt || null,
+    nextRefreshAt: account?.nextRefreshAt || null,
+    createdAt: account?.createdAt || null,
+    updatedAt: account?.updatedAt || null,
+    limits: safeLimits
+  };
+}
+
 // Without a secret the hub cannot tell its own widget from any other caller, so it
 // must not expose account identity (email/plan/key) to the network. Binding to
 // loopback keeps an unauthenticated hub usable locally while refusing LAN/remote
@@ -853,11 +884,13 @@ function createHub({
       const result = authorize(READ_SCOPE);
       if (!result) return;
       if (!accountService) return accountUnavailable(res);
+      const isAdmin = result.principal.scopes.includes(ADMIN_SCOPE);
+      const accounts = await accountService.listAccounts({ includeCredentialMetadata: isAdmin });
       return sendJson(res, 200, {
         ok: true,
         authority: 'hub',
         providers: accountService.supportedProviders(),
-        accounts: await accountService.listAccounts()
+        accounts: isAdmin ? accounts : accounts.map(redactViewerAccount)
       });
     }
     const readRoute = (req.method === 'GET' || req.method === 'HEAD') && (
@@ -1013,6 +1046,7 @@ function createHub({
             name: body?.name,
             label: body?.label,
             enabled: body?.enabled,
+            credentialMode: body?.credentialMode,
             ...(Object.prototype.hasOwnProperty.call(body || {}, 'credential') ? { credential: body.credential } : {})
           });
           if (!account) return sendJson(res, 404, { error: 'account_not_found' });

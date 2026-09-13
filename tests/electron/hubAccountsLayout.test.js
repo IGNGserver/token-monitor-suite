@@ -52,11 +52,12 @@ test('Hub account credentials are never included in public account responses', (
     service.indexOf('function publicAccount('),
     service.indexOf('function statusFromError(')
   );
-  assert.doesNotMatch(publicAccountBody, /credential|apiKey|cookie|token/);
+  assert.doesNotMatch(publicAccountBody, /apiKey|cookie|token/);
+  assert.doesNotMatch(publicAccountBody, /credentialMetadata/);
   const listRoute = server.slice(
     server.indexOf("url.pathname === '/api/accounts'"),
     server.indexOf("if (req.method === 'POST' && url.pathname === '/api/accounts')")
   );
-  assert.match(listRoute, /accounts: await accountService\.listAccounts\(\)/);
-  assert.doesNotMatch(listRoute, /credential/);
+  assert.match(listRoute, /listAccounts\(\{ includeCredentialMetadata: isAdmin \}\)/);
+  assert.match(listRoute, /redactViewerAccount/);
 });

@@ -63,12 +63,19 @@ test('hub web app wires status, heatmap, and active-days controls', () => {
   assert.match(app, /data-account-delete/);
   assert.match(app, /data-account-provider-trigger/);
   assert.match(app, /data-account-provider-option/);
+  assert.match(app, /data-account-provider-menu/);
   assert.match(app, /data-account-provider-input/);
   assert.match(app, /accountProviderMenuOpen/);
   assert.doesNotMatch(app, /<select name="provider"/);
   assert.match(app, /historyRevision|deviceHistoryRevision/);
   assert.match(app, /data-subscription-form/);
+  assert.match(app, /data-topup-ledger/);
+  assert.match(app, /subscriptionTopUpRowHtml/);
+  assert.match(app, /const canManage = state\.authorization\?\.scopes\?\.includes\('admin'\)/);
   assert.match(app, /data-pricing-form/);
+  assert.match(app, /captureRenderState\(/);
+  assert.match(app, /restoreRenderState\(/);
+  assert.match(app, /new AbortController\(/);
 });
 
 test('hub account UI keeps the shared form system and reports OAuth failures', () => {
@@ -86,7 +93,11 @@ test('hub account UI keeps the shared form system and reports OAuth failures', (
   assert.match(css, /\.account-select-trigger/);
   assert.match(css, /\.account-select-menu/);
   assert.match(css, /\.account-select-option\.selected/);
+  assert.match(css, /--panel: var\(--bg-elevated\)/);
   assert.match(css, /@media \(max-width: 860px\)/);
+
+  assert.match(index, /id="settingsDrawer"[^>]*aria-hidden="true"/);
+  assert.match(index, /id="rangePopover"[^>]*aria-modal="true"/);
 });
 
 test('devicePlatformLabel / countActiveDays / heatmapValue behavior', () => {

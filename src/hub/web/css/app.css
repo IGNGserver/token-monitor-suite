@@ -8,6 +8,11 @@
   --muted: #5d6573;
   --line: rgba(18, 20, 26, 0.08);
   --line-strong: rgba(18, 20, 26, 0.14);
+  /* Compatibility aliases used by status/chart surfaces. */
+  --panel: var(--bg-elevated);
+  --panel-2: var(--bg-soft);
+  --surface: var(--bg);
+  --border: var(--line-strong);
   --accent: #2563eb;
   --accent-soft: rgba(37, 99, 235, 0.10);
   --good: #0f9f6e;
@@ -949,6 +954,33 @@ html[data-theme="dark"] .heat.lvl-4 { fill: rgba(110, 168, 255, 0.92); }
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+.topup-ledger {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.topup-ledger-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.topup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-soft);
+}
+.topup-row .field { min-width: 0; }
+.topup-remove { white-space: nowrap; }
+@media (max-width: 620px) {
+  .topup-row { grid-template-columns: 1fr 1fr; }
+  .topup-remove { grid-column: 1 / -1; justify-self: start; }
 }
 
 .popover {

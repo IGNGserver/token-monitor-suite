@@ -58,6 +58,7 @@ test('Hub account API stores credentials centrally and never returns them', asyn
     port: 0,
     host: '127.0.0.1',
     adminSecret: 'admin-token',
+    viewerSecret: 'viewer-token',
     ingestCredentials: { 'device-a': 'device-token' },
     accountCredentialKey: 'account-encryption-key',
     accountProbe: async (provider) => accountProbe(provider),
@@ -77,7 +78,7 @@ test('Hub account API stores credentials centrally and never returns them', asyn
       body: {
         provider: 'deepseek',
         name: 'work',
-        credential: { apiKey: 'server-secret-api-key' }
+        credential: { apiKey: 'server-secret-api-key', region: 'cn', site: 'global' }
       }
     });
     assert.equal(added.response.status, 201);
@@ -94,6 +95,27 @@ test('Hub account API stores credentials centrally and never returns them', asyn
     assert.equal(listed.body.authority, 'hub');
     assert.equal(listed.body.accounts.length, 1);
     assert.equal(JSON.stringify(listed.body).includes('server-secret-api-key'), false);
+    assert.deepEqual(listed.body.accounts[0].credentialMetadata, { site: 'global', region: 'cn' });
+
+    const viewer = await requestJson(port, '/api/accounts', { token: 'viewer-token' });
+    assert.equal(viewer.response.status, 200);
+    assert.equal(viewer.body.accounts.length, 1);
+    assert.equal(viewer.body.accounts[0].provider, 'deepseek');
+    assert.equal(viewer.body.accounts[0].name, undefined);
+    assert.equal(viewer.body.accounts[0].label, undefined);
+    assert.equal(viewer.body.accounts[0].accountEmail, undefined);
+    assert.equal(viewer.body.accounts[0].accountKey, undefined);
+    assert.equal(viewer.body.accounts[0].credentialMetadata, undefined);
+    assert.equal(JSON.stringify(viewer.body).includes('server-secret-api-key'), false);
+
+    const edited = await requestJson(port, `/api/accounts/${encodeURIComponent(accountId)}`, {
+      method: 'PATCH',
+      token: 'admin-token',
+      body: { credential: { region: 'us-east-1' }, credentialMode: 'merge' }
+    });
+    assert.equal(edited.response.status, 200);
+    const relisted = await requestJson(port, '/api/accounts', { token: 'admin-token' });
+    assert.deepEqual(relisted.body.accounts[0].credentialMetadata, { site: 'global', region: 'us-east-1' });
   } finally {
     await hub.stop();
   }

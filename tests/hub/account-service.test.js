@@ -187,6 +187,51 @@ test('Hub provider options do not carry ambient environment or local account dis
   assert.deepEqual(options.openrouterProfiles, { work: { apiKey: 'manual-key', enabled: true } });
 });
 
+test('Hub account edits preserve and merge nested third-party profiles', async () => {
+  const repository = new MemoryRepository();
+  const seenKeys = [];
+  const service = createHubAccountService({
+    store: repository,
+    credentialKey: 'hub-key',
+    probe: async (provider, options) => {
+      seenKeys.push(options.thirdPartyProfiles?.work?.apiKey || '');
+      return probeRow(provider, 'third-party-account');
+    }
+  });
+
+  const account = await service.addAccount({
+    provider: 'thirdparty',
+    name: 'work',
+    credential: {
+      profile: {
+        adapter: 'newapi',
+        baseUrl: 'https://api.example.test/v1',
+        apiKey: 'first-key'
+      }
+    }
+  });
+
+  const listed = await service.listAccounts({ includeCredentialMetadata: true });
+  assert.deepEqual(listed[0].credentialMetadata, {
+    adapter: 'newapi',
+    baseUrl: 'https://api.example.test/v1'
+  });
+
+  await service.updateAccount(account.id, {
+    credential: {
+      adapter: 'newapi',
+      baseUrl: 'https://api.example.test/v1',
+      apiKey: 'second-key'
+    },
+    credentialMode: 'merge'
+  });
+  assert.deepEqual(seenKeys, ['first-key', 'second-key']);
+  assert.equal(
+    decryptCredential(repository.hubCredentials.get(account.id), 'hub-key').profile.apiKey,
+    'second-key'
+  );
+});
+
 test('Hub rejects third-party account targets that could reach local services', async () => {
   const repository = new MemoryRepository();
   let probed = false;

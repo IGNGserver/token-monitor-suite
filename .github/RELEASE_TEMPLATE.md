@@ -6,15 +6,17 @@
 ### Added
 - **Hub Account Configuration:** Added central provider accounts tab in Hub Web dashboard with quick form inputs and JSON credential support for 17 providers including DeepSeek, Claude, Codex, Antigravity (AGY), Copilot, OpenCode, and more.
 - **Codex and Antigravity (AGY) Support:** Added Hub-side quota fetching for Codex via auth.json/OAuth token and AGY via Language Server RPC endpoint, with comprehensive compliance and safety disclaimers.
+### Fixed
+- **Hub Web interactions:** Live updates now preserve management form drafts, focus, cursor position, and scroll state; account provider selection and subscription top-up ledgers remain usable while the dashboard refreshes.
 <!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.28-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.28-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.45.0-rev.28.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-Setup-0.45.0-rev.28.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.45.0-rev.28.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.45.0-rev.28.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.29-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.29-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.45.0-rev.29.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-Setup-0.45.0-rev.29.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.45.0-rev.29.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.45.0-rev.29.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -54,15 +56,17 @@ open-source: https://github.com/junhoyeo/tokscale
 ### 新增
 - **中枢账号配置：** 中枢网页端新增“账号管理”选项卡，支持包括 DeepSeek、Claude、Codex、Antigravity (AGY)、Copilot、OpenCode 等在内的服务商便捷表单与 JSON 凭据录入及集中刷新。
 - **Codex 与 Antigravity 支持：** 中枢端支持通过 auth.json/OAuth Token 直接获取 Codex 额度，以及通过 RPC 探测获取 AGY 额度，并在配置时强化安全与合规免责声明。
+### 修复
+- **中枢网页交互：** 实时更新期间保留管理表单草稿、焦点、光标与滚动位置；服务商选择和订阅充值明细可以持续正常操作。
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.28-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.28-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.45.0-rev.28.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-Setup-0.45.0-rev.28.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.45.0-rev.28.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.45.0-rev.28.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.29-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.29-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.45.0-rev.29.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-Setup-0.45.0-rev.29.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.45.0-rev.29.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.45.0-rev.29.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -95,7 +99,7 @@ https://github.com/junhoyeo/tokscale
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v0.45.0-rev.27...v0.45.0-rev.28">v0.45.0-rev.27...v0.45.0-rev.28</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v0.45.0-rev.28...v0.45.0-rev.29">v0.45.0-rev.28...v0.45.0-rev.29</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -115,15 +119,17 @@ https://github.com/junhoyeo/tokscale
 ### 新增
 - **中樞帳號設定：** 中樞網頁端新增「帳號管理」分頁，支援包括 DeepSeek、Claude、Codex、Antigravity (AGY)、Copilot、OpenCode 等服務商的便捷表單與 JSON 憑證錄入及集中更新。
 - **Codex 與 Antigravity 支援：** 中樞端支援透過 auth.json/OAuth Token 直接取得 Codex 額度，以及透過 RPC 探針取得 AGY 額度，並在設定時強化安全與合規免責聲明。
+### 修正
+- **中樞網頁互動：** 即時更新期間保留管理表單草稿、焦點、游標與捲動位置；服務商選擇和訂閱儲值明細可以持續正常操作。
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.28-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.28-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.45.0-rev.28.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-Setup-0.45.0-rev.28.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.45.0-rev.28.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.45.0-rev.28.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.29-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.29-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.45.0-rev.29.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-Setup-0.45.0-rev.29.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.45.0-rev.29.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.45.0-rev.29.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29.AppImage)
 
 </details>
 
@@ -138,15 +144,17 @@ https://github.com/junhoyeo/tokscale
 ### 추가
 - **Hub 계정 설정:** Hub Web 대시보드에 계정 관리 탭을 추가하여 DeepSeek, Claude, Codex, Antigravity (AGY), Copilot, OpenCode 등 제공자의 간편 입력 및 JSON 자격 증명을 중앙 집중식으로 지원합니다.
 - **Codex 및 Antigravity 지원:** auth.json/OAuth Token을 통한 Codex 한도 조회와 RPC 엔드포인트를 통한 AGY 한도 조회를 Hub에서 직접 지원하며, 면책 조항을 추가했습니다.
+### 수정
+- **Hub Web 상호작용:** 실시간 업데이트 중에도 관리 폼 초안, 포커스, 커서 및 스크롤 위치를 보존하며, 제공자 선택과 구독 충전 내역을 계속 사용할 수 있습니다.
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.28-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.28-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.45.0-rev.28.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-Setup-0.45.0-rev.28.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.45.0-rev.28.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.45.0-rev.28.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.29-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.29-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.45.0-rev.29.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-Setup-0.45.0-rev.29.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.45.0-rev.29.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.45.0-rev.29.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29.AppImage)
 
 </details>
 
@@ -161,15 +169,17 @@ https://github.com/junhoyeo/tokscale
 ### 追加
 - **Hub アカウント設定:** Hub Web ダッシュボードにアカウント管理タブを追加し、DeepSeek、Claude、Codex、Antigravity (AGY)、Copilot、OpenCode などの簡易入力および JSON 認証情報の集中管理に対応しました。
 - **Codex および Antigravity 対応:** Hub 側で auth.json/OAuth Token を用いた Codex の上限取得および RPC 経由での AGY 上限取得に対応し、設定時の免責事項を追加しました。
+### 修正
+- **Hub Web の操作性:** リアルタイム更新中も管理フォームの下書き、フォーカス、カーソル、スクロール位置を保持し、プロバイダー選択とサブスクリプションのチャージ明細を継続して操作できます。
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.28-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.28-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.45.0-rev.28.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-Setup-0.45.0-rev.28.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.45.0-rev.28.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.45.0-rev.28.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.28/Token-Monitor-0.45.0-rev.28.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.29-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.29-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.45.0-rev.29.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-Setup-0.45.0-rev.29.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.45.0-rev.29.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.45.0-rev.29.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.29/Token-Monitor-0.45.0-rev.29.AppImage)
 
 </details>
 

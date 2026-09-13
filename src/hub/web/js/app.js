@@ -95,6 +95,56 @@ const VIEWS = [
 
 const PERIODS = ['today', 'month', 'allTime'];
 
+const VIEW_PATHS = Object.freeze({
+  home: '/',
+  tool: '/tool',
+  device: '/device',
+  model: '/model',
+  project: '/project',
+  session: '/session',
+  limits: '/limits',
+  accounts: '/accounts',
+  status: '/status',
+  trends: '/trends',
+  subscriptions: '/subscriptions',
+  pricing: '/pricing'
+});
+
+function viewFromLocation() {
+  const hash = window.location.hash ? window.location.hash.replace(/^#\/?/, '').trim() : '';
+  if (hash) {
+    const matched = VIEWS.find((v) => v.id === hash);
+    if (matched) return matched.id;
+  }
+  const path = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
+  for (const [id, urlPath] of Object.entries(VIEW_PATHS)) {
+    if (urlPath === path) return id;
+  }
+  // Also match plural aliases like /devices or /tools if user types it
+  if (path === '/devices') return 'device';
+  if (path === '/tools') return 'tool';
+  if (path === '/models') return 'model';
+  if (path === '/projects') return 'project';
+  if (path === '/sessions') return 'session';
+  return null;
+}
+
+function syncUrlForView(viewId, { replace = false } = {}) {
+  const targetPath = VIEW_PATHS[viewId] || '/';
+  const currentPath = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
+  if (currentPath === targetPath && !window.location.hash) return;
+  try {
+    const url = `${targetPath}${window.location.search || ''}`;
+    if (replace) {
+      window.history.replaceState({ view: viewId }, '', url);
+    } else {
+      window.history.pushState({ view: viewId }, '', url);
+    }
+  } catch {
+    /* ignore history errors if sandboxed */
+  }
+}
+
 const els = {
   app: document.getElementById('app'),
   primaryNav: document.getElementById('primaryNav'),
@@ -109,7 +159,6 @@ const els = {
   pwaDismissBtn: document.getElementById('pwaDismissBtn'),
   pageTitle: document.getElementById('pageTitle'),
   pageMeta: document.getElementById('pageMeta'),
-  homeReturnBtn: document.getElementById('homeReturnBtn'),
   periodTabs: document.getElementById('periodTabs'),
   customRangeBtn: document.getElementById('customRangeBtn'),
   refreshBtn: document.getElementById('refreshBtn'),
@@ -150,7 +199,6 @@ const state = {
     language: 'auto',
     theme: 'system',
     currency: 'USD',
-    view: 'home',
     period: 'today',
     trendsRange: '30',
     trendsStack: 'client',
@@ -162,7 +210,8 @@ const state = {
     selectedDeviceId: '',
     selectedToolId: '',
     deviceDetailPeriod: 'today',
-    ...loadPrefs()
+    ...loadPrefs(),
+    view: viewFromLocation() || loadPrefs().view || 'home'
   },
   secret: loadSecret(),
   locale: 'en',
@@ -498,12 +547,6 @@ function renderChrome() {
     ].join('');
     els.deviceFilter.value = allDevices.some((device) => device.deviceId === current) ? current : '';
   }
-  if (els.homeReturnBtn) {
-    const onHome = state.prefs.view === 'home';
-    els.homeReturnBtn.classList.toggle('hidden', onHome);
-    els.homeReturnBtn.title = tr('home.return');
-    els.homeReturnBtn.setAttribute('aria-label', tr('home.return'));
-  }
   refreshPwaUi();
 }
 
@@ -534,12 +577,12 @@ function emptyHtml(key) {
   return `<div class="empty-card">${tr(key)}</div>`;
 }
 
-function panel(title, body, meta = '') {
+function panel(title, body, meta = '', action = '') {
   return `
     <section class="panel">
       <div class="panel-head">
         <h2 class="panel-title">${escapeHtml(title)}</h2>
-        ${meta ? `<div class="panel-meta tiny">${escapeHtml(meta)}</div>` : ''}
+        ${action || (meta ? `<div class="panel-meta tiny">${escapeHtml(meta)}</div>` : '')}
       </div>
       ${body}
     </section>
@@ -755,6 +798,11 @@ function shareBarHtml(rows) {
 }
 
 function renderHero() {
+  const onHome = state.prefs.view === 'home';
+  if (els.heroStrip) {
+    els.heroStrip.classList.toggle('hidden', !onHome);
+  }
+  if (!onHome) return;
   const period = activePeriod();
   const stats = viewStats();
   els.totalTokens.textContent = formatCompact(period.totalTokens || 0);
@@ -845,43 +893,124 @@ function renderHome() {
     ? displayActiveDays
     : (Number.isFinite(summaryActiveDays) ? summaryActiveDays : displayActiveDays);
 
+  const totalTokens = Math.max(1, period.totalTokens || 0);
+
+  // Tools: interactive visual proportion bars with client icons
   const toolsBody = tools.length
-    ? `<div class="stack">${tools.map((row) => rowHtml({ ...row, client: row.key }, { showIcon: true, sub: `${Math.round((row.value / Math.max(1, period.totalTokens || 0)) * 100)}%` })).join('')}</div>`
+    ? `<div class="stack">${tools.map((row) => {
+        const pct = Math.round((row.value / totalTokens) * 100);
+        return `
+          <button type="button" class="home-interactive-row" data-jump-view="tool" data-jump-tool="${escapeHtml(row.key)}">
+            <div class="row">
+              <div class="row-main">
+                <img class="client-icon" src="${clientIconPath(row.key)}" alt="" onerror="this.style.display='none'" />
+                <div class="row-copy">
+                  <div class="row-name">${escapeHtml(row.name)}</div>
+                  <div class="row-sub">${pct}% · ${formatCost(row.cost, state.prefs.currency)}</div>
+                </div>
+              </div>
+              <div class="row-metrics">
+                <div class="row-value">${formatCompact(row.value)}</div>
+              </div>
+            </div>
+            <div class="share-meter"><span style="width:${Math.max(2, Math.min(100, pct))}%; background:${row.color}"></span></div>
+          </button>
+        `;
+      }).join('')}</div>`
     : emptyHtml('empty.usage');
+
+  // Models: interactive visual proportion bars with model colors
   const modelsBody = models.length
-    ? `<div class="stack">${models.map((row) => rowHtml(row, { sub: `${Math.round((row.value / Math.max(1, period.totalTokens || 0)) * 100)}%` })).join('')}</div>`
+    ? `<div class="stack">${models.map((row) => {
+        const pct = Math.round((row.value / totalTokens) * 100);
+        return `
+          <button type="button" class="home-interactive-row" data-jump-view="model">
+            <div class="row">
+              <div class="row-main">
+                <span class="swatch" style="background:${row.color}"></span>
+                <div class="row-copy">
+                  <div class="row-name">${escapeHtml(row.name)}</div>
+                  <div class="row-sub">${pct}% · ${formatCost(row.cost, state.prefs.currency)}</div>
+                </div>
+              </div>
+              <div class="row-metrics">
+                <div class="row-value">${formatCompact(row.value)}</div>
+              </div>
+            </div>
+            <div class="share-meter"><span style="width:${Math.max(2, Math.min(100, pct))}%; background:${row.color}"></span></div>
+          </button>
+        `;
+      }).join('')}</div>`
     : emptyHtml('empty.usage');
+
+  // Devices: cards with status & quick jump
   const devicesBody = devices.length
-    ? `<div class="stack">${devices.map((row) => rowHtml(row, { sub: `${row.platformDisplay || devicePlatformLabel(row.platform, row.osName, row.osVersion)}${row.stale ? ` · ${tr('devices.stale')}` : ''}` })).join('')}</div>`
-    : emptyHtml('empty.usage');
-  const limitsBody = limits.length
-    ? `<div class="stack">${limits.map((card) => `
-        <div class="row">
-          <div class="row-main">
-            <img class="client-icon" src="${clientIconPath(card.provider)}" alt="" onerror="this.style.display='none'" />
-            <div class="row-copy">
-              <div class="row-name">${escapeHtml(card.name)}</div>
-              <div class="row-sub">${escapeHtml(clientLabel(card.provider))}${card.plan ? ` · ${escapeHtml(card.plan)}` : ''}${card.accountEmail && card.name !== card.accountEmail ? ` · ${escapeHtml(card.accountEmail)}` : ''}</div>
+    ? `<div class="stack">${devices.map((row) => `
+        <button type="button" class="home-interactive-row" data-jump-view="device" data-jump-device="${escapeHtml(row.key)}">
+          <div class="row">
+            <div class="row-main">
+              <span class="swatch" style="background:${row.color}"></span>
+              <div class="row-copy">
+                <div class="row-name">${escapeHtml(row.name)}</div>
+                <div class="row-sub">${row.platformDisplay || devicePlatformLabel(row.platform, row.osName, row.osVersion)}${row.stale ? ` · ${tr('devices.stale')}` : ''}</div>
+              </div>
+            </div>
+            <div class="row-metrics">
+              <div class="row-value">${formatCompact(row.value)}</div>
+              <div class="row-cost">${formatCost(row.cost, state.prefs.currency)}</div>
             </div>
           </div>
-          <div class="row-metrics">
-            <div class="row-value remaining-tone remaining-tone-${card.lowestRemaining == null ? 'unknown' : limitRemainingTone(card.lowestRemaining)}">${card.lowestRemaining == null ? '—' : `${Math.round(card.lowestRemaining)}%`}</div>
-            <div class="row-cost">${card.stale ? tr('devices.stale') : tr('devices.live')}</div>
-          </div>
-        </div>
+        </button>
       `).join('')}</div>`
+    : emptyHtml('empty.usage');
+
+  // Limits: graphical cards with progress bars and remaining tone
+  const limitsBody = limits.length
+    ? `<div class="home-limits-grid">${limits.map((card) => {
+        const remaining = card.lowestRemaining;
+        const tone = remaining == null ? 'unknown' : limitRemainingTone(remaining);
+        const toneClass = `meter-${tone}`;
+        const pct = remaining == null ? 0 : Math.max(0, Math.min(100, Math.round(remaining)));
+        return `
+          <button type="button" class="home-limit-card" data-jump-view="limits">
+            <div class="home-limit-head">
+              <div class="home-limit-identity">
+                <img class="client-icon" src="${clientIconPath(card.provider)}" alt="" onerror="this.style.display='none'" />
+                <span class="home-limit-name">${escapeHtml(card.name)}</span>
+              </div>
+              <span class="home-limit-val remaining-tone-${tone}">${remaining == null ? '—' : `${pct}%`}</span>
+            </div>
+            <div class="home-limit-bar ${toneClass}"><span style="width:${pct}%"></span></div>
+            <div class="home-limit-sub">${escapeHtml(clientLabel(card.provider))}${card.plan ? ` · ${escapeHtml(card.plan)}` : ''}</div>
+          </button>
+        `;
+      }).join('')}</div>`
     : emptyHtml('empty.limits');
 
   const activeTime = Number(summary?.activeTimeMs || 0);
   const completeness = renderCompletenessNotice(stats, state.prefs.period);
-  const summaryBody = (summary || heatDaily.length)
-    ? `
-      <div class="summary-grid">
-        <div class="summary-chip"><span class="summary-label">${tr('home.activeDays')}</span><strong>${formatNumber(activeDaysValue)}</strong></div>
-        <div class="summary-chip"><span class="summary-label">${tr('home.streak')}</span><strong>${formatNumber(summary?.currentStreak || 0)}</strong></div>
-        <div class="summary-chip"><span class="summary-label">${tr('home.peakDay')}</span><strong>${formatCompact(summary?.peakDayTokens || 0)}</strong></div>
-        <div class="summary-chip"><span class="summary-label">${tr('home.activeTime')}</span><strong>${formatDuration(activeTime)}</strong></div>
+
+  const viewAllAction = (targetView) => `<button type="button" class="panel-head-action" data-jump-view="${targetView}"><span>${tr(`nav.${targetView}`)}</span>${uiIcon('arrowUpRight')}</button>`;
+
+  const sparklineHeader = `
+    <div class="home-sparkline-head">
+      <div class="home-sparkline-pills">
+        <div class="home-pill"><span class="home-pill-label">${tr('home.activeDays')}:</span><span class="home-pill-val">${formatNumber(activeDaysValue)}</span></div>
+        <div class="home-pill"><span class="home-pill-label">${tr('home.streak')}:</span><span class="home-pill-val">${formatNumber(summary?.currentStreak || 0)}d</span></div>
+        <div class="home-pill"><span class="home-pill-label">${tr('home.peakDay')}:</span><span class="home-pill-val">${formatCompact(summary?.peakDayTokens || 0)}</span></div>
+        ${activeTime > 0 ? `<div class="home-pill"><span class="home-pill-label">${tr('home.activeTime')}:</span><span class="home-pill-val">${formatDuration(activeTime)}</span></div>` : ''}
       </div>
+      ${viewAllAction('trends')}
+    </div>
+  `;
+
+  const sparklineBlock = `
+    ${sparklineHeader}
+    ${renderSparkline(daily)}
+  `;
+
+  const heatmapBody = (summary || heatDaily.length)
+    ? `
       <div class="toolbar-row">
         <div class="seg" role="group" aria-label="${tr('home.heatmapMetric')}">
           ${segButtons([['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')]], heatMetric, 'heatmap-metric')}
@@ -897,14 +1026,14 @@ function renderHome() {
   return `
     ${completeness}
     ${renderHistoryScopeNotice()}
+    ${panel(tr('home.activity'), sparklineBlock, daily.length ? `${daily.length}d` : '')}
     <div class="grid-2">
-      ${panel(tr('home.tools'), toolsBody)}
-      ${panel(tr('home.models'), modelsBody)}
-      ${panel(tr('home.devices'), devicesBody)}
-      ${panel(tr('home.limits'), limitsBody)}
+      ${panel(tr('home.tools'), toolsBody, '', viewAllAction('tool'))}
+      ${panel(tr('home.models'), modelsBody, '', viewAllAction('model'))}
+      ${panel(tr('home.devices'), devicesBody, '', viewAllAction('device'))}
+      ${panel(tr('home.limits'), limitsBody, '', viewAllAction('limits'))}
     </div>
-    ${panel(tr('home.summary'), summaryBody)}
-    ${panel(tr('home.activity'), renderSparkline(daily), daily.length ? `${daily.length}d` : '')}
+    ${panel(tr('home.summary'), heatmapBody)}
   `;
 }
 
@@ -2673,30 +2802,39 @@ function clearCustomRange() {
   render();
 }
 
-function bindEvents() {
-  if (els.homeReturnBtn) {
-    els.homeReturnBtn.addEventListener('click', () => {
-      if (state.prefs.view === 'home') return;
-      state.prefs.view = 'home';
-      savePrefs({ view: 'home' });
-      openNav(false);
-      void ensureHistory().then(() => render());
-    });
+function switchView(viewId, { updateHistory = true, replace = false } = {}) {
+  const target = String(viewId || 'home').trim();
+  const validView = VIEWS.some((v) => v.id === target) ? target : 'home';
+  if (state.prefs.view === validView && updateHistory) {
+    syncUrlForView(validView, { replace: true });
+    return;
   }
+  state.prefs.view = validView;
+  savePrefs({ view: validView });
+  if (updateHistory) {
+    syncUrlForView(validView, { replace });
+  }
+  openNav(false);
+  if (validView === 'subscriptions') void loadSubscriptions().then(() => render());
+  if (validView === 'pricing') void loadPricing().then(() => render());
+  if (validView === 'accounts') void loadAccounts().then(() => render());
+  if (validView === 'trends' || validView === 'home') {
+    void ensureHistory().then(() => render());
+    return;
+  }
+  render();
+}
+
+function bindEvents() {
+  window.addEventListener('popstate', () => {
+    const locView = viewFromLocation() || 'home';
+    switchView(locView, { updateHistory: false });
+  });
+
   els.primaryNav.addEventListener('click', (event) => {
     const btn = event.target.closest('[data-view]');
     if (!btn) return;
-    state.prefs.view = btn.dataset.view;
-    savePrefs({ view: state.prefs.view });
-    openNav(false);
-    if (state.prefs.view === 'subscriptions') void loadSubscriptions().then(() => render());
-    if (state.prefs.view === 'pricing') void loadPricing().then(() => render());
-    if (state.prefs.view === 'accounts') void loadAccounts().then(() => render());
-    if (state.prefs.view === 'trends' || state.prefs.view === 'home') {
-      void ensureHistory().then(() => render());
-      return;
-    }
-    render();
+    switchView(btn.dataset.view);
   });
 
   if (els.deviceFilter) {
@@ -2767,6 +2905,20 @@ function bindEvents() {
   });
 
   els.content.addEventListener('click', (event) => {
+    const jumpView = event.target.closest('[data-jump-view]');
+    if (jumpView) {
+      const view = jumpView.dataset.jumpView;
+      if (jumpView.dataset.jumpTool) {
+        state.prefs.selectedToolId = jumpView.dataset.jumpTool;
+        savePrefs({ selectedToolId: state.prefs.selectedToolId });
+      }
+      if (jumpView.dataset.jumpDevice) {
+        state.prefs.selectedDeviceId = jumpView.dataset.jumpDevice;
+        savePrefs({ selectedDeviceId: state.prefs.selectedDeviceId });
+      }
+      switchView(view);
+      return;
+    }
     const retryDashboard = event.target.closest('[data-retry-dashboard]');
     if (retryDashboard) {
       void bootstrapAuthorized().catch((error) => {

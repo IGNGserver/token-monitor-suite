@@ -268,6 +268,16 @@ There are two places to configure Token Monitor; day-to-day use only needs the f
 
 See the [configuration reference](docs/configuration.md) for every setting and all environment variables.
 
+## Tested Environments & Platform Compatibility
+
+Token Monitor is developed and tested primarily in the environments below. **Platforms and setups outside this list have not been fully verified and may encounter unexpected issues.** Feedback and PRs are welcome:
+
+- **Docker Compose Hub**: Verified for multi-device sync, aggregation, and SSE streaming.
+- **Windows 11**: Primary development and testing platform.
+  - Main tested coding tools: **Codex**, **OpenCode**.
+  - Lightly tested tools: **Antigravity**, **Claude Desktop**.
+- **Ubuntu**: Only headless agent **data reporting/ingest** has been tested; day-to-day coding workflows and complete client operation have not been comprehensively verified on this platform.
+
 ## Privacy
 
 Token Monitor processes usage logs locally and sends no analytics or telemetry to the project maintainer. Network access occurs only for documented or user-enabled features. See the [privacy policy](docs/privacy.md) for the data used by updates, provider integrations, Discord Rich Presence, and optional multi-device sync.

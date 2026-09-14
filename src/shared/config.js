@@ -42,6 +42,12 @@ function parseArgs(argv) {
   return args;
 }
 
+function parseBoolean(value, fallback = true) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  return !['0', 'false', 'no', 'off'].includes(String(value).trim().toLowerCase());
+}
+
 function readJson(filePath, fallback = null) {
   let content;
   try {
@@ -158,6 +164,7 @@ module.exports = {
   generateHubSecret,
   lanIpv4Addresses,
   loadDotEnv,
+  parseBoolean,
   parseArgs,
   pidFilePath,
   projectRoot,

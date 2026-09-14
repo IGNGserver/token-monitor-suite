@@ -8,6 +8,7 @@ const test = require('node:test');
 const rootDir = path.join(__dirname, '..', '..');
 const read = (...p) => fs.readFileSync(path.join(rootDir, ...p), 'utf8');
 const { usageConfigFromSettings } = require('../../src/electron/runtimeConfig');
+const { usageConfigFromSource } = require('../../src/shared/collectorConfig');
 
 test('preload exposes the dashboard IPC surface', () => {
   const preload = read('src', 'electron', 'preload.js');
@@ -71,7 +72,7 @@ test('custom ranges honor an explicit Hub capability denial without local-only f
 
 test('dashboard history is gated by the historyEnabled setting', () => {
   const main = read('src', 'electron', 'main.js');
-  assert.match(main, /historyEnabled:\s*true/);
+  assert.match(main, /historyEnabled:\s*parseBoolean\(process\.env\.TOKEN_MONITOR_HISTORY_ENABLED,\s*true\)/);
   assert.match(main, /historyEnabled:\s*parseBoolean\(patch\.historyEnabled[\s\S]*?,\s*false\)/);
   assert.match(main, /if \(settings\?\.historyEnabled === false\) return aggregateHistory\(\[\]\)/);
   assert.equal(usageConfigFromSettings({ historyEnabled: true }).historyEnabled, true);
@@ -83,7 +84,9 @@ test('agent history collection defaults to enabled, matching the widget', () => 
   const agent = read('src', 'agent', 'agent.js');
   const envExample = read('.env.example');
   const configDoc = read('docs', 'configuration.md');
-  assert.match(agent, /TOKEN_MONITOR_HISTORY_ENABLED,\s*true\)/);
+  assert.match(agent, /usageConfigFromSource\(usageSource/);
+  assert.match(agent, /historyEnabled:\s*args\.history\s*\?\?\s*args\.historyEnabled\s*\?\?\s*process\.env\.TOKEN_MONITOR_HISTORY_ENABLED/);
+  assert.equal(usageConfigFromSource({}).historyEnabled, true);
   assert.doesNotMatch(envExample, /TOKEN_MONITOR_HISTORY_ENABLED=0/);
   assert.match(configDoc, /TOKEN_MONITOR_HISTORY_ENABLED=/);
 });

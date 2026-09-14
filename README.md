@@ -164,6 +164,7 @@ Download from [GitHub Releases](https://github.com/IGNGserver/token-monitor-suit
 - **macOS (Intel)** — x64 `.dmg`, signed and notarized
 - **Windows 10/11** — setup and portable `.exe`, [code-signed](docs/code-signing.md)
 - **Linux x64** — `.AppImage`
+- **No-GUI/server** — `Token-Monitor-Headless-<version>.tar.gz`; install with Node.js 22.13+ and `npm ci --omit=dev`
 
 Packaged builds check GitHub Releases automatically. When an update is available, the app shows an update indicator; supported platforms can also install from Settings → General.
 
@@ -173,7 +174,7 @@ Local mode is the default: launch the app and it starts tracking this device. No
 
 ## Multi-device sync
 
-When you want multi-device sync, connect all devices (and any headless agents) to the same Docker Compose Hub. On each device, open the widget and choose **Connect to a hub** under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget.
+When you want multi-device sync, connect all devices (and any headless agents) to the same Docker Compose Hub. On each device, open the widget and choose **Connect to a hub** under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget. For a no-GUI install, use the [headless agent guide](docs/headless-agent.md) and the `Token-Monitor-Headless-<version>.tar.gz` release asset.
 
 For this single-user project, `TOKEN_MONITOR_SECRET` is the one Hub key used by every device and it covers read, ingest, and administrative operations, including manually managed quota accounts. Older split admin/viewer/device credentials remain available only as a compatibility mode. Remote connections require HTTPS by default; desktop/agent HTTP needs an explicit trusted-LAN opt-in, while Android release builds always require HTTPS.
 

@@ -308,6 +308,73 @@ export function wslStatusSummary(status) {
   };
 }
 
+function numberValue(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+function tokenMetricFields(period = {}, prefix = '') {
+  const fields = prefix
+    ? {
+        cacheReadTokens: `${prefix}CacheReads`,
+        cacheWriteTokens: `${prefix}CacheWrites`,
+        outputTokens: `${prefix}Outputs`
+      }
+    : {
+        cacheReadTokens: 'cacheReadTokens',
+        cacheWriteTokens: 'cacheWriteTokens',
+        outputTokens: 'outputTokens'
+      };
+  const cacheReadTokens = numberValue(period[fields.cacheReadTokens]);
+  const cacheWriteTokens = numberValue(period[fields.cacheWriteTokens]);
+  const outputTokens = numberValue(period[fields.outputTokens]);
+  const totalTokens = numberValue(period.totalTokens);
+  const inputTokens = Math.max(0, totalTokens - outputTokens);
+  const cacheInputTokens = Math.min(inputTokens, cacheReadTokens + cacheWriteTokens);
+  const uncachedInputTokens = Math.max(0, inputTokens - cacheInputTokens);
+  return {
+    totalTokens,
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    uncachedInputTokens,
+    cacheHitPercent: inputTokens > 0 ? (cacheReadTokens / inputTokens) * 100 : null
+  };
+}
+
+export function periodTokenMetrics(period = {}) {
+  return tokenMetricFields(period);
+}
+
+export function tokenMetricsForRow(period = {}, kind = 'client', key = '', rowTokens) {
+  const prefix = kind === 'model' ? 'model' : (kind === 'client' ? 'client' : '');
+  if (kind === 'session') {
+    const session = period?.sessions?.[key] || {};
+    return tokenMetricFields({
+      totalTokens: session.totalTokens,
+      cacheReadTokens: session.cacheReadTokens,
+      cacheWriteTokens: session.cacheWriteTokens,
+      outputTokens: session.outputTokens
+    });
+  }
+  return tokenMetricFields({
+    totalTokens: rowTokens ?? (kind === 'model' ? period?.models?.[key] : period?.clients?.[key]),
+    [`${prefix}CacheReads`]: period?.[`${prefix}CacheReads`]?.[key],
+    [`${prefix}CacheWrites`]: period?.[`${prefix}CacheWrites`]?.[key],
+    [`${prefix}Outputs`]: period?.[`${prefix}Outputs`]?.[key]
+  }, prefix);
+}
+
+export function periodActivityCounts(period = {}) {
+  return {
+    projects: Object.keys(period?.projects || {}).length,
+    sessions: Object.keys(period?.sessions || {}).length,
+    tools: Object.keys(period?.clients || {}).length,
+    models: Object.keys(period?.models || {}).length
+  };
+}
+
 export function deviceBreakdownRows(device, periodKey = 'today') {
   const period = device?.periods?.[periodKey] || {};
   const totalTokens = Math.max(0, Number(period.totalTokens || 0));
@@ -323,11 +390,13 @@ export function deviceBreakdownRows(device, periodKey = 'today') {
       colorFor: modelColor
     }).map((model) => ({
       ...model,
+      metrics: tokenMetricsForRow(period, 'model', model.key, model.value),
       percent: row.value > 0 ? (model.value / row.value) * 100 : 0
     }));
     return {
       ...row,
       client: row.key,
+      metrics: tokenMetricsForRow(period, 'client', row.key, row.value),
       percent: totalTokens > 0 ? (row.value / totalTokens) * 100 : 0,
       models
     };
@@ -337,6 +406,7 @@ export function deviceBreakdownRows(device, periodKey = 'today') {
     colorFor: modelColor
   }).map((row) => ({
     ...row,
+    metrics: tokenMetricsForRow(period, 'model', row.key, row.value),
     percent: totalTokens > 0 ? (row.value / totalTokens) * 100 : 0
   }));
   return { totalTokens, totalCost, tools, models };
@@ -359,14 +429,14 @@ export function toolRows(period) {
   return mapRows(period?.clients, period?.clientCosts, {
     labelFor: clientLabel,
     colorFor: clientColor
-  });
+  }).map((row) => ({ ...row, metrics: tokenMetricsForRow(period, 'client', row.key, row.value) }));
 }
 
 export function modelRows(period) {
   return mapRows(period?.models, period?.modelCosts, {
     labelFor: (id) => id,
     colorFor: modelColor
-  });
+  }).map((row) => ({ ...row, metrics: tokenMetricsForRow(period, 'model', row.key, row.value) }));
 }
 
 export function projectRows(period, { incomplete = false } = {}) {
@@ -414,7 +484,8 @@ export function sessionRows(period, { limit = MAX_SESSION_ROWS } = {}) {
         ].filter(Boolean).join(' · '),
         messageCount: Number(session?.messageCount || 0),
         projectLabel: session?.projectLabel || '',
-        lastUsedAt: session?.lastUsedAt || session?.startedAt || ''
+        lastUsedAt: session?.lastUsedAt || session?.startedAt || '',
+        metrics: tokenMetricsForRow(period, 'session', key)
       };
     })
     .filter(Boolean)
@@ -443,12 +514,15 @@ export function deviceRows(stats, periodKey) {
         osVersion: device.osVersion || '',
         platformDisplay: devicePlatformLabel(device.platform, device.osName, device.osVersion),
         updatedAt: device.updatedAt || device.receivedAt || '',
+        receivedAt: device.receivedAt || '',
         hostname: device.hostname || '',
         deviceId: device.deviceId || '',
         agentRuntime: device.agentRuntime || '',
         agentRuntimeLabel: agentRuntimeLabel(device.agentRuntime),
         clientStatus: device.clientStatus || {},
         wslStatus: device.wslStatus || null,
+        periodWindows: device.periodWindows || null,
+        projectsEnabled: device.projectsEnabled !== false,
         periods: device.periods || {},
         limits: device.limits || null,
         raw: device

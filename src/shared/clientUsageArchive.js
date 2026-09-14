@@ -1,6 +1,8 @@
 'use strict';
 
+const path = require('node:path');
 const { PERIODS, normalizePeriod } = require('./usage');
+const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 
 const RESERVED_DYNAMIC_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
@@ -269,9 +271,26 @@ function pruneArchivedClientUsage(archive, activeClients) {
   return normalizedArchive;
 }
 
+function clientUsageArchivePath(options = {}) {
+  return options.path || path.join(sharedDataDir(options), 'client-usage-archive.json');
+}
+
+function readClientUsageArchive(options = {}) {
+  const read = options.readJson || readJson;
+  return normalizeArchivedClientUsage(read(clientUsageArchivePath(options), {}));
+}
+
+function writeClientUsageArchive(archive, options = {}) {
+  const write = options.writeJsonAtomic || writeJsonAtomic;
+  write(clientUsageArchivePath(options), normalizeArchivedClientUsage(archive));
+}
+
 module.exports = {
   applyArchivedClientUsage,
   captureArchivedClientUsage,
+  clientUsageArchivePath,
   normalizeArchivedClientUsage,
-  pruneArchivedClientUsage
+  pruneArchivedClientUsage,
+  readClientUsageArchive,
+  writeClientUsageArchive
 };

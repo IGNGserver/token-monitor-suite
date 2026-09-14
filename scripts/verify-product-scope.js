@@ -44,6 +44,7 @@ function verifyProductScope() {
   expect(!Object.hasOwn(scripts, 'hub'), 'package.json must not expose a standalone Hub command');
   expect(scripts.agent === 'node src/agent/agent.js', 'the headless agent entry point must remain available');
   expect(scripts['agent:once'] === 'node src/agent/agent.js --once', 'the one-shot agent entry point must remain available');
+  expect(scripts['package:headless'] === 'node scripts/package-headless.js', 'the headless release package entry point must remain available');
   expect(!Object.hasOwn(scripts, 'sync:worker'), 'package.json must not expose a removed secondary Hub sync command');
   expect(scripts['verify:product-scope'] === 'node scripts/verify-product-scope.js', 'scope verification must remain wired into npm scripts');
   expect(String(scripts.verify || '').includes('verify:product-scope'), 'npm run verify must execute the product-scope guard');
@@ -104,6 +105,8 @@ function verifyProductScope() {
   expectAbsent('scripts/sync-worker-shared.js');
   expectAbsent('deploy');
   expect(exists('docs/hub-compose.md'), 'the canonical Docker Compose Hub guide must remain');
+  expect(exists('docs/headless-agent.md'), 'the canonical headless agent guide must remain');
+  expect(exists('scripts/package-headless.js'), 'the headless package script must remain');
   expect(exists('docker-compose.yml'), 'the root Docker Compose file must remain the only Hub distribution entry point');
   expect(exists('Dockerfile'), 'the Hub Dockerfile must remain');
   expect(exists('docker-entrypoint.sh'), 'the Hub Docker entrypoint must remain');
@@ -119,6 +122,8 @@ function verifyProductScope() {
 
   const ci = read('.github/workflows/ci.yml');
   const release = read('.github/workflows/release.yml');
+  expect(release.includes('package:headless'), 'release workflow must package the headless agent');
+  expect(release.includes('Token-Monitor-Headless-*.tar.gz'), 'release workflow must publish the headless agent artifact');
   for (const [name, text] of [['CI', ci], ['release workflow', release]]) {
     expect(!text.includes('sync:worker'), `${name} must not invoke the removed secondary Hub sync path`);
     expect(!text.includes('worker/src'), `${name} must not verify a removed secondary Hub source tree`);

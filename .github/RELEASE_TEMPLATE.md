@@ -4,20 +4,24 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Hub Web Dashboard Navigation & Routing:** Added independent URL routes for each page with full browser history (forward/back) support.
-- **Hub Web Dashboard Redesign:** Redesigned home dashboard into a chart-forward command center with elevated 14-day token activity sparklines, proportion distribution bars for tools and models, visual limit health gauges, and deep-link navigation.
+- **Hub Web information architecture:** Replaced the legacy navigation with Overview, Usage, Devices, Limits, Trends, Accounts, Management, and Settings pages while preserving old URLs.
+- **Usage detail:** Added tool/model/project/session tabs with input, output, cache, uncached-token, cost, and expandable breakdown views.
+- **Headless agent package:** Added a release archive for machines that collect usage without the Electron widget.
+### Improved
+- **Trends and device visibility:** Added 7/30/90/365/all trend ranges, activity summaries, device runtime/status details, and explicit custom-range scope notices.
+- **Shared sync runtime:** Unified upload scheduling, retry/backoff, device identity, and summary/archive handling between Electron and the headless agent.
 ### Fixed
-- **Header Navigation:** Removed redundant return-arrow icon in sub-page headers.
-- **Header Metrics Scope:** Restricted top summary KPI cards (Tokens, Cost, Devices, Live) to the home dashboard to maximize vertical screen space on functional sub-pages.
+- **Web compatibility:** Legacy tool, model, project, session, device, status, subscription, and pricing routes now redirect into the new page model without losing their tab.
+- **Configuration boundaries:** Web settings now expose only web-safe preferences and clearly identify desktop-only controls.
 <!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.30-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.30-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.45.0-rev.30.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-Setup-0.45.0-rev.30.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.45.0-rev.30.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.45.0-rev.30.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.31-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.31-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.45.0-rev.31.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-Setup-0.45.0-rev.31.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.45.0-rev.31.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.45.0-rev.31.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -55,20 +59,24 @@ open-source: https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **中枢网页路由与独立 URL：** 各个子页面支持独立 URL，完整支持浏览器前进、后退与刷新直达。
-- **中枢首页图表化大盘重构：** 首页重构为图表优先的可视化仪表盘，首屏呈现近 14 天用量走势交互图，工具与模型采用图形化比例条，紧张额度展示健康度色阶进度仪表，支持卡片快速直达明细。
+- **中枢网页信息架构：** 将旧导航重构为总览、用量、设备、限额、趋势、账号、管理和设置页面，同时保留旧 URL。
+- **用量明细：** 新增工具、模型、项目、会话标签页，支持输入、输出、缓存、未缓存 Token、成本和可展开明细。
+- **无界面 Agent 发布包：** 新增适用于无 Electron 设备的独立采集 Agent 发布压缩包。
+### 改进
+- **趋势与设备信息：** 新增 7/30/90/365/全部趋势范围、活跃摘要、设备运行时/状态详情和自定义范围说明。
+- **共享同步运行时：** Electron 与无界面 Agent 统一上传调度、重试退避、设备身份和摘要/归档处理。
 ### 修复
-- **页眉导航优化：** 移除子页面页眉多余的返回三角按钮，界面更整洁协调。
-- **总览指标条范围：** Token、Cost、设备数、Live 等顶部统计卡片仅在首页展示，为子页面释放完整垂直视口空间。
+- **网页兼容性：** 旧工具、模型、项目、会话、设备、状态、订阅和定价路由会映射到新页面，并保留对应标签。
+- **配置边界：** 网页设置只暴露网页安全配置，并明确标注桌面端专属控制项。
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.30-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.30-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.45.0-rev.30.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-Setup-0.45.0-rev.30.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.45.0-rev.30.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.45.0-rev.30.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.31-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.31-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.45.0-rev.31.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-Setup-0.45.0-rev.31.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.45.0-rev.31.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.45.0-rev.31.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -101,7 +109,7 @@ https://github.com/junhoyeo/tokscale
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v0.45.0-rev.29...v0.45.0-rev.30">v0.45.0-rev.29...v0.45.0-rev.30</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v0.45.0-rev.30...v0.45.0-rev.31">v0.45.0-rev.30...v0.45.0-rev.31</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -119,20 +127,24 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh-TW:start -->
 ### 新增
-- **中樞網頁路由與獨立 URL：** 各個子頁面支援獨立 URL，完整支援瀏覽器前進、後退與重新整理直達。
-- **中樞首頁圖表化大盤重構：** 首頁重構為圖表優先的可視化儀表板，首屏呈現近 14 天用量走勢互動圖，工具與模型採用圖形化比例條，緊張額度展示健康度色階進度儀表，支援卡片快速直達明細。
+- **中樞網頁資訊架構：** 將舊導覽重構為總覽、用量、裝置、限額、趨勢、帳號、管理和設定頁面，同時保留舊 URL。
+- **用量明細：** 新增工具、模型、專案、工作階段分頁，支援輸入、輸出、快取、未快取 Token、成本和可展開明細。
+- **無介面 Agent 發布包：** 新增適用於無 Electron 裝置的獨立採集 Agent 發布壓縮包。
+### 改進
+- **趨勢與裝置資訊：** 新增 7/30/90/365/全部趨勢範圍、活躍摘要、裝置執行時/狀態詳情和自訂範圍說明。
+- **共享同步執行時：** Electron 與無介面 Agent 統一上傳排程、重試退避、裝置身分和摘要/歸檔處理。
 ### 修正
-- **頁首導覽優化：** 移除子頁面頁首多餘的返回三角按鈕，介面更整潔協調。
-- **總覽指標列範圍：** Token、Cost、裝置數、Live 等頂部統計卡片僅在首頁展示，為子頁面釋放完整垂直視口空間。
+- **網頁相容性：** 舊工具、模型、專案、工作階段、裝置、狀態、訂閱和定價路由會映射到新頁面，並保留對應分頁。
+- **設定邊界：** 網頁設定只暴露網頁安全設定，並明確標註桌面端專屬控制項。
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.30-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.30-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.45.0-rev.30.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-Setup-0.45.0-rev.30.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.45.0-rev.30.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.45.0-rev.30.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.31-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.31-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.45.0-rev.31.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-Setup-0.45.0-rev.31.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.45.0-rev.31.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.45.0-rev.31.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31.AppImage)
 
 </details>
 
@@ -145,19 +157,24 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ko:start -->
 ### 추가
-- **Hub 계정 설정:** Hub Web 대시보드에 계정 관리 탭을 추가하여 DeepSeek, Claude, Codex, Antigravity (AGY), Copilot, OpenCode 등 제공자의 간편 입력 및 JSON 자격 증명을 중앙 집중식으로 지원합니다.
-- **Codex 및 Antigravity 지원:** auth.json/OAuth Token을 통한 Codex 한도 조회와 RPC 엔드포인트를 통한 AGY 한도 조회를 Hub에서 직접 지원하며, 면책 조항을 추가했습니다.
+- **Hub Web 정보 구조:** 기존 탐색을 Overview, Usage, Devices, Limits, Trends, Accounts, Management, Settings 페이지로 재구성하고 기존 URL을 유지합니다.
+- **Usage 세부 정보:** 도구, 모델, 프로젝트, 세션 탭에서 입력, 출력, 캐시, 미캐시 토큰, 비용 및 펼칠 수 있는 세부 정보를 제공합니다.
+- **Headless Agent 패키지:** Electron 위젯 없이 수집하는 장치를 위한 독립 릴리스 아카이브를 추가했습니다.
+### 개선
+- **추세 및 장치 정보:** 7/30/90/365/전체 기간, 활동 요약, 장치 런타임/상태 정보와 사용자 지정 기간 안내를 추가했습니다.
+- **공유 동기화 런타임:** Electron과 Headless Agent가 업로드 일정, 재시도, 장치 ID와 아카이브 처리를 공유합니다.
 ### 수정
-- **Hub Web 상호작용:** 실시간 업데이트 중에도 관리 폼 초안, 포커스, 커서 및 스크롤 위치를 보존하며, 제공자 선택과 구독 충전 내역을 계속 사용할 수 있습니다.
+- **웹 호환성:** 기존 도구, 모델, 프로젝트, 세션, 장치, 상태, 구독 및 요금 URL이 새 페이지와 탭으로 연결됩니다.
+- **설정 경계:** 웹 설정에는 웹에서 안전한 항목만 표시하고 데스크톱 전용 제어를 명확히 구분합니다.
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.30-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.30-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.45.0-rev.30.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-Setup-0.45.0-rev.30.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.45.0-rev.30.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.45.0-rev.30.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.31-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.31-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.45.0-rev.31.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-Setup-0.45.0-rev.31.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.45.0-rev.31.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.45.0-rev.31.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31.AppImage)
 
 </details>
 
@@ -170,19 +187,24 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ja:start -->
 ### 追加
-- **Hub アカウント設定:** Hub Web ダッシュボードにアカウント管理タブを追加し、DeepSeek、Claude、Codex、Antigravity (AGY)、Copilot、OpenCode などの簡易入力および JSON 認証情報の集中管理に対応しました。
-- **Codex および Antigravity 対応:** Hub 側で auth.json/OAuth Token を用いた Codex の上限取得および RPC 経由での AGY 上限取得に対応し、設定時の免責事項を追加しました。
+- **Hub Web 情報アーキテクチャ:** 旧ナビゲーションを Overview、Usage、Devices、Limits、Trends、Accounts、Management、Settings に再構成し、旧 URL も維持しました。
+- **Usage 詳細:** ツール、モデル、プロジェクト、セッションのタブで、入力、出力、キャッシュ、未キャッシュ Token、コスト、展開可能な詳細を確認できます。
+- **Headless Agent パッケージ:** Electron ウィジェットなしで収集する端末向けの独立リリースアーカイブを追加しました。
+### 改善
+- **トレンドとデバイス情報:** 7/30/90/365/全期間の範囲、アクティビティ概要、デバイスのランタイム/状態詳細、カスタム範囲の案内を追加しました。
+- **共有同期ランタイム:** Electron と Headless Agent でアップロードスケジュール、再試行、デバイス ID、アーカイブ処理を統一しました。
 ### 修正
-- **Hub Web の操作性:** リアルタイム更新中も管理フォームの下書き、フォーカス、カーソル、スクロール位置を保持し、プロバイダー選択とサブスクリプションのチャージ明細を継続して操作できます。
+- **Web 互換性:** 旧ツール、モデル、プロジェクト、セッション、デバイス、ステータス、サブスクリプション、料金 URL を新しいページとタブへ接続しました。
+- **設定境界:** Web 設定には Web で安全な項目だけを表示し、デスクトップ専用の操作を明確に区別します。
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.30-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.45.0-rev.30-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.45.0-rev.30.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-Setup-0.45.0-rev.30.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.45.0-rev.30.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.45.0-rev.30.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.30/Token-Monitor-0.45.0-rev.30.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.45.0-rev.31-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.45.0-rev.31-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.45.0-rev.31.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-Setup-0.45.0-rev.31.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.45.0-rev.31.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.45.0-rev.31.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.45.0-rev.31/Token-Monitor-0.45.0-rev.31.AppImage)
 
 </details>
 

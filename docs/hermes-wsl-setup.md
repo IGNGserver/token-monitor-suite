@@ -63,7 +63,7 @@ Hermes Agent 运行在 WSL 中，其会话数据存储在 `~/.hermes/state.db`�
 cd ~
 git clone https://github.com/IGNGserver/token-monitor-suite.git
 cd token-monitor-suite
-npm install
+npm ci --omit=dev
 ```
 
 ### 第三步：配置环境变量
@@ -94,7 +94,7 @@ TOKEN_MONITOR_DEVICE_ID=hermes-wsl
 首次运行使用 `--once` 模式做一次性推送测试：
 
 ```bash
-cd ~/token-monitor
+cd ~/token-monitor-suite
 
 # 注意：如果 WSL 配置了 HTTP_PROXY 代理，
 # 需要确保 hub 地址不被代理拦截
@@ -121,7 +121,7 @@ crontab -e
 添加以下行（每 30 分钟运行一次）：
 
 ```cron
-*/30 * * * * cd /home/用户名/token-monitor && no_proxy=192.168.x.x NO_PROXY=192.168.x.x npm run agent -- --once >> /tmp/token-monitor-agent.log 2>&1
+*/30 * * * * cd /home/用户名/token-monitor-suite && no_proxy=192.168.x.x NO_PROXY=192.168.x.x npm run agent -- --once >> /tmp/token-monitor-agent.log 2>&1
 ```
 
 #### 方式 B：Systemd 用户服务
@@ -135,7 +135,7 @@ Description=Token Monitor Headless Agent (WSL)
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/npm run agent -- --once
-WorkingDirectory=/home/用户名/token-monitor
+WorkingDirectory=/home/用户名/token-monitor-suite
 Environment=NO_PROXY=192.168.x.x,172.25.0.0/16
 
 [Install]

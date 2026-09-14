@@ -44,6 +44,40 @@ jobs:
           chmod +x android/gradlew
           ./android/gradlew --no-daemon -p android runUnitTests
 
+  headless:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install production dependencies only
+        run: npm ci --omit=dev
+      - name: Package headless agent
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_VERSION#v}"
+          npm run package:headless -- "$version"
+          tar -tzf "dist-headless/Token-Monitor-Headless-${version}.tar.gz" \
+            | grep -q "/src/agent/agent.js$"
+          if tar -tzf "dist-headless/Token-Monitor-Headless-${version}.tar.gz" \
+            | grep -Eq '(^|/)src/(electron|hub)/|(^|/)node_modules/'; then
+            echo "headless archive contains a GUI, Hub, or node_modules path" >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: token-monitor-headless
+          if-no-files-found: error
+          path: dist-headless/Token-Monitor-Headless-*.tar.gz
+
   build:
     needs: verify
     strategy:
@@ -512,7 +546,7 @@ jobs:
           path: dist-hub-compose/Token-Monitor-Hub-Compose-*.zip
 
   release:
-    needs: [build, android, hub-image]
+    needs: [build, android, headless, hub-image]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -535,6 +569,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: token-monitor-android
+          path: artifacts
+      - name: Download headless agent artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: token-monitor-headless
           path: artifacts
       - name: Download Hub artifacts
         uses: actions/download-artifact@v4
@@ -598,6 +637,7 @@ jobs:
               echo "Compose: set \`TOKEN_MONITOR_VERSION=${version}\` then \`docker compose pull && docker compose up -d\`; this prerelease does not move the \`latest\` tag."
             fi
             echo "Or download \`Token-Monitor-Hub-Compose-${version}.zip\` from Assets for a minimal deploy bundle."
+            echo "The no-GUI collector is available as \`Token-Monitor-Headless-${version}.tar.gz\`; install it with \`npm ci --omit=dev\`."
           } >> release-body.md
       - uses: softprops/action-gh-release@v2
         with:
@@ -609,6 +649,7 @@ jobs:
             artifacts/*.AppImage
             artifacts/*.deb
             artifacts/Token-Monitor-Android-*.apk
+            artifacts/Token-Monitor-Headless-*.tar.gz
             artifacts/latest.yml
             artifacts/latest-linux.yml
             artifacts/latest-mac.yml

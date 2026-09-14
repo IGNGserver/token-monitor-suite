@@ -3098,7 +3098,7 @@ test('Qoder CN transcript history remains available when a targeted tick names a
   })}\n`);
 
   try {
-    const { collectUsageOnce } = freshCollector();
+    const { collectUsageOnce, localTodayKey } = freshCollector();
     const result = await collectUsageOnce({
       clients: 'claude,qodercn',
       targetClients: ['claude'],
@@ -3120,7 +3120,7 @@ test('Qoder CN transcript history remains available when a targeted tick names a
       })
     });
 
-    const today = result.history.daily.find((entry) => entry.date === new Date().toISOString().slice(0, 10));
+    const today = result.history.daily.find((entry) => entry.date === localTodayKey());
     assert.ok(today, 'history includes the current local day');
     assert.ok(today.perClient.qodercn, 'history graph includes transcript-derived Qoder CN usage');
     assert.equal(today.perClient.qodercn.tokens > 0, true);

@@ -1,6 +1,6 @@
 'use strict';
 
-const { clientsCsvForSetting } = require('../shared/clientTracking');
+const { usageConfigFromSource } = require('../shared/collectorConfig');
 
 const MODE_STRUCTURAL_KEYS = Object.freeze([
   'hubMode',
@@ -14,6 +14,8 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'allTimeSince',
   'collectionIntervalMs',
   'collectionMode',
+  'watchEnabled',
+  'watchDebounceMs',
   'historyEnabled',
   'historyIntervalMs',
   'sessionUsageArchiveEnabled',
@@ -34,25 +36,7 @@ function changedAny(previous, next, keys) {
 }
 
 function usageConfigFromSettings(settings = {}, context = {}) {
-  return {
-    clients: clientsCsvForSetting(settings.clients),
-    allTimeSince: settings.allTimeSince || '2024-01-01',
-    commandTimeoutMs: Number(context.commandTimeoutMs || 120 * 1000),
-    deviceId: settings.deviceId || context.defaultDeviceId,
-    agentVersion: context.agentVersion,
-    agentRuntime: context.agentRuntime || 'electron-widget',
-    intervalMs: context.intervalMs ?? settings.collectionIntervalMs,
-    historyEnabled: settings.historyEnabled !== false,
-    dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
-    dailyHistoryArchiveWriteEnabled: context.dailyHistoryArchiveWriteEnabled,
-    projectsEnabled: settings.projectsEnabled !== false,
-    historyIntervalMs: context.historyIntervalMs ?? settings.historyIntervalMs,
-    watchEnabled: context.watchEnabled,
-    watchDebounceMs: Number(context.watchDebounceMs || 1500),
-    wslScanEnabled: settings.wslScanEnabled !== false,
-    onError: context.onError,
-    logger: context.logger
-  };
+  return usageConfigFromSource(settings, context);
 }
 
 function envelopeFromSettings(settings = {}, context = {}) {

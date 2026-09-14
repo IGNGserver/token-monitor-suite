@@ -168,6 +168,7 @@ Main SQLite 的對話內容同樣只提供估算用量，沒有供應商計費�
 - **macOS（Intel）** — x64 `.dmg`，已簽章並 notarize
 - **Windows 10/11** — 安裝版與可攜版 `.exe`，均[已簽章](docs/code-signing.md)
 - **Linux x64** — `.AppImage`
+- **無 GUI／伺服器** — `Token-Monitor-Headless-<version>.tar.gz`；使用 Node.js 22.13+ 與 `npm ci --omit=dev` 安裝
 
 打包版會自動檢查 GitHub Releases。有新版本時，介面會顯示更新提示；支援的平台也可在 設定 → 一般 中安裝更新。
 
@@ -177,7 +178,7 @@ Main SQLite 的對話內容同樣只提供估算用量，沒有供應商計費�
 
 ## 多裝置同步
 
-如果需要多裝置同步，請把所有裝置（以及沒有小工具的無頭代理）連線到同一個 Docker Compose Hub。在每台裝置上開啟小工具，前往 設定 → 多裝置同步並選擇 **連線到 Hub**；只有沒有小工具的機器才需要執行 `npm run agent`。
+如果需要多裝置同步，請把所有裝置（以及沒有小工具的無頭代理）連線到同一個 Docker Compose Hub。在每台裝置上開啟小工具，前往 設定 → 多裝置同步並選擇 **連線到 Hub**；只有沒有小工具的機器才需要執行 `npm run agent`。無 GUI 安裝請參閱 [Headless Agent 指南](docs/headless-agent.md)，並下載 `Token-Monitor-Headless-<version>.tar.gz`。
 
 這個單人專案使用 `TOKEN_MONITOR_SECRET` 作為所有裝置共用的唯一 Hub 密鑰，涵蓋讀取、上報與管理操作，包括手動加入的額度帳號。舊版分離的 admin/viewer/裝置憑證僅保留作為相容模式。遠端連線預設必須使用 HTTPS；桌面端／agent 需明確啟用可信任 LAN HTTP，Android 發行版始終要求 HTTPS。
 

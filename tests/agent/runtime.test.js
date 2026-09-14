@@ -105,6 +105,22 @@ test('normal once posts exactly one usage record', async () => {
   assert.deepEqual(final, delivered[0]);
 });
 
+test('once rejects when the final Hub upload fails', async () => {
+  const harness = runtimeHarness();
+  const failure = Object.assign(new Error('Hub unavailable'), { status: 503 });
+  const running = runAgentOnce({
+    envelope: { deviceId: 'device-1' },
+    deliver: async () => { throw failure; }
+  }, harness.deps);
+
+  harness.usageUpdate(usageSummary(13));
+  await assert.rejects(running, (error) => (
+    error.message === 'headless upload failed (hub_server_error)'
+      && error.status === 503
+      && error.code === 'hub_server_error'
+  ));
+});
+
 test('dry-run once waits for usage and emits one final JSON record', async () => {
   const harness = runtimeHarness();
   const delivered = [];

@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, Notification, powerMonitor, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
-const { defaultDeviceId, loadDotEnv, pidFilePath, sharedDataDir, normalizeHubUrl } = require('../shared/config');
+const { defaultDeviceId, loadDotEnv, parseBoolean, pidFilePath, sharedDataDir, normalizeHubUrl } = require('../shared/config');
 const {
   CredentialStore,
   credentialSettingsForRenderer,
@@ -38,7 +38,7 @@ const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { requireSafeHubTransport } = require('../shared/hubTransport');
-const { parseBoolean, parseLimitProviders } = require('../shared/limitCollector');
+const { parseLimitProviders } = require('../shared/limitCollector');
 const { isAllowedCodexLoginUrl } = require('../shared/codexLogin');
 const { isAllowedVerificationUrl } = require('../shared/copilotDeviceFlow');
 const {
@@ -80,24 +80,29 @@ const semver = require('semver');
 const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
 const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
 const {
-  applyArchivedClientUsage,
   captureArchivedClientUsage,
+  readClientUsageArchive,
   normalizeArchivedClientUsage,
-  pruneArchivedClientUsage
+  pruneArchivedClientUsage,
+  writeClientUsageArchive
 } = require('../shared/clientUsageArchive');
 const {
-  applySessionUsageArchive,
-  captureSessionUsageArchive,
-  clearSessionUsageArchive,
-  normalizeSessionUsageArchive,
-  readSessionUsageArchive,
-  sessionUsageArchiveDate,
-  writeSessionUsageArchive
+  clearSessionUsageArchive
 } = require('../shared/sessionUsageArchive');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
-const { aggregateDevices, aggregateHistory, applyProjectRollups } = require('../shared/usage');
+const { aggregateDevices, aggregateHistory } = require('../shared/usage');
 const { fetchBufferedWithTimeout, fetchWithTimeout } = require('../shared/http');
 const { postSyncPayload } = require('../shared/syncPayload');
+const { renameDeviceOnHub, readDeviceIdentity, writeDeviceIdentity } = require('../shared/deviceIdentity');
+const {
+  DEFAULT_COLLECTION_INTERVAL_MS: SHARED_DEFAULT_COLLECTION_INTERVAL_MS,
+  DEFAULT_SMART_COLLECTION_INTERVAL_MS: SHARED_DEFAULT_SMART_COLLECTION_INTERVAL_MS,
+  normalizeCollectionIntervalMs: normalizeSharedCollectionIntervalMs,
+  normalizeCollectionMode: normalizeSharedCollectionMode,
+  normalizeWatchDebounceMs: normalizeSharedWatchDebounceMs
+} = require('../shared/collectorConfig');
+const { createSyncUploadSink } = require('../shared/syncUploadSink');
+const { createSyncSummaryTransformer } = require('../shared/syncSummary');
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const { historyPreview, historyRevision } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
@@ -128,7 +133,7 @@ const {
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
 const { classifyStreamFailure } = require('./syncConnection');
 const { composeLocalSyncStats } = require('./syncDisplayStats');
-const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
+const { normalizeSyncUploadIntervalMs } = require('../shared/syncUploadScheduler');
 const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const {
   classifySettingsChange,
@@ -209,9 +214,7 @@ const CSP_HEADER = [
 const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
-const COLLECTION_MODE_VALUES = new Set(['live', 'interval']);
-const COLLECTION_INTERVAL_OPTIONS = [5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000];
-const DEFAULT_COLLECTION_INTERVAL_MS = 5 * 60 * 1000;
+const DEFAULT_COLLECTION_INTERVAL_MS = SHARED_DEFAULT_COLLECTION_INTERVAL_MS;
 const HUB_REQUEST_TIMEOUT_MS = 15 * 1000;
 // The Docker Hub emits a heartbeat every 30 seconds by default. Allow two
 // missed beats before treating a half-open stream as disconnected.
@@ -232,7 +235,8 @@ let settings = null;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
-let sessionUsageArchive = null;
+let clientUsageArchive = null;
+let deviceIdentity = null;
 let rendererViewState = normalizeInitialRendererViewState();
 const serviceStatusClient = createServiceStatusClient();
 const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname));
@@ -302,6 +306,7 @@ function normalizeHomeLimitAccountCount(value) {
 function defaultSettings() {
   const envHubUrl = normalizeHubUrl(process.env.TOKEN_MONITOR_HUB_URL || '');
   const windowBehavior = process.env.TOKEN_MONITOR_ALWAYS_ON_TOP === '0' ? 'normal' : 'floating';
+  const collectionMode = normalizeCollectionMode(process.env.TOKEN_MONITOR_COLLECTION_MODE);
   return {
     hubMode: envHubUrl ? 'client' : 'local',
     hubUrl: envHubUrl,
@@ -347,15 +352,20 @@ function defaultSettings() {
     showHomeLimitBars: false,
     showHomeLimitProviderNames: false,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, false),
-    historyEnabled: true,
+    historyEnabled: parseBoolean(process.env.TOKEN_MONITOR_HISTORY_ENABLED, true),
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
     sessionUsageArchiveEnabled: parseBoolean(process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true),
     wslScanEnabled: parseBoolean(process.env.TOKEN_MONITOR_WSL_SCAN, true),
     exportAutoEnabled: false,
     exportDir: '',
     exportIntervalMs: 60 * 1000,
-    collectionMode: 'live',
-    collectionIntervalMs: 5 * 60 * 1000,
+    collectionMode,
+    collectionIntervalMs: normalizeCollectionIntervalMs(
+      process.env.TOKEN_MONITOR_INTERVAL_MS,
+      collectionMode === 'smart' ? SHARED_DEFAULT_SMART_COLLECTION_INTERVAL_MS : SHARED_DEFAULT_COLLECTION_INTERVAL_MS
+    ),
+    watchEnabled: parseBoolean(process.env.TOKEN_MONITOR_WATCH, true),
+    watchDebounceMs: normalizeSharedWatchDebounceMs(process.env.TOKEN_MONITOR_WATCH_DEBOUNCE_MS),
     syncUploadIntervalMs: normalizeSyncUploadIntervalMs(process.env.TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS),
     serviceProviderDisplayOrder: '',
     hiddenServiceProviders: '',
@@ -396,9 +406,7 @@ function defaultSettings() {
 }
 
 function normalizeCollectionMode(value, fallback = 'live') {
-  const next = String(value || '').trim();
-  if (COLLECTION_MODE_VALUES.has(next)) return next;
-  return COLLECTION_MODE_VALUES.has(fallback) ? fallback : 'live';
+  return normalizeSharedCollectionMode(value, fallback);
 }
 
 function normalizeHeatmapMetric(value, fallback = 'cost') {
@@ -415,10 +423,7 @@ function normalizeHomeActiveDaysWindow(value, fallback = 'all') {
 }
 
 function normalizeCollectionIntervalMs(value, fallback = DEFAULT_COLLECTION_INTERVAL_MS) {
-  const numeric = Number(value);
-  if (COLLECTION_INTERVAL_OPTIONS.includes(numeric)) return numeric;
-  const fallbackNumeric = Number(fallback);
-  return COLLECTION_INTERVAL_OPTIONS.includes(fallbackNumeric) ? fallbackNumeric : DEFAULT_COLLECTION_INTERVAL_MS;
+  return normalizeSharedCollectionIntervalMs(value, fallback);
 }
 
 function collectorIntervalMs() {
@@ -426,7 +431,7 @@ function collectorIntervalMs() {
 }
 
 function collectorWatchEnabled() {
-  return normalizeCollectionMode(settings?.collectionMode) === 'live';
+  return settings?.watchEnabled !== false && normalizeCollectionMode(settings?.collectionMode) !== 'interval';
 }
 
 function syncUploadIntervalMs() {
@@ -442,7 +447,7 @@ function electronUsageConfig(errorPrefix) {
     intervalMs: collectorIntervalMs(),
     historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
     watchEnabled: collectorWatchEnabled(),
-    watchDebounceMs: 1500,
+    watchDebounceMs: normalizeSharedWatchDebounceMs(settings.watchDebounceMs),
     dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
     onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
     logger: (message) => console.log(`[${errorPrefix}] ${message}`)
@@ -587,6 +592,8 @@ function floatingBubblePayload() {
 function ensureSettingsLoaded() {
   if (settings) return settings;
   settings = readSettings();
+  ensureClientUsageArchiveLoaded();
+  ensureDeviceIdentityLoaded();
   // Auto-enable newly introduced default clients (e.g. claude-desktop) once for existing installs.
   // An explicit environment selection is a complete selection, including an
   // empty one. Persisted values still retain their normal read precedence, but
@@ -1044,8 +1051,16 @@ function readSettings() {
     if (saved.wslScanEnabled !== undefined) {
       merged.wslScanEnabled = parseBoolean(saved.wslScanEnabled, true);
     }
+    if (saved.watchEnabled !== undefined) {
+      merged.watchEnabled = parseBoolean(saved.watchEnabled, true);
+    }
+    if (saved.watchDebounceMs !== undefined) {
+      merged.watchDebounceMs = normalizeSharedWatchDebounceMs(saved.watchDebounceMs);
+    }
     merged.collectionMode = normalizeCollectionMode(merged.collectionMode);
     merged.collectionIntervalMs = normalizeCollectionIntervalMs(merged.collectionIntervalMs);
+    merged.watchEnabled = parseBoolean(merged.watchEnabled, true);
+    merged.watchDebounceMs = normalizeSharedWatchDebounceMs(merged.watchDebounceMs);
     merged.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(merged.syncUploadIntervalMs);
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
@@ -1184,55 +1199,77 @@ function localArchiveSourceDevice() {
 
 function updateArchivedClientUsage(previousClients, nextClients) {
   const removedClients = removedTrackedClients(previousClients, nextClients);
-  let archive = pruneArchivedClientUsage(settings.archivedClientUsage, nextClients);
+  let archive = pruneArchivedClientUsage(ensureClientUsageArchiveLoaded(), nextClients);
   if (removedClients.length > 0) {
     archive = captureArchivedClientUsage(archive, localArchiveSourceDevice(), removedClients);
   }
+  clientUsageArchive = archive;
   settings.archivedClientUsage = archive;
-}
-
-function ensureSessionUsageArchiveLoaded() {
-  if (sessionUsageArchive) return sessionUsageArchive;
+  syncSummaryTransformer.setClientUsageArchive(archive);
   try {
-    sessionUsageArchive = readSessionUsageArchive();
+    writeClientUsageArchive(archive);
   } catch (error) {
-    console.log(`[session-archive] read failed: ${error.message}`);
-    sessionUsageArchive = normalizeSessionUsageArchive({});
+    console.log(`[client-archive] write failed: ${error.message}`);
   }
-  return sessionUsageArchive;
 }
 
-function updateSessionUsageArchive(summary, now) {
-  const previous = ensureSessionUsageArchiveLoaded();
-  const next = captureSessionUsageArchive(previous, summary, now);
-  if (JSON.stringify(next) === JSON.stringify(previous)) return previous;
+function ensureClientUsageArchiveLoaded() {
+  if (clientUsageArchive) return clientUsageArchive;
+  const legacy = normalizeArchivedClientUsage(settings?.archivedClientUsage);
+  let shared;
   try {
-    writeSessionUsageArchive(next);
-    sessionUsageArchive = next;
+    shared = readClientUsageArchive();
   } catch (error) {
-    console.log(`[session-archive] write failed: ${error.message}`);
+    console.log(`[client-archive] read failed: ${error.message}`);
+    shared = { version: 1, clients: {} };
   }
-  return next;
-}
-
-function summaryWithArchivedClientUsage(summary) {
-  const now = sessionUsageArchiveDate(summary);
-  const withArchivedClients = applyArchivedClientUsage(summary, settings?.archivedClientUsage, {
-    activeClients: settings?.clients,
-    now
+  const merged = normalizeArchivedClientUsage({
+    ...shared,
+    clients: { ...(legacy.clients || {}), ...(shared.clients || {}) }
   });
-  let visibleSummary = withArchivedClients;
-  if (settings?.sessionUsageArchiveEnabled === false) {
-    return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
+  clientUsageArchive = merged;
+  if (settings) settings.archivedClientUsage = merged;
+  if (JSON.stringify(merged) !== JSON.stringify(shared)) {
+    try { writeClientUsageArchive(merged); }
+    catch (error) { console.log(`[client-archive] migration write failed: ${error.message}`); }
   }
-  if (isExternalAgentActive()) {
-    sessionUsageArchive = null;
-    visibleSummary = applySessionUsageArchive(withArchivedClients, ensureSessionUsageArchiveLoaded(), { now });
-  } else {
-    const sessionArchive = updateSessionUsageArchive(summary, now);
-    visibleSummary = applySessionUsageArchive(withArchivedClients, sessionArchive, { now });
+  return clientUsageArchive;
+}
+
+function ensureDeviceIdentityLoaded() {
+  if (deviceIdentity) return deviceIdentity;
+  const shared = readDeviceIdentity();
+  const legacyDeviceId = String(settings?.lastPostedDeviceId || '').trim();
+  const lastPostedDeviceId = shared.lastPostedDeviceId || legacyDeviceId;
+  deviceIdentity = { version: 1, lastPostedDeviceId };
+  if (lastPostedDeviceId && shared.lastPostedDeviceId !== lastPostedDeviceId) {
+    try { writeDeviceIdentity(lastPostedDeviceId); }
+    catch (error) { console.log(`[identity] migration write failed: ${error.message}`); }
   }
-  return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
+  if (settings && settings.lastPostedDeviceId !== lastPostedDeviceId) {
+    settings.lastPostedDeviceId = lastPostedDeviceId;
+  }
+  return deviceIdentity;
+}
+
+const syncSummaryTransformer = createSyncSummaryTransformer({
+  archivedClientUsage: () => ensureClientUsageArchiveLoaded(),
+  activeClients: () => settings?.clients,
+  captureClientUsage: true,
+  writeClientUsageArchive: (archive) => {
+    clientUsageArchive = archive;
+    if (settings) settings.archivedClientUsage = archive;
+    writeClientUsageArchive(archive);
+  },
+  canWriteClientUsageArchive: () => !isExternalAgentActive(),
+  sessionUsageArchiveEnabled: () => settings?.sessionUsageArchiveEnabled !== false,
+  projectsEnabled: () => settings?.projectsEnabled !== false,
+  canWriteSessionUsageArchive: () => !isExternalAgentActive(),
+  onArchiveError: (error, operation) => console.log(`[session-archive] ${operation} failed: ${error.message}`)
+});
+
+function summaryWithArchivedClientUsage(summary, reason, meta) {
+  return syncSummaryTransformer.transform(summary, reason, meta);
 }
 
 function applyMacActivationPolicy(state = {}) {
@@ -1547,41 +1584,6 @@ function isExternalAgentActive() {
   } catch (_) { return false; }
 }
 
-async function renameDeviceOnHub(previousDeviceId, nextDeviceId, options = {}) {
-  const { url: hubUrl, secret } = effectiveHubConfig();
-  if (!hubUrl) return false;
-  const base = hubUrl.replace(/\/$/, '');
-  const devicesResponse = await fetchBufferedWithTimeout(fetch, `${base}/api/devices`, {
-    headers: secret ? { authorization: `Bearer ${secret}` } : {},
-    ...(options.signal ? { signal: options.signal } : {})
-  }, HUB_REQUEST_TIMEOUT_MS);
-  if (devicesResponse.ok) {
-    const body = await devicesResponse.json();
-    const ids = new Set((body?.devices || []).map((device) => String(device?.deviceId || device?.id || '')));
-    // An administrator may have completed the identity migration from the Hub
-    // dashboard before the remote client restarts. Recognize that state so the
-    // device credential can resume without needing admin scope itself.
-    if (!ids.has(previousDeviceId) && ids.has(nextDeviceId)) return true;
-  }
-  const response = await fetchBufferedWithTimeout(fetch, `${base}/api/devices/${encodeURIComponent(previousDeviceId)}/rename`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
-    ...(options.signal ? { signal: options.signal } : {}),
-    body: JSON.stringify({ deviceId: nextDeviceId })
-  }, HUB_REQUEST_TIMEOUT_MS);
-  if (response.status === 404) return false;
-  if (response.status === 403) {
-    throw new Error('Hub device rename requires an admin credential; provision a token for the new Device ID on the Hub host before changing it here');
-  }
-  if (!response.ok) {
-    const error = new Error(`Hub device rename failed (${response.status})`);
-    error.status = response.status;
-    error.code = stableSyncFailureCode(error, 'hub_rename_failed');
-    throw error;
-  }
-  return true;
-}
-
 async function postToHub(summary, context = {}) {
   const config = safeEffectiveHubConfig();
   if (!config.ok) {
@@ -1595,13 +1597,16 @@ async function postToHub(summary, context = {}) {
     error.code = 'hub_not_configured';
     throw error;
   }
-  const stale = settings.lastPostedDeviceId;
+  const stale = ensureDeviceIdentityLoaded().lastPostedDeviceId;
   if (stale && stale !== summary.deviceId) {
     // Move the ingest baseline and immutable ledger identity before posting the
     // new snapshot. Falling through after a conflict would merge two unrelated
     // installations or replay the full cumulative counter, so non-404 failures
     // deliberately block this upload.
-    await renameDeviceOnHub(stale, summary.deviceId, { signal: context.signal });
+    await renameDeviceOnHub(fetch, hubUrl, secret, stale, summary.deviceId, {
+      signal: context.signal,
+      timeoutMs: HUB_REQUEST_TIMEOUT_MS
+    });
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/ingest`;
   const { response } = await postSyncPayload(fetch, url, {
@@ -1617,8 +1622,11 @@ async function postToHub(summary, context = {}) {
     error.code = stableSyncFailureCode(error, 'hub_ingest_failed');
     throw error;
   }
-  if (settings.lastPostedDeviceId !== summary.deviceId) {
+  if (settings.lastPostedDeviceId !== summary.deviceId || deviceIdentity?.lastPostedDeviceId !== summary.deviceId) {
     settings.lastPostedDeviceId = summary.deviceId;
+    deviceIdentity = { version: 1, lastPostedDeviceId: summary.deviceId };
+    try { writeDeviceIdentity(summary.deviceId); }
+    catch (error) { console.log(`[identity] state write failed: ${error.message}`); }
     saveSettings();
   }
   try {
@@ -1650,7 +1658,7 @@ function startSyncCollector() {
   stopSyncCollector();
   mode = 'sync';
   updateSyncHealth('local', { state: 'collecting', failureCode: null });
-  const syncUploadScheduler = createSyncUploadScheduler({
+  const syncUploadSink = createSyncUploadSink({
     intervalMs: syncUploadIntervalMs(),
     flushTimeoutMs: HUB_REQUEST_TIMEOUT_MS,
     upload: async (summary, context) => {
@@ -1675,16 +1683,14 @@ function startSyncCollector() {
         throw error;
       }
     },
-    onError: (error) => console.log(`[sync-collector] post failed (${stableSyncFailureCode(error)}): ${error.message}`)
-  });
-  syncUploadSchedulerHandle = syncUploadScheduler;
-  const sink = {
-    async enqueue(summary, revision) {
-      if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
-      const visibleSummary = {
-        ...summary,
-        syncUploadIntervalMs: syncUploadIntervalMs()
-      };
+    onError: (error) => console.log(`[sync-collector] post failed (${stableSyncFailureCode(error)}): ${error.message}`),
+    beforeEnqueue: (visibleSummary) => {
+      if (isExternalAgentActive()) {
+        syncSummaryTransformer.reloadClientUsageArchive();
+        syncSummaryTransformer.reloadSessionUsageArchive();
+        clientUsageArchive = null;
+        return false;
+      }
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
       if (displayStats) {
@@ -1692,16 +1698,15 @@ function startSyncCollector() {
         sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats: displayStats, at: new Date().toISOString() } });
       }
       updateSyncHealth('local', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null });
-      await syncUploadScheduler.enqueue(visibleSummary, revision);
-    },
-    flush: () => syncUploadScheduler.flush(),
-    stop: () => syncUploadScheduler.stop()
-  };
+      return true;
+    }
+  });
+  syncUploadSchedulerHandle = syncUploadSink;
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
     transformUsage: summaryWithArchivedClientUsage,
     usageOptions: electronUsageConfig('sync-collector'),
-    sink,
+    sink: syncUploadSink,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
   });
   publishSyncHealth();
@@ -3730,7 +3735,7 @@ app.whenReady().then(() => {
     try {
       clearSessionUsageArchive();
       clearDailyHistoryArchive();
-      sessionUsageArchive = normalizeSessionUsageArchive({});
+      syncSummaryTransformer.resetSessionUsageArchive({});
       return { ok: true };
     } catch (error) {
       return { ok: false, error: error.message };
@@ -3792,6 +3797,8 @@ app.whenReady().then(() => {
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
     if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
+    if (patch.watchEnabled !== undefined) normalizedPatch.watchEnabled = parseBoolean(patch.watchEnabled, settings.watchEnabled !== false);
+    if (patch.watchDebounceMs !== undefined) normalizedPatch.watchDebounceMs = normalizeSharedWatchDebounceMs(patch.watchDebounceMs, settings.watchDebounceMs);
     if (patch.heatmapMetric !== undefined) normalizedPatch.heatmapMetric = normalizeHeatmapMetric(patch.heatmapMetric, settings.heatmapMetric);
     if (patch.homeActiveDaysWindow !== undefined) normalizedPatch.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(patch.homeActiveDaysWindow, settings.homeActiveDaysWindow);
     settings = normalizeWindowBehaviorSettings({
@@ -3835,6 +3842,8 @@ app.whenReady().then(() => {
       wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, true),
       collectionMode: normalizeCollectionMode(patch.collectionMode ?? settings.collectionMode),
       collectionIntervalMs: normalizeCollectionIntervalMs(patch.collectionIntervalMs ?? settings.collectionIntervalMs),
+      watchEnabled: parseBoolean(patch.watchEnabled ?? settings.watchEnabled, true),
+      watchDebounceMs: normalizeSharedWatchDebounceMs(patch.watchDebounceMs ?? settings.watchDebounceMs),
       syncUploadIntervalMs: normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs ?? settings.syncUploadIntervalMs),
       serviceProviderDisplayOrder: patch.serviceProviderDisplayOrder !== undefined ? String(patch.serviceProviderDisplayOrder || '') : (settings.serviceProviderDisplayOrder || ''),
       hiddenServiceProviders: patch.hiddenServiceProviders !== undefined ? String(patch.hiddenServiceProviders || '') : (settings.hiddenServiceProviders || ''),

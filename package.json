@@ -1,7 +1,7 @@
 {
   "name": "token-monitor",
   "productName": "Token Monitor",
-  "version": "0.45.0-rev.30",
+  "version": "0.45.0-rev.31",
   "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
   "main": "src/electron/main.js",
   "scripts": {
@@ -30,6 +30,7 @@
     "build:apt": "node scripts/build-apt-repository.js",
     "verify:release-artifact-names": "node scripts/verify-updater-artifact-names.js dist",
     "verify:release-version": "node scripts/verify-release-version.js",
+    "package:headless": "node scripts/package-headless.js",
     "package:hub-compose": "node scripts/package-hub-compose.js",
     "lint": "eslint .",
     "verify": "npm run verify:product-scope && npm run lint && npm test",

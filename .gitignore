@@ -23,3 +23,4 @@ devlog/
 
 # Hub compose release bundle output
 dist-hub-compose/
+dist-headless/

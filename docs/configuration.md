@@ -61,6 +61,10 @@ TOKEN_MONITOR_HUB_URL=               # required in sync mode — HTTPS Docker Co
 TOKEN_MONITOR_SECRET=                # the single Hub key; use the same value on every device
 TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to the hostname
 TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # optional — 0/live, 600000/10min, 1200000/20min, 1800000/30min
+TOKEN_MONITOR_COLLECTION_MODE=live    # live, interval, or smart
+TOKEN_MONITOR_INTERVAL_MS=300000      # shared periodic collection interval
+TOKEN_MONITOR_WATCH=1                 # shared file-watch switch
+TOKEN_MONITOR_WATCH_DEBOUNCE_MS=1500  # shared source-event debounce
 TOKEN_MONITOR_CLIENTS=               # optional — defaults to all supported tools; empty disables tracking
 TOKEN_MONITOR_PROJECTS_ENABLED=      # optional — defaults off; 1 collects project metadata
 TOKEN_MONITOR_HISTORY_ENABLED=       # optional — defaults on; 0 skips trend history
@@ -78,6 +82,12 @@ For a trusted LAN/VPN Hub that still uses `http://<lan-ip>:17321`, also set
 rejected by default; prefer HTTPS whenever possible. In the single-user mode,
 all devices intentionally use the same Hub key. Split admin/viewer/device
 credentials remain available only for legacy deployments.
+
+The collection and upload controls above are shared by the widget's Hub client
+mode and the headless agent. A widget's saved GUI value overrides its first-run
+`.env` default; the headless agent uses CLI flags first, then environment, then
+the shared built-in default. `smart` is useful on machines where a periodic,
+activity-aware scan is preferable to continuous file watching.
 
 Provider credentials for quota accounts are entered manually in the Hub and
 are not read from a device's local developer-tool installation. Proxy settings

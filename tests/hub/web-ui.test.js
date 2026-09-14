@@ -48,6 +48,15 @@ test('resolveStaticAsset serves the SPA shell and real assets', async () => {
   const trendsRoute = await resolveStaticAsset(DEFAULT_WEB_ROOT, '/trends');
   assert.ok(trendsRoute);
   assert.equal(path.basename(trendsRoute.filePath), 'index.html');
+  for (const route of [
+    '/usage', '/management', '/settings',
+    '/home', '/tool', '/tools', '/model', '/models', '/project', '/projects',
+    '/session', '/sessions', '/device', '/status', '/subscriptions', '/pricing'
+  ]) {
+    const resolved = await resolveStaticAsset(DEFAULT_WEB_ROOT, route);
+    assert.ok(resolved, `expected SPA route ${route}`);
+    assert.equal(path.basename(resolved.filePath), 'index.html');
+  }
 });
 
 test('hub serves the web UI on the same port without a secret', async () => {

@@ -164,6 +164,7 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 - **macOS（Intel）** — x64 `.dmg`，已签名并 notarize
 - **Windows 10/11** — 安装版和便携版 `.exe`，均[已签名](docs/code-signing.md)
 - **Linux x64** — `.AppImage`
+- **无 GUI／服务器** — `Token-Monitor-Headless-<version>.tar.gz`；使用 Node.js 22.13+ 与 `npm ci --omit=dev` 安装
 
 打包版会自动检查 GitHub Releases。有新版本时，界面会显示更新提示；受支持的平台也可在 设置 → 常规 中安装更新。
 
@@ -173,7 +174,7 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 
 ## 多设备同步
 
-如果需要多设备同步，把所有设备（以及没有小部件的无头代理）连接到同一个 Docker Compose Hub。在每台设备上打开小部件，在 设置 → 多设备同步 中选择 **连接到 Hub**；只有没有小部件的机器才需要运行 `npm run agent`。
+如果需要多设备同步，把所有设备（以及没有小部件的无头代理）连接到同一个 Docker Compose Hub。在每台设备上打开小部件，在 设置 → 多设备同步 中选择 **连接到 Hub**；只有没有小部件的机器才需要运行 `npm run agent`。无 GUI 安装请参阅[Headless Agent 指南](docs/headless-agent.md)，并下载 `Token-Monitor-Headless-<version>.tar.gz`。
 
 Hub 凭据已分权：viewer 令牌只读，设备令牌可读取并仅上报绑定的 Device ID，admin 令牌才能执行变更。远程连接默认必须使用 HTTPS；桌面端/agent 需显式开启可信 LAN HTTP，Android 发行版始终要求 HTTPS。
 

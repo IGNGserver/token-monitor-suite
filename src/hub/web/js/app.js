@@ -39,12 +39,15 @@ import {
   limitRemainingTone,
   clampHomeLimitAccountCount,
   modelColor,
-  HUB_ACCOUNT_PROVIDERS
+  HUB_ACCOUNT_PROVIDERS,
+  periodTokenMetrics,
+  periodActivityCounts
 } from './data.js';
 
 const UI_ICON_PATHS = Object.freeze({
   home: '<path d="M3.5 10.5 12 3l8.5 7.5v8a1 1 0 0 1-1 1h-5v-5h-5v5h-5a1 1 0 0 1-1-1z"/><path d="M8 20.5h8"/>',
   tool: '<path d="m14.7 6.3 3-3a4 4 0 0 0 1.1 4.9l-6.4 6.4-2-2 6.4-6.4a4 4 0 0 0-4.9-1.1z"/><path d="m11.4 13.6-6.7 6.7a1.4 1.4 0 0 1-2-2l6.7-6.7"/>',
+  usage: '<path d="M4 19V5M4 19h16"/><path d="m7 15 3-4 3 2 5-7"/>',
   device: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h3M16 15h.01"/>',
   model: '<path d="m12 3 2.5 5.5L20 11l-5.5 2.5L12 19l-2.5-5.5L4 11l5.5-2.5z"/>',
   project: '<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10l2 2h6.5A1.5 1.5 0 0 1 20 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 16.5z"/>',
@@ -55,6 +58,7 @@ const UI_ICON_PATHS = Object.freeze({
   trends: '<path d="M4 17 9 12l3 3 7-8"/><path d="M15 7h4v4"/>',
   subscriptions: '<path d="M5 7h14M5 12h14M5 17h8"/><path d="M17 16v4M15 18h4"/>',
   pricing: '<path d="M6 4h12M6 20h12M8 4c0 4 8 4 8 8s-8 4-8 8"/><path d="M16 4c0 4-8 4-8 8s8 4 8 8"/>',
+  management: '<path d="M4 7h16M4 12h16M4 17h10"/><path d="M17 15v6M14 18h6"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   back: '<path d="m15 5-7 7 7 7"/><path d="M8 12h12"/>',
   range: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 9h16M8 13h3M13 13h3M8 16h3"/>',
@@ -79,16 +83,27 @@ function renderStaticUiIcons() {
 }
 
 const VIEWS = [
+  { id: 'overview', icon: 'home' },
+  { id: 'usage', icon: 'usage' },
+  { id: 'devices', icon: 'device' },
+  { id: 'limits', icon: 'limits' },
+  { id: 'trends', icon: 'trends' },
+  { id: 'accounts', icon: 'accounts' },
+  { id: 'management', icon: 'management' },
+  { id: 'settings', icon: 'settings' }
+];
+
+// Keep the old identifiers in the source and in the URL resolver so existing
+// bookmarks, pinned shortcuts, and persisted preferences land on the new page
+// without keeping the old 12-item navigation visible.
+const LEGACY_VIEWS = [
   { id: 'home', icon: 'home' },
   { id: 'tool', icon: 'tool' },
   { id: 'device', icon: 'device' },
   { id: 'model', icon: 'model' },
   { id: 'project', icon: 'project' },
   { id: 'session', icon: 'session' },
-  { id: 'limits', icon: 'limits' },
-  { id: 'accounts', icon: 'accounts' },
   { id: 'status', icon: 'status' },
-  { id: 'trends', icon: 'trends' },
   { id: 'subscriptions', icon: 'subscriptions' },
   { id: 'pricing', icon: 'pricing' }
 ];
@@ -96,45 +111,83 @@ const VIEWS = [
 const PERIODS = ['today', 'month', 'allTime'];
 
 const VIEW_PATHS = Object.freeze({
-  home: '/',
-  tool: '/tool',
-  device: '/device',
-  model: '/model',
-  project: '/project',
-  session: '/session',
+  overview: '/',
+  usage: '/usage',
+  devices: '/devices',
   limits: '/limits',
   accounts: '/accounts',
-  status: '/status',
   trends: '/trends',
-  subscriptions: '/subscriptions',
-  pricing: '/pricing'
+  management: '/management',
+  settings: '/settings'
 });
 
-function viewFromLocation() {
-  const hash = window.location.hash ? window.location.hash.replace(/^#\/?/, '').trim() : '';
-  if (hash) {
-    const matched = VIEWS.find((v) => v.id === hash);
-    if (matched) return matched.id;
-  }
-  const path = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
-  for (const [id, urlPath] of Object.entries(VIEW_PATHS)) {
-    if (urlPath === path) return id;
-  }
-  // Also match plural aliases like /devices or /tools if user types it
-  if (path === '/devices') return 'device';
-  if (path === '/tools') return 'tool';
-  if (path === '/models') return 'model';
-  if (path === '/projects') return 'project';
-  if (path === '/sessions') return 'session';
-  return null;
+const LEGACY_ROUTE_ALIASES = Object.freeze({
+  '/home': { view: 'overview' },
+  '/tool': { view: 'usage', usageTab: 'tools' },
+  '/tools': { view: 'usage', usageTab: 'tools' },
+  '/model': { view: 'usage', usageTab: 'models' },
+  '/models': { view: 'usage', usageTab: 'models' },
+  '/project': { view: 'usage', usageTab: 'projects' },
+  '/projects': { view: 'usage', usageTab: 'projects' },
+  '/session': { view: 'usage', usageTab: 'sessions' },
+  '/sessions': { view: 'usage', usageTab: 'sessions' },
+  '/device': { view: 'devices' },
+  '/status': { view: 'limits', limitTab: 'health' },
+  '/subscriptions': { view: 'management', managementTab: 'subscriptions' },
+  '/pricing': { view: 'management', managementTab: 'pricing' }
+});
+
+function normalizeViewId(value) {
+  const id = String(value || '').trim();
+  if (VIEWS.some((view) => view.id === id)) return id;
+  if (!LEGACY_VIEWS.some((view) => view.id === id)) return 'overview';
+  return LEGACY_ROUTE_ALIASES[`/${id}`]?.view || 'overview';
 }
 
-function syncUrlForView(viewId, { replace = false } = {}) {
+function routeFromLocation() {
+  let path = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
+  let params = new URLSearchParams(window.location.search || '');
+  const hash = window.location.hash ? window.location.hash.replace(/^#/, '') : '';
+  if (hash) {
+    const hashUrl = hash.startsWith('/') ? hash : `/${hash}`;
+    const queryIndex = hashUrl.indexOf('?');
+    path = (queryIndex >= 0 ? hashUrl.slice(0, queryIndex) : hashUrl).replace(/\/+$/, '') || '/';
+    params = new URLSearchParams(queryIndex >= 0 ? hashUrl.slice(queryIndex + 1) : '');
+  }
+  const target = LEGACY_ROUTE_ALIASES[path]
+    || (Object.entries(VIEW_PATHS).find(([, targetPath]) => targetPath === path)
+      ? { view: Object.entries(VIEW_PATHS).find(([, targetPath]) => targetPath === path)[0] }
+      : null);
+  if (!target) return { view: 'overview' };
+  return {
+    view: target.view,
+    usageTab: ['tools', 'models', 'projects', 'sessions'].includes(params.get('tab'))
+      ? params.get('tab')
+      : target.usageTab,
+    managementTab: ['subscriptions', 'pricing'].includes(params.get('tab'))
+      ? params.get('tab')
+      : target.managementTab,
+    limitTab: params.get('tab') === 'health' || target.limitTab ? 'health' : 'limits'
+  };
+}
+
+function viewFromLocation() {
+  return routeFromLocation().view;
+}
+
+function syncUrlForView(viewId, { replace = false, tab = '' } = {}) {
   const targetPath = VIEW_PATHS[viewId] || '/';
   const currentPath = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
-  if (currentPath === targetPath && !window.location.hash) return;
   try {
-    const url = `${targetPath}${window.location.search || ''}`;
+    const params = new URLSearchParams();
+    const nextTab = tab || (viewId === 'usage' ? state?.prefs?.usageTab : viewId === 'management' ? state?.prefs?.managementTab : '');
+    if (nextTab && ((viewId === 'usage' && ['tools', 'models', 'projects', 'sessions'].includes(nextTab))
+      || (viewId === 'management' && ['subscriptions', 'pricing'].includes(nextTab)))) {
+      params.set('tab', nextTab);
+    }
+    const query = params.toString();
+    const url = `${targetPath}${query ? `?${query}` : ''}`;
+    if (currentPath === targetPath && window.location.search === (query ? `?${query}` : '') && !window.location.hash) return;
     if (replace) {
       window.history.replaceState({ view: viewId }, '', url);
     } else {
@@ -194,6 +247,9 @@ const els = {
   heroStrip: document.getElementById('heroStrip')
 };
 
+const storedPrefs = loadPrefs();
+const initialRoute = routeFromLocation();
+
 const state = {
   prefs: {
     language: 'auto',
@@ -210,8 +266,11 @@ const state = {
     selectedDeviceId: '',
     selectedToolId: '',
     deviceDetailPeriod: 'today',
-    ...loadPrefs(),
-    view: viewFromLocation() || loadPrefs().view || 'home'
+    ...storedPrefs,
+    view: initialRoute.view || viewFromLocation() || normalizeViewId(storedPrefs.view),
+    usageTab: initialRoute.usageTab || storedPrefs.usageTab || 'tools',
+    managementTab: initialRoute.managementTab || storedPrefs.managementTab || 'subscriptions',
+    limitTab: initialRoute.limitTab || storedPrefs.limitTab || 'limits'
   },
   secret: loadSecret(),
   locale: 'en',
@@ -290,7 +349,9 @@ function viewStats() {
     ...stats,
     devices: [device],
     periods: device.periods || {},
-    limits: device.limits || { providers: [] },
+    // Limits are Hub-owned account data, not per-device usage. Keep the
+    // top-level collection when a device filter is active.
+    limits: stats.limits || { providers: [] },
     projectsIncomplete: Boolean(device.allTimeProjectsOmitted || device.allTimeProjectsIncomplete)
   };
 }
@@ -504,22 +565,33 @@ function openRange(open) {
   }
 }
 
+function viewUsesUsageScope(view = state.prefs.view) {
+  return ['overview', 'usage', 'devices', 'trends'].includes(view);
+}
+
+function viewDescription(view = state.prefs.view) {
+  return tr(`page.${view}.description`);
+}
+
 function renderChrome() {
   const capabilities = state.authorization?.capabilities || state.health?.capabilities || {};
   const admin = state.authorization?.scopes?.includes('admin');
   const visibleViews = VIEWS.filter((view) => {
-    if (view.id === 'pricing') return capabilities.pricing !== false && admin;
     if (view.id === 'accounts') return capabilities.hubAccounts !== false;
+    if (view.id === 'management') return capabilities.subscriptions !== false || (capabilities.pricing !== false && admin);
     return true;
   });
-  if (!visibleViews.some((view) => view.id === state.prefs.view)) state.prefs.view = 'home';
+  if (!visibleViews.some((view) => view.id === state.prefs.view)) state.prefs.view = 'overview';
   els.primaryNav.innerHTML = visibleViews.map((view) => `
     <button type="button" class="nav-btn ${state.prefs.view === view.id ? 'active' : ''}" data-view="${view.id}">
       <span class="nav-ico">${uiIcon(view.icon)}</span>
       <span class="nav-label">${tr(`nav.${view.id}`)}</span>
     </button>
   `).join('');
-  if (els.customRangeBtn) els.customRangeBtn.classList.toggle('hidden', capabilities.usageRange === false);
+  const scoped = viewUsesUsageScope();
+  els.deviceFilter?.closest('.device-filter')?.classList.toggle('hidden', !scoped);
+  els.periodTabs?.classList.toggle('hidden', !scoped);
+  els.customRangeBtn?.classList.toggle('hidden', !scoped || capabilities.usageRange === false);
 
   els.periodTabs.innerHTML = [
     ...PERIODS.map((period) => `
@@ -538,7 +610,8 @@ function renderChrome() {
     : tr(`period.${state.prefs.period}`);
   const selectedDevice = allDevices.find((device) => device.deviceId === state.prefs.deviceFilter);
   const selectedLabel = selectedDevice ? ` · ${selectedDevice.hostname || selectedDevice.deviceId}` : '';
-  els.pageMeta.textContent = `${periodLabel} · ${devices} ${tr('stats.devices').toLowerCase()}${selectedLabel}`;
+  const scopeMeta = scoped ? `${periodLabel} · ${devices} ${tr('stats.devices').toLowerCase()}${selectedLabel}` : '';
+  els.pageMeta.textContent = [viewDescription(), scopeMeta].filter(Boolean).join(' · ');
   if (els.deviceFilter) {
     const current = state.prefs.deviceFilter || '';
     els.deviceFilter.innerHTML = [
@@ -798,7 +871,7 @@ function shareBarHtml(rows) {
 }
 
 function renderHero() {
-  const onHome = state.prefs.view === 'home';
+  const onHome = state.prefs.view === 'overview';
   if (els.heroStrip) {
     els.heroStrip.classList.toggle('hidden', !onHome);
   }
@@ -824,8 +897,11 @@ function renderCompletenessNotice(stats, periodName) {
 }
 
 function renderHistoryScopeNotice() {
-  return state.prefs.deviceFilter
-    ? `<div class="notice" role="status">${escapeHtml(tr('data.historyGlobal'))}</div>`
+  const notices = [];
+  if (state.prefs.deviceFilter) notices.push(tr('data.historyGlobal'));
+  if (state.customPeriod) notices.push(tr('usage.customRangeGlobal'));
+  return notices.length
+    ? notices.map((notice) => `<div class="notice" role="status">${escapeHtml(notice)}</div>`).join('')
     : '';
 }
 
@@ -1026,6 +1102,7 @@ function renderHome() {
   return `
     ${completeness}
     ${renderHistoryScopeNotice()}
+    ${renderUsageMetricStrip(period)}
     ${panel(tr('home.activity'), sparklineBlock, daily.length ? `${daily.length}d` : '')}
     <div class="grid-2">
       ${panel(tr('home.tools'), toolsBody, '', viewAllAction('tool'))}
@@ -1079,10 +1156,122 @@ function renderTools() {
           <h2 class="panel-title">${escapeHtml(selected.name)}</h2>
           <div class="panel-meta tiny">${tr('tools.models')}</div>
         </div>
+        ${selected.metrics ? `<div class="usage-detail-label">${escapeHtml(tr('usage.breakdown'))}</div>${renderTokenMix(selected.metrics)}` : ''}
+        <div class="usage-detail-label usage-detail-label-spaced">${escapeHtml(tr('usage.tabs.models'))}</div>
         ${models.length ? shareBarHtml(models.slice(0, 16)) : emptyHtml('empty.usage')}
       </section>
     </div>
   `;
+}
+
+function usageMetricCard(label, value, detail = '') {
+  return `<div class="usage-metric-card"><span class="summary-label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>${detail ? `<span class="row-sub">${escapeHtml(detail)}</span>` : ''}</div>`;
+}
+
+function renderUsageMetricStrip(period) {
+  const metrics = periodTokenMetrics(period);
+  const counts = periodActivityCounts(period);
+  const cacheRate = metrics.cacheHitPercent == null ? '—' : `${Math.round(metrics.cacheHitPercent)}%`;
+  return `<div class="usage-metric-strip">
+    ${usageMetricCard(tr('stats.tokens'), formatNumber(metrics.totalTokens), `${counts.tools} ${tr('usage.tabs.tools').toLowerCase()} · ${counts.models} ${tr('usage.tabs.models').toLowerCase()}`)}
+    ${usageMetricCard(tr('usage.input'), formatNumber(metrics.inputTokens), `${formatNumber(metrics.uncachedInputTokens)} ${tr('usage.uncached').toLowerCase()}`)}
+    ${usageMetricCard(tr('usage.output'), formatNumber(metrics.outputTokens))}
+    ${usageMetricCard(tr('usage.cacheRate'), cacheRate, `${formatNumber(metrics.cacheReadTokens)} ${tr('usage.cacheRead').toLowerCase()}`)}
+  </div>`;
+}
+
+function renderTokenMix(metrics = {}) {
+  const values = [
+    [tr('usage.input'), metrics.inputTokens, 'var(--accent)'],
+    [tr('usage.output'), metrics.outputTokens, 'var(--good)'],
+    [tr('usage.cacheRead'), metrics.cacheReadTokens, 'var(--warn)'],
+    [tr('usage.cacheWrite'), metrics.cacheWriteTokens, 'var(--bad)'],
+    [tr('usage.uncached'), metrics.uncachedInputTokens, 'var(--stale)']
+  ];
+  const total = Math.max(1, Number(metrics.totalTokens || 0));
+  const visible = values.filter(([, value]) => Number(value || 0) > 0);
+  if (!visible.length) return `<div class="usage-detail-empty muted tiny">${escapeHtml(tr('empty.usage'))}</div>`;
+  return `<div class="token-mix" aria-label="${escapeHtml(tr('usage.breakdown'))}">
+    ${visible.map(([label, value, color]) => {
+      const amount = Number(value || 0);
+      const percent = Math.max(2, Math.min(100, (amount / total) * 100));
+      return `<div class="token-mix-row"><div class="token-mix-head"><span>${escapeHtml(label)}</span><strong>${formatNumber(amount)}</strong></div><div class="share-meter"><span style="width:${percent}%;background:${color}"></span></div></div>`;
+    }).join('')}
+  </div>`;
+}
+
+function renderUsageSubnav() {
+  const current = ['tools', 'models', 'projects', 'sessions'].includes(state.prefs.usageTab)
+    ? state.prefs.usageTab
+    : 'tools';
+  return `<nav class="page-tabs" aria-label="${escapeHtml(tr('nav.usage'))}" role="tablist">
+    ${['tools', 'models', 'projects', 'sessions'].map((tab) => `<button type="button" role="tab" aria-selected="${current === tab ? 'true' : 'false'}" class="page-tab${current === tab ? ' active' : ''}" data-usage-tab="${tab}">${escapeHtml(tr(`usage.tabs.${tab}`))}</button>`).join('')}
+  </nav>`;
+}
+
+function usageRowSummary(row, { icon = false, detail = '' } = {}) {
+  const iconHtml = icon
+    ? `<img class="client-icon" src="${clientIconPath(row.client || row.key)}" alt="" onerror="this.style.display='none'" />`
+    : `<span class="swatch" style="background:${row.color || 'var(--accent)'}"></span>`;
+  const suffix = row.percent != null ? ` · ${Math.round(row.percent)}%` : '';
+  return `<div class="usage-table-row-main"><div class="row-main">${iconHtml}<div class="row-copy"><div class="row-name">${escapeHtml(row.name)}</div><div class="row-sub">${escapeHtml(`${row.sub || ''}${suffix}`.replace(/^ · | · $/g, ''))}</div></div></div><div class="row-metrics"><div class="row-value">${formatNumber(row.value)}</div><div class="row-cost">${formatCost(row.cost, state.prefs.currency)}</div></div>${detail ? `<span class="usage-row-chevron">${uiIcon('chevronDown')}</span>` : ''}</div>`;
+}
+
+function renderUsageMetricRows(rows, { kind, showIcon = false, emptyKey = 'empty.usage' } = {}) {
+  if (!rows.length) return renderListView([], emptyKey);
+  return `<div class="usage-table" data-usage-kind="${escapeHtml(kind || '')}">${rows.map((row) => {
+    const hasMetrics = row.metrics && row.metrics.totalTokens > 0;
+    const detail = hasMetrics ? `<div class="usage-row-detail"><div class="usage-detail-label">${escapeHtml(tr('usage.breakdown'))}</div>${renderTokenMix(row.metrics)}</div>` : '';
+    return detail
+      ? `<details class="usage-table-row"><summary>${usageRowSummary(row, { icon: showIcon, detail: true })}</summary>${detail}</details>`
+      : `<article class="usage-table-row">${usageRowSummary(row, { icon: showIcon })}</article>`;
+  }).join('')}</div>`;
+}
+
+function renderUsageModels(period) {
+  const rows = modelRows(period);
+  return panel(tr('usage.tabs.models'), renderUsageMetricRows(rows, { kind: 'model' }));
+}
+
+function renderUsageProjects(period) {
+  const projectData = projectRows(period, { incomplete: Boolean(viewStats()?.projectsIncomplete) && state.prefs.period === 'allTime' });
+  const incompleteBanner = projectData.incomplete
+    ? `<div class="notice warn" role="status">${escapeHtml(tr('projects.incomplete'))}</div>`
+    : '';
+  const rangeBanner = state.customPeriod
+    ? `<div class="notice" role="status">${escapeHtml(tr('usage.rangeDetailsUnavailable'))}</div>`
+    : '';
+  return `${rangeBanner}${incompleteBanner}${panel(tr('usage.tabs.projects'), renderUsageMetricRows(projectData.rows, { kind: 'project', emptyKey: 'empty.projects' }))}`;
+}
+
+function renderUsageSessions(period) {
+  const sessionData = sessionRows(period);
+  const truncated = sessionData.truncated
+    ? `<div class="notice" role="status">${escapeHtml(tr('sessions.truncated', { shown: sessionData.rows.length, total: sessionData.total }))}</div>`
+    : '';
+  const rangeBanner = state.customPeriod
+    ? `<div class="notice" role="status">${escapeHtml(tr('usage.rangeDetailsUnavailable'))}</div>`
+    : '';
+  const rows = sessionData.rows.map((row) => ({
+    ...row,
+    sub: `${row.sub || ''}${row.lastUsedAt ? ` · ${formatRelative(row.lastUsedAt, state.locale)}` : ''}`
+  }));
+  return `${rangeBanner}${truncated}${panel(tr('usage.tabs.sessions'), renderUsageMetricRows(rows, { kind: 'session', showIcon: true, emptyKey: 'empty.sessions' }))}`;
+}
+
+function renderUsage() {
+  const period = activePeriod();
+  const tab = ['tools', 'models', 'projects', 'sessions'].includes(state.prefs.usageTab)
+    ? state.prefs.usageTab
+    : 'tools';
+  const body = tab === 'tools'
+    ? renderTools()
+    : tab === 'models'
+      ? renderUsageModels(period)
+      : tab === 'projects'
+        ? renderUsageProjects(period)
+        : renderUsageSessions(period);
+  return `<section class="page-intro"><div><div class="eyebrow">${escapeHtml(tr('page.overview.kicker'))}</div><h2>${escapeHtml(tr('nav.usage'))}</h2><p>${escapeHtml(tr('page.usage.description'))}</p></div>${renderUsageSubnav()}</section>${renderHistoryScopeNotice()}${renderUsageMetricStrip(period)}${body}`;
 }
 
 function renderListView(rows, emptyKey, { showIcon = false } = {}) {
@@ -1126,8 +1315,26 @@ function renderDevices() {
   const selected = rows.find((row) => row.key === selectedId) || rows[0];
   const breakdown = deviceBreakdownRows(selected.raw || selected, periodKey);
   const detailPeriod = state.prefs.deviceDetailPeriod || 'today';
+  const activeDevices = rows.filter((row) => !row.stale).length;
+  const runtimes = new Set(rows.map((row) => row.agentRuntimeLabel || agentRuntimeLabel(row.agentRuntime)).filter(Boolean));
+  const fleetSummary = `<div class="usage-metric-strip device-summary-strip">
+    ${usageMetricCard(tr('devices.summary'), rows.length)}
+    ${usageMetricCard(tr('devices.live'), activeDevices)}
+    ${usageMetricCard(tr('devices.stale'), rows.length - activeDevices)}
+    ${usageMetricCard(tr('devices.runtime'), runtimes.size || '—')}
+  </div>`;
+  const detailMeta = [
+    selected.deviceId,
+    selected.receivedAt ? `${tr('devices.lastSeen')} ${formatRelative(selected.receivedAt, state.locale)}` : '',
+    selected.projectsEnabled === false ? tr('projects.incomplete') : ''
+  ].filter(Boolean).join(' · ');
+  const customRangeNotice = state.customPeriod
+    ? `<div class="notice" role="status">${escapeHtml(tr('devices.customRangeNotice'))}</div>`
+    : '';
 
   return `
+    ${customRangeNotice}
+    ${fleetSummary}
     <div class="grid-2 devices-layout">
       <section class="panel">
         <div class="panel-head"><h2 class="panel-title">${tr('devices.title')}</h2></div>
@@ -1175,6 +1382,7 @@ function renderDevices() {
             selected.stale ? tr('devices.stale') : tr('devices.live')
           ].filter(Boolean).join(' · '))}</div>
         </div>
+        ${detailMeta ? `<div class="device-detail-meta muted tiny">${escapeHtml(detailMeta)}</div>` : ''}
         <div class="toolbar-row">
           <div class="seg" role="group" aria-label="${tr('devices.period')}">
             ${segButtons([['today', tr('period.today')], ['month', tr('period.month')], ['allTime', tr('period.allTime')]], detailPeriod, 'device-period')}
@@ -1184,6 +1392,8 @@ function renderDevices() {
           <div class="summary-chip"><span class="summary-label">${tr('stats.tokens')}</span><strong>${formatNumber(breakdown.totalTokens)}</strong></div>
           <div class="summary-chip"><span class="summary-label">${tr('stats.cost')}</span><strong>${formatCost(breakdown.totalCost, state.prefs.currency)}</strong></div>
         </div>
+        <div class="usage-detail-label">${escapeHtml(tr('usage.breakdown'))}</div>
+        ${renderTokenMix(periodTokenMetrics(selected.raw?.periods?.[periodKey] || {}))}
         ${renderDeviceStatusBlocks(selected)}
         ${panel(tr('devices.tools'), shareBarHtml(breakdown.tools.slice(0, 12)) + (breakdown.tools.some((t) => t.models?.length) ? `<div class="device-tool-models">${breakdown.tools.filter((t) => t.models?.length).slice(0, 6).map((tool) => `<div class="status-block" style="margin-top:12px"><div class="row-sub">${escapeHtml(tool.name)}</div>${shareBarHtml(tool.models.slice(0, 6))}</div>`).join('')}</div>` : ''))}
         ${panel(tr('devices.models'), shareBarHtml(breakdown.models.slice(0, 12)))}
@@ -1259,6 +1469,15 @@ function renderLimits() {
   const cards = state.limitProvider
     ? allCards.filter((card) => card.provider === state.limitProvider)
     : allCards;
+  const healthy = cards.filter((card) => !card.stale && String(card.status).toLowerCase() === 'ok').length;
+  const stale = cards.filter((card) => card.stale).length;
+  const attention = Math.max(0, cards.length - healthy - stale);
+  const healthSummary = `<div class="usage-metric-strip limit-health-strip">
+    ${usageMetricCard(tr('status.accounts'), cards.length)}
+    ${usageMetricCard(tr('limits.healthy'), healthy)}
+    ${usageMetricCard(tr('limits.attention'), attention)}
+    ${usageMetricCard(tr('limits.stale'), stale)}
+  </div>`;
   const filter = `
     <div class="toolbar-row view-toolbar">
       <label class="field inline-field">
@@ -1270,7 +1489,8 @@ function renderLimits() {
       </label>
       <span class="panel-meta tiny">${tr('limits.accountsCount', { count: cards.length })}</span>
     </div>`;
-  return filter + renderLimitCards(cards);
+  const healthPanel = state.prefs.limitTab === 'health' ? renderStatus() : '';
+  return `<section class="page-intro"><div><div class="eyebrow">${escapeHtml(tr('limits.health'))}</div><h2>${escapeHtml(tr('nav.limits'))}</h2><p>${escapeHtml(tr('page.limits.description'))}</p></div></section>${healthSummary}${healthPanel}${filter}${renderLimitCards(cards)}`;
 }
 
 function renderStatus() {
@@ -1482,6 +1702,97 @@ function pricingForm(entry) {
     </div>
     <div class="drawer-actions"><button type="submit" class="primary-btn"${state.pricingSaving ? ' disabled' : ''}>${state.pricingSaving ? tr('actions.saving') : tr('actions.save')}</button></div>
   </form>`;
+}
+
+function renderManagementSubnav() {
+  const current = ['subscriptions', 'pricing'].includes(state.prefs.managementTab)
+    ? state.prefs.managementTab
+    : 'subscriptions';
+  const admin = state.authorization?.scopes?.includes('admin');
+  const pricingVisible = state.authorization?.capabilities?.pricing !== false && admin;
+  return `<nav class="page-tabs" aria-label="${escapeHtml(tr('nav.management'))}" role="tablist">
+    <button type="button" role="tab" aria-selected="${current === 'subscriptions' ? 'true' : 'false'}" class="page-tab${current === 'subscriptions' ? ' active' : ''}" data-management-tab="subscriptions">${escapeHtml(tr('management.tabs.subscriptions'))}</button>
+    ${pricingVisible ? `<button type="button" role="tab" aria-selected="${current === 'pricing' ? 'true' : 'false'}" class="page-tab${current === 'pricing' ? ' active' : ''}" data-management-tab="pricing">${escapeHtml(tr('management.tabs.pricing'))}</button>` : ''}
+  </nav>`;
+}
+
+function renderManagement() {
+  const admin = state.authorization?.scopes?.includes('admin');
+  const pricingVisible = state.authorization?.capabilities?.pricing !== false && admin;
+  const tab = state.prefs.managementTab === 'pricing' && pricingVisible ? 'pricing' : 'subscriptions';
+  if (state.prefs.managementTab !== tab) state.prefs.managementTab = tab;
+  const body = tab === 'pricing' ? renderPricing() : renderSubscriptions();
+  return `<section class="page-intro"><div><div class="eyebrow">${escapeHtml(tr('page.overview.kicker'))}</div><h2>${escapeHtml(tr('nav.management'))}</h2><p>${escapeHtml(tr('page.management.description'))}</p></div>${renderManagementSubnav()}</section>${body}`;
+}
+
+function settingsOptionList(options, selected) {
+  return options.map(([value, label]) => `<option value="${escapeHtml(value)}"${String(value) === String(selected) ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('');
+}
+
+function renderSettingsPage() {
+  const scopes = state.authorization?.scopes || [];
+  const capabilities = state.authorization?.capabilities || state.health?.capabilities || {};
+  const capabilityEntries = Object.entries(capabilities).filter(([, value]) => value !== undefined);
+  const capabilityHtml = capabilityEntries.length
+    ? `<div class="settings-capability-list">${capabilityEntries.map(([key, value]) => `<span class="badge ${value === false ? 'stale' : 'ok'}">${escapeHtml(key)} · ${value === false ? 'off' : 'on'}</span>`).join('')}</div>`
+    : `<span class="muted tiny">—</span>`;
+  const origin = window.location.origin && window.location.origin !== 'null'
+    ? window.location.origin
+    : window.location.host || 'current page';
+  const streamLabel = tr(`status.${state.stream === 'live' ? 'live' : state.stream === 'connecting' || state.stream === 'retrying' ? 'connecting' : state.stream === 'unauthorized' ? 'unauthorized' : 'offline'}`);
+  return `<section class="page-intro settings-page-intro"><div><div class="eyebrow">${escapeHtml(tr('settings.webOnly'))}</div><h2>${escapeHtml(tr('settings.pageTitle'))}</h2><p>${escapeHtml(tr('settings.pageDescription'))}</p></div></section>
+    <div class="settings-layout">
+      <form class="panel settings-form" data-web-settings-form>
+        <div class="panel-head"><h2 class="panel-title">${escapeHtml(tr('settings.webOnly'))}</h2><span class="panel-meta tiny">${escapeHtml(tr('settings.pageDescription'))}</span></div>
+        <div class="form-grid">
+          <label class="field"><span>${tr('settings.language')}</span><select name="language">${settingsOptionList([['auto', 'Auto'], ['en', 'English'], ['zh-CN', '简体中文'], ['zh-TW', '繁體中文'], ['ja', '日本語'], ['ko', '한국어']], state.prefs.language || 'auto')}</select></label>
+          <label class="field"><span>${tr('settings.theme')}</span><select name="theme">${settingsOptionList([['system', 'System'], ['light', 'Light'], ['dark', 'Dark']], state.prefs.theme || 'system')}</select></label>
+          <label class="field"><span>${tr('settings.currency')}</span><select name="currency">${settingsOptionList([['USD', 'USD'], ['CNY', 'CNY'], ['TWD', 'TWD'], ['HKD', 'HKD']], state.prefs.currency || 'USD')}</select></label>
+          <label class="field"><span>${tr('settings.homeLimitAccountCount')}</span><input name="homeLimitAccountCount" type="number" min="1" max="12" step="1" value="${clampHomeLimitAccountCount(state.prefs.homeLimitAccountCount, 3)}" /></label>
+          <label class="field field-wide"><span>${tr('settings.secret')}</span><input name="secret" type="password" autocomplete="off" spellcheck="false" value="${escapeHtml(state.secret || '')}" /></label>
+        </div>
+        <p class="muted tiny settings-form-hint">${escapeHtml(tr('settings.authHint'))}</p>
+        <div class="drawer-actions"><button type="submit" class="primary-btn">${escapeHtml(tr('settings.savePage'))}</button><button type="button" class="ghost-btn" data-web-signout>${escapeHtml(tr('settings.signOut'))}</button></div>
+      </form>
+      <div class="settings-side-stack">
+        <section class="panel settings-info-panel"><div class="panel-head"><h2 class="panel-title">${escapeHtml(tr('settings.connection'))}</h2></div><p class="muted tiny">${escapeHtml(tr('settings.connectionHint'))}</p><dl class="settings-definition-list"><div><dt>${escapeHtml(tr('settings.currentOrigin'))}</dt><dd>${escapeHtml(origin)}</dd></div><div><dt>${escapeHtml(tr('settings.role'))}</dt><dd>${escapeHtml(scopes.length ? scopes.join(' · ') : '—')}</dd></div><div><dt>${escapeHtml(tr('settings.stream'))}</dt><dd>${escapeHtml(streamLabel)}</dd></div></dl><div class="settings-capabilities"><span class="summary-label">${escapeHtml(tr('settings.capabilities'))}</span>${capabilityHtml}</div></section>
+        <section class="panel settings-info-panel"><div class="panel-head"><h2 class="panel-title">${escapeHtml(tr('settings.pwa'))}</h2></div><p class="muted tiny">${escapeHtml(pwaStatusText())}</p>${state.deferredInstall ? `<button type="button" class="ghost-btn" data-pwa-install>${escapeHtml(tr('pwa.install'))}</button>` : ''}</section>
+        <section class="panel settings-boundary-panel"><div class="panel-head"><h2 class="panel-title">${escapeHtml(tr('settings.desktopOnly'))}</h2></div><p class="muted tiny">${escapeHtml(tr('settings.desktopOnlyHint'))}</p></section>
+      </div>
+    </div>`;
+}
+
+async function saveWebSettingsForm(form) {
+  const values = new FormData(form);
+  state.prefs.language = String(values.get('language') || 'auto');
+  state.prefs.theme = String(values.get('theme') || 'system');
+  state.prefs.currency = String(values.get('currency') || 'USD');
+  state.prefs.homeLimitAccountCount = clampHomeLimitAccountCount(values.get('homeLimitAccountCount'), 3);
+  savePrefs({
+    language: state.prefs.language,
+    theme: state.prefs.theme,
+    currency: state.prefs.currency,
+    homeLimitAccountCount: state.prefs.homeLimitAccountCount
+  });
+  const nextSecret = String(values.get('secret') || '').trim();
+  const secretChanged = nextSecret !== state.secret;
+  applyTheme();
+  applyLocale();
+  if (secretChanged) {
+    const ok = await tryConnect(nextSecret, true);
+    if (!ok) return false;
+  }
+  showToast(tr('toast.saved'));
+  return true;
+}
+
+function signOutFromHub() {
+  clearSecret();
+  state.secret = '';
+  if (state.stopStream) state.stopStream();
+  state.stopStream = null;
+  setStreamStatus('offline');
+  showAuth(true);
 }
 
 function loadingHtml() {
@@ -1697,16 +2008,28 @@ function renderTrends() {
   const heatMetric = state.prefs.heatmapMetric === 'tokens' ? 'tokens' : 'cost';
   const daily = historyDaily(historySource(), state.prefs.trendsRange === 'all' ? 0 : state.prefs.trendsRange);
   const trendMetric = ['tokens', 'cost', 'activeTime'].includes(state.prefs.trendsMetric) ? state.prefs.trendsMetric : 'tokens';
+  const rangeSummary = daily.reduce((summary, day) => ({
+    tokens: summary.tokens + Number(day?.tokens || 0),
+    cost: summary.cost + Number(day?.cost || 0),
+    activeTime: summary.activeTime + Number(day?.activeTimeMs || 0)
+  }), { tokens: 0, cost: 0, activeTime: 0 });
+  const trendSummary = `<div class="usage-metric-strip trend-summary">
+    ${usageMetricCard(tr('home.activeDays'), formatNumber(daily.filter((day) => Number(day?.tokens || 0) > 0 || Number(day?.cost || 0) > 0).length))}
+    ${usageMetricCard(tr('stats.tokens'), formatNumber(rangeSummary.tokens))}
+    ${usageMetricCard(tr('stats.cost'), formatCost(rangeSummary.cost, state.prefs.currency))}
+    ${usageMetricCard(tr('home.activeTime'), formatDuration(rangeSummary.activeTime))}
+  </div>`;
   return `
     ${renderHistoryScopeNotice()}
+    ${trendSummary}
     <div class="toolbar-row">
       <div class="seg">
         <button type="button" class="seg-btn ${state.prefs.trendsStack === 'client' ? 'active' : ''}" data-stack="client">${tr('trends.stack.client')}</button>
         <button type="button" class="seg-btn ${state.prefs.trendsStack === 'model' ? 'active' : ''}" data-stack="model">${tr('trends.stack.model')}</button>
       </div>
       <div class="seg">
-        ${['7', '30', '90', 'all'].map((range) => `
-          <button type="button" class="seg-btn ${String(state.prefs.trendsRange) === range ? 'active' : ''}" data-range="${range}">${range === 'all' ? 'All' : range}</button>
+        ${['7', '30', '90', '365', 'all'].map((range) => `
+          <button type="button" class="seg-btn ${String(state.prefs.trendsRange) === range ? 'active' : ''}" data-range="${range}">${range === 'all' ? 'All' : `${range}d`}</button>
         `).join('')}
       </div>
       <div class="seg" role="group" aria-label="${tr('home.heatmapMetric')}">
@@ -1736,61 +2059,28 @@ function render() {
     return;
   }
   renderHero();
-  const period = activePeriod();
   let html;
   switch (state.prefs.view) {
-    case 'tool':
-      html = renderTools();
+    case 'usage':
+      html = renderUsage();
       break;
-    case 'device':
+    case 'devices':
       html = renderDevices();
       break;
-    case 'model':
-      html = panel(tr('nav.model'), renderListView(modelRows(period), 'empty.usage'));
-      break;
-    case 'project': {
-      const projectData = projectRows(period, { incomplete: Boolean(viewStats()?.projectsIncomplete) && state.prefs.period === 'allTime' });
-      const incompleteBanner = projectData.incomplete
-        ? `<div class="notice warn" style="margin-bottom:12px">${escapeHtml(tr('projects.incomplete'))}</div>`
-        : '';
-      html = panel(tr('nav.project'), incompleteBanner + renderListView(projectData.rows, 'empty.projects'));
-      break;
-    }
-    case 'session': {
-      const sessionData = sessionRows(period);
-      const truncated = sessionData.truncated
-        ? `<div class="notice" style="margin-bottom:12px">${escapeHtml(tr('sessions.truncated', { shown: sessionData.rows.length, total: sessionData.total }))}</div>`
-        : '';
-      html = panel(
-        tr('nav.session'),
-        truncated + renderListView(
-          sessionData.rows.map((row) => ({
-            ...row,
-            sub: `${row.sub || ''}${row.lastUsedAt ? ` · ${formatRelative(row.lastUsedAt, state.locale)}` : ''}`
-          })),
-          'empty.sessions',
-          { showIcon: true }
-        )
-      );
-      break;
-    }
     case 'limits':
       html = renderLimits();
       break;
     case 'accounts':
-      html = renderAccounts();
-      break;
-    case 'status':
-      html = renderStatus();
+      html = renderAccountsPage();
       break;
     case 'trends':
       html = renderTrends();
       break;
-    case 'subscriptions':
-      html = renderSubscriptions();
+    case 'management':
+      html = renderManagement();
       break;
-    case 'pricing':
-      html = renderPricing();
+    case 'settings':
+      html = renderSettingsPage();
       break;
     default:
       html = renderHome();
@@ -1834,7 +2124,7 @@ function applyStatsSnapshot(stats) {
   state.error = null;
   if (historyChanged) {
     state.history = null;
-    if (state.prefs.view === 'home' || state.prefs.view === 'trends') {
+    if (state.prefs.view === 'overview' || state.prefs.view === 'trends') {
       void ensureHistory({ force: true }).then(() => render());
     }
   }
@@ -1916,7 +2206,7 @@ async function loadSubscriptions({ force = false, preserveDraft = false } = {}) 
         state.subscriptionsLoading = false;
         state.managementControllers.subscriptions = null;
         state.managementPromises.subscriptions = null;
-        if (state.prefs.view === 'subscriptions') render();
+        if (state.prefs.view === 'management' && state.prefs.managementTab === 'subscriptions') render();
       }
     }
   })();
@@ -1946,7 +2236,7 @@ async function loadPricing({ force = false } = {}) {
         state.pricingLoading = false;
         state.managementControllers.pricing = null;
         state.managementPromises.pricing = null;
-        if (state.prefs.view === 'pricing') render();
+        if (state.prefs.view === 'management' && state.prefs.managementTab === 'pricing') render();
       }
     }
   })();
@@ -2295,6 +2585,10 @@ function renderAccounts() {
     : '';
 
   return `${panel(tr('accounts.title'), `<div class="summary-grid account-summary">${summary}</div>${list}`)}${management}`;
+}
+
+function renderAccountsPage() {
+  return `<section class="page-intro"><div><div class="eyebrow">${escapeHtml(tr('page.overview.kicker'))}</div><h2>${escapeHtml(tr('nav.accounts'))}</h2><p>${escapeHtml(tr('page.accounts.description'))}</p></div></section>${renderAccounts()}`;
 }
 
 function setAccountProviderMenuOpen(open) {
@@ -2802,33 +3096,52 @@ function clearCustomRange() {
   render();
 }
 
-function switchView(viewId, { updateHistory = true, replace = false } = {}) {
-  const target = String(viewId || 'home').trim();
-  const validView = VIEWS.some((v) => v.id === target) ? target : 'home';
-  if (state.prefs.view === validView && updateHistory) {
-    syncUrlForView(validView, { replace: true });
-    return;
-  }
+function switchView(viewId, { updateHistory = true, replace = false, tab = '' } = {}) {
+  const target = String(viewId || 'overview').trim().replace(/^\/+/, '');
+  const legacy = LEGACY_ROUTE_ALIASES[`/${target}`];
+  const validView = legacy?.view || normalizeViewId(target);
+  const nextUsageTab = tab || legacy?.usageTab || state.prefs.usageTab;
+  const nextManagementTab = tab || legacy?.managementTab || state.prefs.managementTab;
+  const nextLimitTab = tab || legacy?.limitTab || state.prefs.limitTab;
+  const usageTab = ['tools', 'models', 'projects', 'sessions'].includes(nextUsageTab) ? nextUsageTab : 'tools';
+  const managementTab = ['subscriptions', 'pricing'].includes(nextManagementTab) ? nextManagementTab : 'subscriptions';
+  const limitTab = nextLimitTab === 'health' ? 'health' : 'limits';
+  const changed = state.prefs.view !== validView
+    || (validView === 'usage' && state.prefs.usageTab !== usageTab)
+    || (validView === 'management' && state.prefs.managementTab !== managementTab)
+    || (validView === 'limits' && state.prefs.limitTab !== limitTab);
   state.prefs.view = validView;
-  savePrefs({ view: validView });
+  if (validView === 'usage') state.prefs.usageTab = usageTab;
+  if (validView === 'management') state.prefs.managementTab = managementTab;
+  if (validView === 'limits') state.prefs.limitTab = limitTab;
+  savePrefs({
+    view: validView,
+    usageTab: state.prefs.usageTab,
+    managementTab: state.prefs.managementTab,
+    limitTab: state.prefs.limitTab
+  });
   if (updateHistory) {
-    syncUrlForView(validView, { replace });
+    syncUrlForView(validView, { replace: replace || !changed, tab: validView === 'usage' ? usageTab : validView === 'management' ? managementTab : '' });
   }
   openNav(false);
-  if (validView === 'subscriptions') void loadSubscriptions().then(() => render());
-  if (validView === 'pricing') void loadPricing().then(() => render());
+  if (validView === 'management' && state.prefs.managementTab === 'subscriptions') void loadSubscriptions().then(() => render());
+  if (validView === 'management' && state.prefs.managementTab === 'pricing') void loadPricing().then(() => render());
   if (validView === 'accounts') void loadAccounts().then(() => render());
-  if (validView === 'trends' || validView === 'home') {
+  if (validView === 'trends' || validView === 'overview') {
     void ensureHistory().then(() => render());
     return;
   }
+  if (!changed && !updateHistory) return;
   render();
 }
 
 function bindEvents() {
   window.addEventListener('popstate', () => {
-    const locView = viewFromLocation() || 'home';
-    switchView(locView, { updateHistory: false });
+    const route = routeFromLocation();
+    switchView(route.view, {
+      updateHistory: false,
+      tab: route.usageTab || route.managementTab || route.limitTab
+    });
   });
 
   els.primaryNav.addEventListener('click', (event) => {
@@ -2905,6 +3218,23 @@ function bindEvents() {
   });
 
   els.content.addEventListener('click', (event) => {
+    const usageTab = event.target.closest('[data-usage-tab]');
+    if (usageTab) {
+      state.prefs.usageTab = ['tools', 'models', 'projects', 'sessions'].includes(usageTab.dataset.usageTab)
+        ? usageTab.dataset.usageTab
+        : 'tools';
+      savePrefs({ usageTab: state.prefs.usageTab });
+      switchView('usage', { tab: state.prefs.usageTab });
+      return;
+    }
+    const managementTab = event.target.closest('[data-management-tab]');
+    if (managementTab) {
+      const nextTab = managementTab.dataset.managementTab === 'pricing' ? 'pricing' : 'subscriptions';
+      state.prefs.managementTab = nextTab;
+      savePrefs({ managementTab: nextTab });
+      switchView('management', { tab: nextTab });
+      return;
+    }
     const jumpView = event.target.closest('[data-jump-view]');
     if (jumpView) {
       const view = jumpView.dataset.jumpView;
@@ -2916,7 +3246,20 @@ function bindEvents() {
         state.prefs.selectedDeviceId = jumpView.dataset.jumpDevice;
         savePrefs({ selectedDeviceId: state.prefs.selectedDeviceId });
       }
-      switchView(view);
+      switchView(view, { tab: jumpView.dataset.jumpUsageTab || '' });
+      return;
+    }
+    const webSignOut = event.target.closest('[data-web-signout]');
+    if (webSignOut) {
+      signOutFromHub();
+      return;
+    }
+    const pwaInstall = event.target.closest('[data-pwa-install]');
+    if (pwaInstall) {
+      if (!state.deferredInstall) return;
+      const promptEvent = state.deferredInstall;
+      state.deferredInstall = null;
+      void promptEvent.prompt().then(() => promptEvent.userChoice).catch(() => {}).finally(() => refreshPwaUi());
       return;
     }
     const retryDashboard = event.target.closest('[data-retry-dashboard]');
@@ -3240,6 +3583,14 @@ function bindEvents() {
   });
 
   els.content.addEventListener('submit', (event) => {
+    const webSettingsForm = event.target.closest('[data-web-settings-form]');
+    if (webSettingsForm) {
+      event.preventDefault();
+      void saveWebSettingsForm(webSettingsForm).catch((error) => {
+        showToast(error.message || tr('error.generic'));
+      });
+      return;
+    }
     const accountForm = event.target.closest('[data-account-form]');
     if (accountForm) {
       event.preventDefault();
@@ -3407,12 +3758,8 @@ function bindEvents() {
     showToast(tr('toast.saved'));
   });
   els.signOutBtn.addEventListener('click', () => {
-    clearSecret();
-    state.secret = '';
-    if (state.stopStream) state.stopStream();
-    setStreamStatus('offline');
     openSettings(false);
-    showAuth(true);
+    signOutFromHub();
   });
 
   els.authForm.addEventListener('submit', async (event) => {

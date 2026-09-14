@@ -164,6 +164,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 - **macOS (Intel)** — x64 `.dmg`、署名および notarize 済み
 - **Windows 10/11** — インストーラー版とポータブル版の `.exe`、[署名済み](docs/code-signing.md)
 - **Linux x64** — `.AppImage`
+- **GUI なし／サーバー** — `Token-Monitor-Headless-<version>.tar.gz`。Node.js 22.13+ と `npm ci --omit=dev` でインストール
 
 パッケージ版は GitHub Releases を自動確認します。新しいバージョンがある場合は画面に更新インジケーターが表示され、対応プラットフォームでは 設定 → 一般 からもインストールできます。
 
@@ -173,7 +174,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 
 ## マルチデバイス同期
 
-マルチデバイス同期を使う場合は、すべてのデバイス（ウィジェットのない headless agent を含む）を同じ Docker Compose Hub に接続します。各デバイスでウィジェットを開き、設定 → マルチデバイス同期で **Hub に接続** を選びます。ウィジェットのないマシンでだけ `npm run agent` を実行してください。
+マルチデバイス同期を使う場合は、すべてのデバイス（ウィジェットのない headless agent を含む）を同じ Docker Compose Hub に接続します。各デバイスでウィジェットを開き、設定 → マルチデバイス同期で **Hub に接続** を選びます。ウィジェットのないマシンでだけ `npm run agent` を実行してください。GUI なしの環境では [Headless Agent ガイド](docs/headless-agent.md) と `Token-Monitor-Headless-<version>.tar.gz` を利用できます。
 
 この一人用プロジェクトでは、`TOKEN_MONITOR_SECRET` が全デバイスで使う唯一の Hub キーです。読み取り、ingest、管理操作（手動追加した quota アカウントを含む）をすべて許可します。古い分離型の admin/viewer/device 認証情報は互換モードとして残っています。リモート接続はデフォルトで HTTPS が必要です。デスクトップ/agent の HTTP は信頼できる LAN を明示的に許可した場合だけ、Android リリースビルドは常に HTTPS を使います。
 

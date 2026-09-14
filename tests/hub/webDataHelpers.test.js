@@ -78,6 +78,22 @@ test('hub web app wires status, heatmap, and active-days controls', () => {
   assert.match(app, /new AbortController\(/);
 });
 
+test('hub web navigation exposes the new page model and compatibility routes', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/hub/web/js/app.js'), 'utf8');
+  for (const view of ['overview', 'usage', 'devices', 'limits', 'trends', 'accounts', 'management', 'settings']) {
+    assert.match(app, new RegExp(`id: '${view}'`));
+  }
+  assert.match(app, /const LEGACY_ROUTE_ALIASES/);
+  assert.match(app, /function renderUsage\(/);
+  assert.match(app, /function renderManagement\(/);
+  assert.match(app, /function renderSettingsPage\(/);
+  assert.match(app, /function renderAccountsPage\(/);
+  assert.match(app, /data-usage-tab/);
+  assert.match(app, /data-management-tab/);
+  assert.match(app, /usage\.customRangeGlobal/);
+  assert.match(app, /\['7', '30', '90', '365', 'all'\]/);
+});
+
 test('hub account UI keeps the shared form system and reports OAuth failures', () => {
   const app = fs.readFileSync(path.join(__dirname, '../../src/hub/web/js/app.js'), 'utf8');
   const index = fs.readFileSync(path.join(__dirname, '../../src/hub/web/index.html'), 'utf8');
@@ -270,6 +286,36 @@ test('deviceBreakdownRows includes nested client models', () => {
   }, 'today');
   assert.equal(breakdown.tools[0].models[0].key, 'gpt-5');
   assert.equal(breakdown.tools[0].models[0].value, 100);
+});
+
+test('usage rows expose desktop-aligned token mix fields', () => {
+  const { periodTokenMetrics, toolRows, modelRows } = dataApi;
+  const period = {
+    totalTokens: 1000,
+    outputTokens: 100,
+    cacheReadTokens: 400,
+    cacheWriteTokens: 50,
+    clients: { codex: 700 },
+    clientCacheReads: { codex: 300 },
+    clientCacheWrites: { codex: 20 },
+    clientOutputs: { codex: 80 },
+    models: { 'gpt-5': 700 },
+    modelCacheReads: { 'gpt-5': 300 },
+    modelCacheWrites: { 'gpt-5': 20 },
+    modelOutputs: { 'gpt-5': 80 }
+  };
+  assert.deepEqual(periodTokenMetrics(period), {
+    totalTokens: 1000,
+    inputTokens: 900,
+    outputTokens: 100,
+    cacheReadTokens: 400,
+    cacheWriteTokens: 50,
+    uncachedInputTokens: 450,
+    cacheHitPercent: 400 / 900 * 100
+  });
+  assert.equal(toolRows(period)[0].metrics.cacheReadTokens, 300);
+  assert.equal(toolRows(period)[0].metrics.totalTokens, 700);
+  assert.equal(modelRows(period)[0].metrics.outputTokens, 80);
 });
 
 test('statusRows marks health from stale/status', () => {

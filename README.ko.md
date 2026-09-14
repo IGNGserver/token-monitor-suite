@@ -164,6 +164,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 - **macOS (Intel)** — x64 `.dmg`, 서명 및 notarize 완료
 - **Windows 10/11** — 설치용 및 휴대용 `.exe`, [서명됨](docs/code-signing.md)
 - **Linux x64** — `.AppImage`
+- **GUI 없는 서버** — `Token-Monitor-Headless-<version>.tar.gz`; Node.js 22.13+ 및 `npm ci --omit=dev`로 설치
 
 패키지 빌드는 GitHub Releases를 자동 확인합니다. 새 버전이 있으면 화면에 업데이트 표시가 나타나며, 지원되는 플랫폼에서는 설정 → 일반에서도 설치할 수 있습니다.
 
@@ -173,7 +174,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 
 ## 멀티 디바이스 동기화
 
-멀티 디바이스 동기화를 사용하려면 모든 기기(위젯이 없는 headless agent 포함)를 같은 Docker Compose Hub에 연결합니다. 각 기기에서 위젯을 열고 설정 → 멀티 디바이스 동기화에서 **Hub에 연결**을 선택하세요. 위젯이 없는 기기에서만 `npm run agent`를 실행하면 됩니다.
+멀티 디바이스 동기화를 사용하려면 모든 기기(위젯이 없는 headless agent 포함)를 같은 Docker Compose Hub에 연결합니다. 각 기기에서 위젯을 열고 설정 → 멀티 디바이스 동기화에서 **Hub에 연결**을 선택하세요. 위젯이 없는 기기에서만 `npm run agent`를 실행하면 됩니다. GUI가 없는 환경에서는 [Headless Agent 가이드](docs/headless-agent.md)와 `Token-Monitor-Headless-<version>.tar.gz`를 사용하세요.
 
 이 1인용 프로젝트에서는 `TOKEN_MONITOR_SECRET`가 모든 기기에서 사용하는 유일한 Hub 키입니다. 읽기, 업로드, 수동으로 추가한 quota 계정을 포함한 관리자 작업을 모두 허용합니다. 이전의 분리된 admin/viewer/device 자격 증명은 호환 모드로만 남아 있습니다. 원격 연결은 기본적으로 HTTPS가 필요합니다. 데스크톱/agent의 HTTP는 신뢰할 수 있는 LAN을 명시적으로 허용한 경우에만 사용할 수 있고, Android 릴리스 빌드는 항상 HTTPS를 요구합니다.
 

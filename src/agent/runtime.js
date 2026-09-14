@@ -1,14 +1,20 @@
 'use strict';
 
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
-const { createOrderedSink } = require('../shared/orderedSink');
+const {
+  createSyncUploadSink,
+  withSyncUploadMetadata
+} = require('../shared/syncUploadSink');
 
 function createAgentDeviceRuntime(options = {}, deps = {}, overrides = {}) {
   const makeDeviceRuntime = deps.createDeviceRuntime || createDeviceRuntime;
-  const makeOrderedSink = deps.createOrderedSink || createOrderedSink;
+  const makeSyncUploadSink = deps.createSyncUploadSink || createSyncUploadSink;
   const sink = overrides.sink === undefined
-    ? makeOrderedSink({
-        send: options.deliver
+    ? makeSyncUploadSink({
+        upload: options.deliver,
+        intervalMs: options.syncUploadIntervalMs,
+        flushTimeoutMs: options.uploadTimeoutMs,
+        onError: options.uploadOnError
       })
     : overrides.sink;
 
@@ -53,8 +59,8 @@ async function runAgentOnce(options = {}, deps = {}) {
     usageOptions,
     sink: dryRun ? null : undefined,
     onRecord(record, meta) {
-      latestRecord = record;
-      options.onRecord?.(record, meta);
+      latestRecord = withSyncUploadMetadata(record, options.syncUploadIntervalMs);
+      options.onRecord?.(latestRecord, meta);
       if (meta.source === 'usage' && !usageSettled) {
         usageSettled = true;
         resolveUsage(record);
@@ -66,7 +72,13 @@ async function runAgentOnce(options = {}, deps = {}) {
   try {
     await usageReady;
     if (dryRun && latestRecord) await options.deliver?.(latestRecord);
-    await runtime.flush();
+    const flushResult = await runtime.flush();
+    if (flushResult?.ok === false) {
+      const error = new Error(`headless upload failed (${flushResult.code || 'upload_failed'})`);
+      if (flushResult.status !== undefined && flushResult.status !== null) error.status = flushResult.status;
+      error.code = flushResult.code || 'upload_failed';
+      throw error;
+    }
     return latestRecord;
   } finally {
     runtime.stop();

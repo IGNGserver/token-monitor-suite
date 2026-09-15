@@ -1119,7 +1119,6 @@ function renderHome() {
   return `
     ${completeness}
     ${renderHistoryScopeNotice()}
-    ${renderUsageMetricStrip(period)}
     ${panel(tr('home.activity'), sparklineBlock, daily.length ? `${daily.length}d` : '')}
     <div class="grid-2">
       ${panel(tr('home.tools'), toolsBody, '', viewAllAction('tool'))}
@@ -2557,10 +2556,10 @@ function renderAccounts() {
       </div>
     </div>
     <div class="form-grid">
-      <label class="field">
+      <div class="field">
         <span>${tr('accounts.provider')}</span>
         ${providerSelectHtml}
-      </label>
+      </div>
       <label class="field">
         <span>${tr('accounts.name')}</span>
         <input name="name" required value="${accountField(editing, 'name')}" placeholder="${currentProvider}-1" maxlength="128" />
@@ -3341,11 +3340,13 @@ function bindEvents() {
     }
     const accountProviderTrigger = event.target.closest('[data-account-provider-trigger]');
     if (accountProviderTrigger) {
+      event.preventDefault();
       setAccountProviderMenuOpen(!state.accountProviderMenuOpen);
       return;
     }
     const accountProviderOption = event.target.closest('[data-account-provider-option]');
     if (accountProviderOption) {
+      event.preventDefault();
       const provider = String(accountProviderOption.dataset.accountProviderOption || '').trim().toLowerCase();
       const previousProvider = state.accountSelectedProvider;
       state.accountSelectedProvider = provider || 'deepseek';

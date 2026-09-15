@@ -1626,12 +1626,13 @@ html[data-theme="dark"] .heat.heat-cost.lvl-4 { fill: rgba(251, 191, 36, 0.92); 
 .usage-metric-card {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
   padding: 14px 16px;
-  border-left: 2px solid var(--accent);
-  background: color-mix(in srgb, var(--bg-elevated) 86%, var(--accent-soft));
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--text) 5%, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
 }
 .usage-metric-card strong {
   font-family: var(--mono);
@@ -1640,9 +1641,9 @@ html[data-theme="dark"] .heat.heat-cost.lvl-4 { fill: rgba(251, 191, 36, 0.92); 
   font-variant-numeric: tabular-nums;
 }
 .usage-metric-card .row-sub { overflow: hidden; text-overflow: ellipsis; }
-.limit-health-strip .usage-metric-card:nth-child(2) { border-color: var(--good); }
-.limit-health-strip .usage-metric-card:nth-child(3) { border-color: var(--warn); }
-.limit-health-strip .usage-metric-card:nth-child(4) { border-color: var(--stale); }
+.limit-health-strip .usage-metric-card:nth-child(2) strong { color: var(--good); }
+.limit-health-strip .usage-metric-card:nth-child(3) strong { color: var(--warn); }
+.limit-health-strip .usage-metric-card:nth-child(4) strong { color: var(--stale); }
 .usage-detail-label {
   margin: 0 0 8px;
   color: var(--muted);

@@ -180,9 +180,16 @@ function syncUrlForView(viewId, { replace = false, tab = '' } = {}) {
   const currentPath = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
   try {
     const params = new URLSearchParams();
-    const nextTab = tab || (viewId === 'usage' ? state?.prefs?.usageTab : viewId === 'management' ? state?.prefs?.managementTab : '');
+    const nextTab = tab || (viewId === 'usage'
+      ? state?.prefs?.usageTab
+      : viewId === 'management'
+        ? state?.prefs?.managementTab
+        : viewId === 'limits'
+          ? (state?.prefs?.limitTab === 'health' ? 'health' : '')
+          : '');
     if (nextTab && ((viewId === 'usage' && ['tools', 'models', 'projects', 'sessions'].includes(nextTab))
-      || (viewId === 'management' && ['subscriptions', 'pricing'].includes(nextTab)))) {
+      || (viewId === 'management' && ['subscriptions', 'pricing'].includes(nextTab))
+      || (viewId === 'limits' && nextTab === 'health'))) {
       params.set('tab', nextTab);
     }
     const query = params.toString();
@@ -569,6 +576,12 @@ function viewUsesUsageScope(view = state.prefs.view) {
   return ['overview', 'usage', 'devices', 'trends'].includes(view);
 }
 
+function viewKicker(view = state.prefs.view) {
+  if (view === 'settings') return tr('settings.webOnly');
+  if (view === 'limits') return tr('limits.health');
+  return tr('page.overview.kicker');
+}
+
 function viewDescription(view = state.prefs.view) {
   return tr(`page.${view}.description`);
 }
@@ -611,7 +624,11 @@ function renderChrome() {
   const selectedDevice = allDevices.find((device) => device.deviceId === state.prefs.deviceFilter);
   const selectedLabel = selectedDevice ? ` · ${selectedDevice.hostname || selectedDevice.deviceId}` : '';
   const scopeMeta = scoped ? `${periodLabel} · ${devices} ${tr('stats.devices').toLowerCase()}${selectedLabel}` : '';
-  els.pageMeta.textContent = [viewDescription(), scopeMeta].filter(Boolean).join(' · ');
+  const desc = viewDescription();
+  const kicker = viewKicker();
+  els.pageMeta.textContent = scoped
+    ? [desc, scopeMeta].filter(Boolean).join(' · ')
+    : (kicker ? `${kicker} · ${desc}` : desc);
   if (els.deviceFilter) {
     const current = state.prefs.deviceFilter || '';
     els.deviceFilter.innerHTML = [
@@ -1000,7 +1017,7 @@ function renderHome() {
     ? `<div class="stack">${models.map((row) => {
         const pct = Math.round((row.value / totalTokens) * 100);
         return `
-          <button type="button" class="home-interactive-row" data-jump-view="model">
+          <button type="button" class="home-interactive-row" data-jump-view="model" data-jump-usage-tab="models">
             <div class="row">
               <div class="row-main">
                 <span class="swatch" style="background:${row.color}"></span>
@@ -2040,7 +2057,7 @@ function renderTrends() {
       </div>
     </div>
     ${panel(tr('nav.trends'), renderStackedBars(daily, state.prefs.trendsStack, trendMetric))}
-    ${panel(tr('home.heatmap'), renderHeatmap(historyDaily(historySource(), 90), heatMetric))}
+    ${panel(tr('home.heatmap'), renderHeatmap(daily, heatMetric))}
   `;
 }
 
@@ -3121,7 +3138,10 @@ function switchView(viewId, { updateHistory = true, replace = false, tab = '' } 
     limitTab: state.prefs.limitTab
   });
   if (updateHistory) {
-    syncUrlForView(validView, { replace: replace || !changed, tab: validView === 'usage' ? usageTab : validView === 'management' ? managementTab : '' });
+    syncUrlForView(validView, {
+      replace: replace || !changed,
+      tab: validView === 'usage' ? usageTab : validView === 'management' ? managementTab : (validView === 'limits' && limitTab === 'health' ? 'health' : '')
+    });
   }
   openNav(false);
   if (validView === 'management' && state.prefs.managementTab === 'subscriptions') void loadSubscriptions().then(() => render());
@@ -3681,19 +3701,15 @@ function bindEvents() {
     refreshPwaUi();
   });
 
-  const openSettingsAndCloseNav = () => {
+  const navigateToSettingsAndCloseNav = () => {
     openNav(false);
-    openSettings(true);
+    switchView('settings');
   };
-  els.settingsOpen?.setAttribute('aria-controls', 'settingsDrawer');
-  els.settingsOpen?.setAttribute('aria-expanded', 'false');
-  els.settingsOpenTop?.setAttribute('aria-controls', 'settingsDrawer');
-  els.settingsOpenTop?.setAttribute('aria-expanded', 'false');
   els.customRangeBtn?.setAttribute('aria-controls', 'rangePopover');
   els.customRangeBtn?.setAttribute('aria-expanded', 'false');
-  els.settingsOpen.addEventListener('click', openSettingsAndCloseNav);
+  els.settingsOpen?.addEventListener('click', navigateToSettingsAndCloseNav);
   if (els.settingsOpenTop) {
-    els.settingsOpenTop.addEventListener('click', openSettingsAndCloseNav);
+    els.settingsOpenTop.addEventListener('click', navigateToSettingsAndCloseNav);
   }
   els.settingsDrawer.querySelectorAll('[data-close-settings]').forEach((el) => {
     el.addEventListener('click', () => openSettings(false));

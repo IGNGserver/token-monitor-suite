@@ -86,7 +86,7 @@ function composeReleaseNotes(template, generatedNotes, { repository = '', direct
 }
 
 function fullChangelogRange(template) {
-  const matches = [...template.matchAll(/^<summary><strong>Full Changelog:<\/strong> <a href="https:\/\/github\.com\/Javis603\/token-monitor\/compare\/([^"\s]+)">([^<]+)<\/a><\/summary>$/gm)];
+  const matches = [...template.matchAll(/^<summary><strong>Full Changelog:<\/strong> <a href="https:\/\/github\.com\/(?:IGNGserver\/token-monitor-suite|Javis603\/token-monitor)\/compare\/([^"\s]+)">([^<]+)<\/a><\/summary>$/gm)];
   if (matches.length !== 1) {
     throw new Error(`expected exactly one versioned Full Changelog link, found ${matches.length}`);
   }

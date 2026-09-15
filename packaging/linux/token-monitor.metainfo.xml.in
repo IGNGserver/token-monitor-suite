@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.javis.tokenmonitor.desktop</id>
+  <id>com.igng.tokenmonitor.desktop</id>
   <name>Token Monitor</name>
-  <summary>Live token and cost widget for AI coding tools</summary>
+  <summary>Live token usage and cost monitor for AI coding agents</summary>
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
-  <developer id="com.javis.tokenmonitor">
+  <developer id="com.igng.tokenmonitor">
     <name>IGNGserver</name>
   </developer>
   <description>

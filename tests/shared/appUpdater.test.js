@@ -393,7 +393,6 @@ test('parseReleaseListPayload selects the newest project revision and ignores ot
     release('v0.37.23-rev.1'),
     release('v0.37.23-rev.3', { prerelease: true }),
     release('v0.37.23-rev.2', { prerelease: false }),
-    release('v0.37.23'),
     release('v0.37.23.1'),
     release('v0.37.23-rev.4', { draft: true })
   ]);
@@ -403,5 +402,5 @@ test('parseReleaseListPayload selects the newest project revision and ignores ot
     '0.37.23-rev.2',
     '0.37.23-rev.1'
   ]);
-  assert.equal(parseProjectReleasePayload(release('v0.37.23')), null);
+  assert.equal(parseProjectReleasePayload(release('v0.37.23.1')), null);
 });

@@ -299,7 +299,7 @@ if (require.main === module) {
     appPath,
     targetArch: process.env.TOKEN_MONITOR_WIDGET_ARCH || process.arch,
     appGroup: process.env.TOKEN_MONITOR_APP_GROUP || 'group.com.example.tokenmonitor',
-    widgetBundleId: process.env.TOKEN_MONITOR_WIDGET_BUNDLE_ID || 'com.javis.tokenmonitor.widget',
+    widgetBundleId: process.env.TOKEN_MONITOR_WIDGET_BUNDLE_ID || 'com.igng.tokenmonitor.widget',
     distributionBuild: process.env.TOKEN_MONITOR_WIDGET_DISTRIBUTION === '1',
     localDevelopmentSigning: process.env.TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING === '1',
     developmentTeam: process.env.DEVELOPMENT_TEAM,

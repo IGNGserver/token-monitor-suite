@@ -18,7 +18,7 @@ android {
     applicationId = "com.igng.tokenmonitor.android"
     minSdk = 26
     targetSdk = 36
-    val releaseVersion = providers.gradleProperty("tokenMonitorVersion").orElse("0.45.0-rev.31").get()
+    val releaseVersion = providers.gradleProperty("tokenMonitorVersion").orElse("0.45.0-rev.32").get()
     versionCode = releaseVersionCode(releaseVersion)
     versionName = releaseVersion
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -54,16 +54,19 @@ android {
 }
 
 private fun releaseVersionCode(version: String): Int {
-  val match = Regex("^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)-rev\\.([1-9]\\d*)$").matchEntire(version)
-    ?: error("Android release version must match <major>.<minor>.<patch>-rev.<revision>: $version")
+  val match = Regex("^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-rev\\.([1-9]\\d*))?$").matchEntire(version)
+    ?: error("Android release version must match <major>.<minor>.<patch>[-rev.<revision>]: $version")
   val major = match.groupValues[1].toLongOrNull()
     ?: error("Android release major version is too large: $version")
   val minor = match.groupValues[2].toLongOrNull()
     ?: error("Android release minor version is too large: $version")
   val patch = match.groupValues[3].toLongOrNull()
     ?: error("Android release patch version is too large: $version")
-  val revision = match.groupValues[4].toLongOrNull()
-    ?: error("Android release revision is too large: $version")
+  val revision = if (match.groupValues[4].isNotEmpty()) {
+    match.groupValues[4].toLongOrNull() ?: error("Android release revision is too large: $version")
+  } else {
+    0L
+  }
   val baseVersionCode = major * 10000L + minor * 100L + patch
   val versionCode = baseVersionCode * 10000L + revision
   require(versionCode in 1..Int.MAX_VALUE.toLong()) {

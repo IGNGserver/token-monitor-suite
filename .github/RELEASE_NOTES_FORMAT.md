@@ -78,7 +78,7 @@ each language block.
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/vPREVIOUS...vCURRENT">vPREVIOUS...vCURRENT</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/vPREVIOUS...vCURRENT">vPREVIOUS...vCURRENT</a></summary>
 
 <!-- github-generated-release-notes -->
 

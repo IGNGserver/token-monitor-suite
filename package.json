@@ -1,7 +1,7 @@
 {
   "name": "token-monitor",
   "productName": "Token Monitor",
-  "version": "0.45.0-rev.31",
+  "version": "0.45.0-rev.32",
   "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
   "main": "src/electron/main.js",
   "scripts": {
@@ -39,7 +39,7 @@
     "verify:product-scope": "node scripts/verify-product-scope.js"
   },
   "build": {
-    "appId": "com.javis.tokenmonitor",
+    "appId": "com.igng.tokenmonitor",
     "productName": "Token Monitor",
     "directories": {
       "output": "dist"
@@ -147,7 +147,7 @@
     "local-first",
     "self-hosted"
   ],
-  "author": "Javis",
+  "author": "IGNGserver",
   "license": "MIT",
   "repository": {
     "type": "git",

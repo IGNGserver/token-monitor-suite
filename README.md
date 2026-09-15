@@ -301,11 +301,12 @@ Issues and PRs are welcome. Project conventions, architecture notes, and the com
 
 - [tokscale](https://github.com/junhoyeo/tokscale) for log parsing and token accounting.
 - [CodexBar](https://github.com/steipete/CodexBar) for AI Tool Limits research.
+- [Token Monitor](https://github.com/Javis603/token-monitor) by [@Javis](https://github.com/Javis603) for the initial desktop architecture and inspiration.
 - **[Code signing policy](docs/code-signing.md):** Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
 
-## Token Monitor Suite additions
+## Token Monitor Suite
 
-This repository keeps the upstream desktop collector and adds the project-specific deployment surfaces:
+This repository is an independent suite providing full cross-platform coverage and deployment surfaces:
 
 - **Claude Desktop Local Agent / Cowork** usage and session details.
 - **Android client** for viewing synced usage from the MySQL-backed Docker Compose Hub.
@@ -314,4 +315,4 @@ This repository keeps the upstream desktop collector and adds the project-specif
 
 ## License
 
-[MIT](LICENSE) © [@Javis](https://github.com/Javis603)
+[MIT](LICENSE) © [IGNGserver](https://github.com/IGNGserver) & [@Javis](https://github.com/Javis603)

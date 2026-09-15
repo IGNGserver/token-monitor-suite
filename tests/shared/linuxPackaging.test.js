@@ -39,7 +39,7 @@ test('Linux AppStream metadata renders the package version and release date', (t
 test('Linux AppStream template declares an App Center launchable', () => {
   const templatePath = path.join(__dirname, '..', '..', 'packaging', 'linux', 'token-monitor.metainfo.xml.in');
   const template = fs.readFileSync(templatePath, 'utf8');
-  assert.match(template, /<id>com\.javis\.tokenmonitor\.desktop<\/id>/);
+  assert.match(template, /<id>com\.igng\.tokenmonitor\.desktop<\/id>/);
   assert.match(template, /<launchable type="desktop-id">token-monitor\.desktop<\/launchable>/);
   assert.match(template, /<category>Development<\/category>/);
   assert.match(template, /<provides>\s*<binary>token-monitor<\/binary>/);

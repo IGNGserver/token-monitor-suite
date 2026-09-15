@@ -54,7 +54,7 @@ Android 的 `versionName` 与桌面版本一致，`versionCode` 会同时编码�
 
 ## Debian App Center / APT 更新
 
-直接打开 GitHub Release 中的 `.deb` 是一次“本地文件安装”，它不会自动把 GitHub Release 当成 APT 软件源。此时 App Center 能显示应用已安装，但没有可比较的仓库候选版本，所以不会显示升级按钮；这不是桌面包的 `Package` 名称问题。包会保持稳定的 `token-monitor` 标识、`com.javis.tokenmonitor` 应用 ID 和可递增的 `0.45.0-rev.N` Debian 版本。
+直接打开 GitHub Release 中的 `.deb` 是一次“本地文件安装”，它不会自动把 GitHub Release 当成 APT 软件源。此时 App Center 能显示应用已安装，但没有可比较的仓库候选版本，所以不会显示升级按钮；这不是桌面包的 `Package` 名称问题。包会保持稳定的 `token-monitor` 标识、`com.igng.tokenmonitor` 应用 ID 和标准语义化 Debian 版本。
 
 要让 App Center 发现后续版本，发布端必须同时提供带签名的 APT 仓库，并在机器上一次性安装该仓库的公钥和 source 配置。仓库索引生成器是：
 

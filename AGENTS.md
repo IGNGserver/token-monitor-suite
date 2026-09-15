@@ -18,10 +18,10 @@ Automated verification is `npm run verify` (= `npm run verify:product-scope && n
 
 ### Version and release policy
 
-- Project versions use `<upstream-semver>-rev.<positive integer>`, for example `0.37.23-rev.1`. The first three components identify the compatible upstream version; `rev.N` distinguishes this project's successive updates for that upstream version. Do not use a fourth core component such as `0.37.23.1`, and do not put `fork` in the version or product name.
+- Project versions use standard SemVer `<major>.<minor>.<patch>` (e.g., `1.0.0`), with optional local revision `-rev.<positive integer>` supported for incremental maintenance.
 - Root package and lock metadata must stay aligned. `npm run verify:release-version` validates the project version format and the root package/lock copies.
 - A normal request to “发布 release” means a GitHub prerelease. The release workflow defaults to `prerelease` for both pushed tags and manual dispatch. Only an explicit request to “发布正式版 release” may select the `release` workflow input. The Docker `latest` tag is updated only for a formal release; version-specific image tags are always published.
-- Release tags are `v<project-version>`, and release jobs must check out and validate the exact tag. Android receives the same version through `-PtokenMonitorVersion`; its `versionCode` includes `rev.N`.
+- Release tags are `v<project-version>`, and release jobs must check out and validate the exact tag. Android receives the same version through `-PtokenMonitorVersion`.
 
 To dry-run the agent without posting: `node src/agent/agent.js --once --dry-run`.
 
@@ -92,9 +92,9 @@ One caveat on top of the table:
 
 The Docker Compose Hub stores normalized device records (`normalizeDeviceRecord` in `usage.js`) and aggregates on read (`aggregateDevices`). The wire shape between agent/widget and Hub is whatever `collectUsageOnce()` returns — that function is the source of truth, and `docs/API.md` documents the full contract. The core is `{deviceId, hostname, platform, updatedAt, agentVersion, today, month, allTime}` (each period has `{totalTokens, costUsd, clients, clientCosts, models, modelCosts}`), plus attribution fields (`trackedClients`, `clientStatus`, `wslStatus`, `periodWindows`, `projectsEnabled`) and optional `osName` / `osVersion` / `agentRuntime` / `history` / `limits`.
 
-### Product boundary and upstream sync
+### Product boundary and architecture governance
 
-`product-scope.json` is the compatibility boundary for this fork: Electron may expose only `local` and `client`, and Hub deployment may use only the root Docker Compose stack. Do not re-add an embedded Hub, a standalone Hub command, a Worker deployment tree, or a second Compose/package entry point when syncing upstream. Keep the scope guard in CI, release verification, and `npm run verify`; if upstream changes the relevant settings, renderer, build, or deployment files, update the implementation and its guard together.
+`product-scope.json` records the approved architectural boundary for this project: Electron exposes only `local` and `client`, and Hub deployment uses only the root Docker Compose stack. An embedded Hub, a standalone Hub command, and a secondary Worker deployment tree are strictly prohibited. Keep the scope guard in CI, release verification, and `npm run verify`. If future features adjust settings, renderer, build, or deployment files, update the implementation and its guard together.
 
 ### Stale devices
 

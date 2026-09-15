@@ -379,5 +379,6 @@ test('hub web app wires tool drill and trends stack', () => {
   assert.match(app, /clampHomeLimitAccountCount,\s*[\r\n\s]*modelColor/);
   assert.match(app, /VIEW_PATHS/);
   assert.match(app, /data-jump-view/);
+  assert.match(app, /data-jump-usage-tab="models"/);
   assert.match(app, /switchView\(/);
 });

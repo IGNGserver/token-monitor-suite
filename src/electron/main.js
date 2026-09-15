@@ -242,7 +242,7 @@ const serviceStatusClient = createServiceStatusClient();
 const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname));
 
 app.setName(APP_NAME);
-if (process.platform === 'win32') app.setAppUserModelId('com.javis.tokenmonitor');
+if (process.platform === 'win32') app.setAppUserModelId('com.igng.tokenmonitor');
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.exit(0);

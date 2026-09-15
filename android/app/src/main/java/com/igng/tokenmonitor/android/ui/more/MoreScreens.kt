@@ -1710,7 +1710,7 @@ fun SettingsScreen(
 
         Text(
 
-          "本项目基于 Javis603/token-monitor，遵循 MIT License。",
+          "本软件遵循 MIT License 开源协议。",
 
           style = MaterialTheme.typography.bodyMedium
 

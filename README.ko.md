@@ -291,8 +291,9 @@ Issue와 PR을 환영합니다. 프로젝트 규약, 아키텍처 노트, 명령
 
 - [tokscale](https://github.com/junhoyeo/tokscale) — 로그 파싱 및 토큰 집계
 - [CodexBar](https://github.com/steipete/CodexBar) — AI 도구 한도 연구
+- [Token Monitor](https://github.com/Javis603/token-monitor) by [@Javis](https://github.com/Javis603) — 원본 프로젝트 데스크톱 아키텍처 및 영감
 - **[코드 서명 정책](docs/code-signing.md):** 무료 코드 서명은 [SignPath.io](https://signpath.io/)에서 제공하고 인증서는 [SignPath Foundation](https://signpath.org/)에서 제공합니다.
 
 ## 라이선스
 
-[MIT](LICENSE) © [@Javis](https://github.com/Javis603)
+[MIT](LICENSE) © [IGNGserver](https://github.com/IGNGserver) & [@Javis](https://github.com/Javis603)

@@ -291,8 +291,9 @@ Issue や PR を歓迎します。プロジェクトの規約、アーキテク�
 
 - [tokscale](https://github.com/junhoyeo/tokscale) — ログ解析とトークン集計
 - [CodexBar](https://github.com/steipete/CodexBar) — AI ツール制限の調査
+- [Token Monitor](https://github.com/Javis603/token-monitor) by [@Javis](https://github.com/Javis603) — 元プロジェクトのデスクトップ構造とインスピレーション
 - **[コード署名ポリシー](docs/code-signing.md)：** 無償のコード署名は [SignPath.io](https://signpath.io/) が提供し、証明書は [SignPath Foundation](https://signpath.org/) が提供します。
 
 ## ライセンス
 
-[MIT](LICENSE) © [@Javis](https://github.com/Javis603)
+[MIT](LICENSE) © [IGNGserver](https://github.com/IGNGserver) & [@Javis](https://github.com/Javis603)

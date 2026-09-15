@@ -30,8 +30,8 @@ After installation, the same check can be run against `Token Monitor.exe` in the
 
 ## Team roles
 
-- Committers and reviewers: [@Javis603](https://github.com/Javis603)
-- Approvers: [@Javis603](https://github.com/Javis603)
+- Committers and reviewers: [@IGNGserver](https://github.com/IGNGserver)
+- Approvers: [@IGNGserver](https://github.com/IGNGserver)
 
 ## Privacy
 

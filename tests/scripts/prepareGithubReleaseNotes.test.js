@@ -80,19 +80,19 @@ test('composeReleaseNotes rejects a missing or duplicated insertion marker', () 
 test('fullChangelogRange locks generated notes to the curated compare range', () => {
   assert.deepEqual(
     fullChangelogRange(
-      '<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.42.1...v0.43.0">v0.42.1...v0.43.0</a></summary>'
+      '<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v0.42.1...v0.43.0">v0.42.1...v0.43.0</a></summary>'
     ),
     { previousTag: 'v0.42.1', currentTag: 'v0.43.0' }
   );
   assert.deepEqual(
     fullChangelogRange(
-      '<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v1.0.0...v1.1.0-beta.1+build.2">v1.0.0...v1.1.0-beta.1+build.2</a></summary>'
+      '<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v1.0.0...v1.1.0-beta.1+build.2">v1.0.0...v1.1.0-beta.1+build.2</a></summary>'
     ),
     { previousTag: 'v1.0.0', currentTag: 'v1.1.0-beta.1+build.2' }
   );
   assert.throws(
     () => fullChangelogRange(
-      '<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v1.0.0...v1.1.0">v1.0.0...v1.2.0</a></summary>'
+      '<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v1.0.0...v1.1.0">v1.0.0...v1.2.0</a></summary>'
     ),
     /does not match href range/
   );

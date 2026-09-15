@@ -24,7 +24,7 @@ function response(status, body) {
 
 function apiFetch(keyBodies, creditsBodies = {}) {
   return async (url, init) => {
-    assert.equal(init.headers['HTTP-Referer'], 'https://github.com/Javis603/token-monitor');
+    assert.equal(init.headers['HTTP-Referer'], 'https://github.com/IGNGserver/token-monitor-suite');
     assert.equal(init.headers['X-OpenRouter-Title'], 'Token Monitor');
     assert.equal(init.headers['X-Title'], undefined);
     const key = String(init.headers.Authorization).slice('Bearer '.length);

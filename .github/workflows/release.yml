@@ -65,10 +65,11 @@ jobs:
           set -euo pipefail
           version="${RELEASE_VERSION#v}"
           npm run package:headless -- "$version"
-          tar -tzf "dist-headless/Token-Monitor-Headless-${version}.tar.gz" \
-            | grep -q "/src/agent/agent.js$"
-          if tar -tzf "dist-headless/Token-Monitor-Headless-${version}.tar.gz" \
-            | grep -Eq '(^|/)src/(electron|hub)/|(^|/)node_modules/'; then
+          archive="dist-headless/Token-Monitor-Headless-${version}.tar.gz"
+          file_list="$RUNNER_TEMP/headless-file-list.txt"
+          tar -tzf "$archive" > "$file_list"
+          grep -q "/src/agent/agent.js$" "$file_list"
+          if grep -Eq '(^|/)src/(electron|hub)/|(^|/)node_modules/' "$file_list"; then
             echo "headless archive contains a GUI, Hub, or node_modules path" >&2
             exit 1
           fi

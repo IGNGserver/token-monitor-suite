@@ -305,8 +305,9 @@ Token Monitor 會在本機處理使用紀錄，不會向專案維護者傳送分
 
 - [tokscale](https://github.com/junhoyeo/tokscale) 提供紀錄解析與 Token 計算。
 - [CodexBar](https://github.com/steipete/CodexBar) 提供 AI 工具額度的研究參考。
+- [Token Monitor](https://github.com/Javis603/token-monitor) by [@Javis](https://github.com/Javis603) 提供原專案桌面端原型與靈感。
 - **[程式碼簽章政策](docs/code-signing.md)：** 免費程式碼簽章由 [SignPath.io](https://signpath.io/) 提供，憑證由 [SignPath Foundation](https://signpath.org/) 提供。
 
 ## 授權
 
-[MIT](LICENSE) © [@Javis](https://github.com/Javis603)
+[MIT](LICENSE) © [IGNGserver](https://github.com/IGNGserver) & [@Javis](https://github.com/Javis603)

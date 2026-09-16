@@ -450,9 +450,10 @@ function createHubAccountService({
 
     const probeWith = async (candidate) => {
       const probeDeps = {
-        fetch: oauthFetch
+        fetch: oauthFetch,
+        ...runtime
       };
-      const result = await probe(account.provider, providerOptions(account, candidate), probeDeps, runtime);
+      const result = await probe(account.provider, providerOptions(account, candidate), {}, probeDeps);
       return { candidate, rows: rowsFromProbe(result) };
     };
     let attempt = await probeWith(activeCredential);

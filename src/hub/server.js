@@ -33,6 +33,7 @@ const { createCatalogPricingLookup, pricingNotFound } = require('./pricing-upstr
 const { calculateUsageEventDeltas, summarizeSessions } = require('./usage-events');
 const { createHubAccountService } = require('./accountService');
 const { createOAuthSessionManager } = require('./oauthService');
+const { createOutboundFetch } = require('../shared/outboundFetch');
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 const PRICE_FIELDS = [
@@ -329,7 +330,8 @@ function createHub({
       || adminSecret
       || ''
   ).trim();
-  const accountService = accountsEnabled !== false
+    const outboundFetch = createOutboundFetch(process.env);
+    const accountService = accountsEnabled !== false
     && resolvedAccountCredentialKey
     && typeof store.listHubAccounts === 'function'
     ? createHubAccountService({
@@ -338,6 +340,7 @@ function createHub({
       refreshMs: accountRefreshMs,
       concurrency: accountConcurrency,
       probe: accountProbe,
+      oauthFetch: accountProbe ? undefined : outboundFetch,
       logger,
       onUpdate: () => { void broadcastStats('account-update'); }
     })
@@ -1012,7 +1015,7 @@ function createHub({
           return sendJson(res, 400, { error: 'invalid_params', message: 'sessionId and redirectUrl are required' });
         }
         const exchanged = await oauthManager.exchangeSession(sessionId, redirectUrl, {
-          fetch: accountProbe ? undefined : fetch
+          fetch: accountProbe ? undefined : outboundFetch
         });
         const account = await accountService.addAccount({
           provider: exchanged.provider,

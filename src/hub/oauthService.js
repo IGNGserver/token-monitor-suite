@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const { fetchBufferedWithTimeout } = require('../shared/http');
+const { createOutboundFetch } = require('../shared/outboundFetch');
 
 // Official OpenAI Codex CLI OAuth Client ID
 const CODEX_OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -87,7 +88,7 @@ async function refreshOAuthToken(provider, refreshToken, deps = {}) {
   const token = String(refreshToken || '').trim();
   if (!token) throw oauthError('refresh_token_missing', `${provider} refresh token is missing`);
   const config = oauthProviderConfig(provider);
-  const fetchFn = deps.fetch || fetch;
+  const fetchFn = deps.fetch || createOutboundFetch(deps.env || process.env, deps);
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     client_id: config.clientId,
@@ -284,7 +285,7 @@ function createOAuthSessionManager({ now = Date.now, ttlMs = SESSION_TTL_MS } = 
   }
 
   async function exchangeCodexToken(code, verifier, deps = {}) {
-    const fetchFn = deps.fetch || fetch;
+    const fetchFn = deps.fetch || createOutboundFetch(deps.env || process.env, deps);
     const body = new URLSearchParams({
       grant_type: 'authorization_code',
       client_id: CODEX_OAUTH_CLIENT_ID,
@@ -324,7 +325,7 @@ function createOAuthSessionManager({ now = Date.now, ttlMs = SESSION_TTL_MS } = 
   }
 
   async function exchangeAntigravityToken(code, verifier, deps = {}) {
-    const fetchFn = deps.fetch || fetch;
+    const fetchFn = deps.fetch || createOutboundFetch(deps.env || process.env, deps);
     const body = new URLSearchParams({
       grant_type: 'authorization_code',
       client_id: AGY_OAUTH_CLIENT_ID,

@@ -4441,7 +4441,7 @@ const SYNC_HEALTH_REASON_KEYS = {
   disconnected: 'settings.sync.offline.disconnected',
   idle_timeout: 'settings.sync.offline.idleTimeout',
   hub_not_configured: 'settings.sync.offline.notConfigured',
-  insecure_hub_transport: 'settings.sync.offline.configuration',
+  insecure_hub_transport: 'settings.sync.offline.insecureTransport',
   hub_transport_unavailable: 'settings.sync.offline.configuration',
   collector_unavailable: 'settings.sync.offline.network',
   collection_failed: 'settings.sync.offline.network',

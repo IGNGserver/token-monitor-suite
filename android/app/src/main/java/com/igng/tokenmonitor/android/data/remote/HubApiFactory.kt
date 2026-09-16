@@ -18,12 +18,12 @@ import javax.inject.Singleton
 class HubApiFactory private constructor(
   private val json: Json,
   private val requestTimeoutMs: Long,
-  private val allowInsecureHttp: Boolean
+  private val globalAllowInsecureHttp: Boolean
 ) {
   @Inject constructor(json: Json) : this(json, 20_000L, false)
 
   fun create(config: ConnectionConfig): HubApi = Retrofit.Builder()
-    .baseUrl(checkedUrl(config.hubUrl))
+    .baseUrl(checkedUrl(config.hubUrl, config.allowInsecureHttp))
     .client(client(config, eventStream = false))
     .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
     .build()
@@ -33,13 +33,14 @@ class HubApiFactory private constructor(
     EventSources.createFactory(client(config, eventStream = true)).newEventSource(request, listener)
 
   fun statsRequest(config: ConnectionConfig): Request = Request.Builder()
-    .url("${checkedUrl(config.hubUrl)}api/stats/stream")
+    .url("${checkedUrl(config.hubUrl, config.allowInsecureHttp)}api/stats/stream")
     .header("Accept", "text/event-stream")
     .build()
 
   private fun client(config: ConnectionConfig, eventStream: Boolean): OkHttpClient = OkHttpClient.Builder()
     .connectTimeout(requestTimeoutMs, TimeUnit.MILLISECONDS)
     .readTimeout(if (eventStream) 0 else requestTimeoutMs, TimeUnit.MILLISECONDS)
+    .pingInterval(if (eventStream) 15_000L else 0L, TimeUnit.MILLISECONDS)
     .addInterceptor { chain ->
       val request = chain.request().newBuilder().apply {
         if (config.secret.isNotBlank()) header("Authorization", "Bearer ${config.secret}")
@@ -68,10 +69,10 @@ class HubApiFactory private constructor(
 
   private fun normalizeUrl(raw: String): String = Companion.normalizeUrl(raw)
 
-  private fun checkedUrl(raw: String): String {
+  private fun checkedUrl(raw: String, allowInsecure: Boolean = false): String {
     val normalized = normalizeUrl(raw)
-    require(allowInsecureHttp || normalized.startsWith("https://", ignoreCase = true)) {
-      "Android 客户端只允许 HTTPS Hub；请为 LAN/VPN Hub 配置 TLS。"
+    require(globalAllowInsecureHttp || allowInsecure || normalized.startsWith("https://", ignoreCase = true)) {
+      "Android 客户端只允许 HTTPS Hub；如需连接外网 HTTP 或 LAN/VPN，请在设置中勾选允许 HTTP 连接。"
     }
     return normalized
   }

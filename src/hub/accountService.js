@@ -576,7 +576,13 @@ function createHubAccountService({
     if (stopped) return [];
     if (refreshPromise) return refreshPromise;
     refreshPromise = (async () => {
-      const accounts = await store.listHubAccounts();
+      let accounts = [];
+      try {
+        accounts = await store.listHubAccounts();
+      } catch (err) {
+        logger.warn?.(`[hub-accounts] failed to list accounts for refresh: ${err?.message || err}`);
+        return [];
+      }
       const results = [];
       let cursor = 0;
       async function worker() {
@@ -589,9 +595,16 @@ function createHubAccountService({
           catch (error) { logger.warn?.(`[hub-accounts] refresh crashed: ${error.message}`); }
         }
       }
-      await Promise.all(Array.from({ length: Math.min(maxConcurrency, accounts.length) }, () => worker()));
+      try {
+        await Promise.all(Array.from({ length: Math.min(maxConcurrency, accounts.length) }, () => worker()));
+      } catch (err) {
+        logger.warn?.(`[hub-accounts] refresh worker pool error: ${err?.message || err}`);
+      }
       return results.filter(Boolean);
-    })().finally(() => { refreshPromise = null; });
+    })().catch((err) => {
+      logger.warn?.(`[hub-accounts] refreshAll unhandled failure: ${err?.message || err}`);
+      return [];
+    }).finally(() => { refreshPromise = null; });
     return refreshPromise;
   }
 

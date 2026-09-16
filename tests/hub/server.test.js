@@ -437,3 +437,35 @@ test('oversized ingest returns 413 without storing the device', async () => {
     await hub.stop();
   }
 });
+
+test('rate limiting isolates peer IPs when trustProxy is enabled', async () => {
+  const { hub } = createMemoryHub({
+    secret: 'test-secret',
+    trustProxy: true,
+    authFailureLimit: 2
+  });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    // 2 failed attempts for client-1
+    for (let i = 0; i < 2; i++) {
+      const res = await fetch(`http://127.0.0.1:${port}/api/stats`, {
+        headers: { 'x-forwarded-for': '198.51.100.1, 10.0.0.1', authorization: 'Bearer wrong' }
+      });
+      assert.equal(res.status, 401);
+    }
+    // 3rd attempt for client-1 should be rate limited
+    const resLimited = await fetch(`http://127.0.0.1:${port}/api/stats`, {
+      headers: { 'x-forwarded-for': '198.51.100.1, 10.0.0.1', authorization: 'Bearer wrong' }
+    });
+    assert.equal(resLimited.status, 429);
+
+    // client-2 through the same proxy should not be rate limited
+    const resOther = await fetch(`http://127.0.0.1:${port}/api/stats`, {
+      headers: { 'x-forwarded-for': '198.51.100.2, 10.0.0.1', authorization: 'Bearer wrong' }
+    });
+    assert.equal(resOther.status, 401);
+  } finally {
+    await hub.stop();
+  }
+});

@@ -3331,7 +3331,7 @@ function bindEvents() {
       void deleteAccount(accountDelete.dataset.accountDelete);
       return;
     }
-    const accountMode = event.target.closest('[data-account-mode]');
+    const accountMode = event.target.closest('button[data-account-mode]');
     if (accountMode) {
       state.accountFormMode = accountMode.dataset.accountMode;
       state.accountFormError = '';

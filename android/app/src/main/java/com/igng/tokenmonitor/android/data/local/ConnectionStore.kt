@@ -8,7 +8,11 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
-data class ConnectionConfig(val hubUrl: String, val secret: String) {
+data class ConnectionConfig(
+  val hubUrl: String,
+  val secret: String,
+  val allowInsecureHttp: Boolean = false
+) {
   val isComplete: Boolean get() = hubUrl.isNotBlank() && secret.isNotBlank()
 }
 
@@ -33,7 +37,8 @@ class ConnectionStore @Inject constructor(@ApplicationContext context: Context) 
 
   override fun read(): ConnectionConfig = ConnectionConfig(
     hubUrl = preferences.getString(HUB_URL, "").orEmpty(),
-    secret = preferences.getString(SECRET, "").orEmpty()
+    secret = preferences.getString(SECRET, "").orEmpty(),
+    allowInsecureHttp = preferences.getBoolean(ALLOW_INSECURE_HTTP, false)
   )
 
   override fun save(config: ConnectionConfig) {
@@ -41,7 +46,11 @@ class ConnectionStore @Inject constructor(@ApplicationContext context: Context) 
       if (raw.isEmpty()) raw
       else HubApiFactory.normalizeUrl(raw).trimEnd('/')
     }
-    preferences.edit().putString(HUB_URL, hubUrl).putString(SECRET, config.secret).apply()
+    preferences.edit()
+      .putString(HUB_URL, hubUrl)
+      .putString(SECRET, config.secret)
+      .putBoolean(ALLOW_INSECURE_HTTP, config.allowInsecureHttp)
+      .apply()
   }
 
   override fun clear() = preferences.edit().clear().apply()
@@ -49,5 +58,6 @@ class ConnectionStore @Inject constructor(@ApplicationContext context: Context) 
   private companion object {
     const val HUB_URL = "hub_url"
     const val SECRET = "hub_secret"
+    const val ALLOW_INSECURE_HTTP = "allow_insecure_http"
   }
 }

@@ -299,6 +299,7 @@ function createHub({
   webRoot,
   tls = null,
   allowInsecureHttp = false,
+  trustProxy = false,
   authFailureLimit = 30,
   ingestRateLimit = 240,
   accountsEnabled = true,
@@ -350,6 +351,8 @@ function createHub({
   const protocol = tlsOptions ? 'https' : 'http';
   const insecureHttpAllowed = allowInsecureHttp === true
     || ['1', 'true', 'yes', 'on'].includes(String(allowInsecureHttp || '').trim().toLowerCase());
+  const isTrustProxy = trustProxy === true
+    || ['1', 'true', 'yes', 'on'].includes(String(process.env.TOKEN_MONITOR_TRUST_PROXY || '').trim().toLowerCase());
   if (!tlsOptions && !LOOPBACK_HOSTS.has(bindHost) && !insecureHttpAllowed) {
     const error = new Error('A non-loopback Hub must use TLS. Set TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1 only for a trusted LAN or VPN.');
     error.code = 'insecure_hub_transport';
@@ -853,7 +856,20 @@ function createHub({
         }
         return result;
       }
-      const peer = String(req.socket?.remoteAddress || req.headers['cf-connecting-ip'] || 'unknown');
+      let peer = String(req.socket?.remoteAddress || 'unknown');
+      if (isTrustProxy) {
+        const xForwardedFor = req.headers['x-forwarded-for'];
+        if (typeof xForwardedFor === 'string' && xForwardedFor.trim()) {
+          const clientIp = xForwardedFor.split(',')[0].trim();
+          if (clientIp) peer = clientIp;
+        } else if (typeof req.headers['x-real-ip'] === 'string' && req.headers['x-real-ip'].trim()) {
+          peer = req.headers['x-real-ip'].trim();
+        } else if (typeof req.headers['cf-connecting-ip'] === 'string' && req.headers['cf-connecting-ip'].trim()) {
+          peer = req.headers['cf-connecting-ip'].trim();
+        }
+      } else if (typeof req.headers['cf-connecting-ip'] === 'string' && req.headers['cf-connecting-ip'].trim()) {
+        peer = req.headers['cf-connecting-ip'].trim();
+      }
       const limited = authFailures.take(peer);
       if (!limited.ok) {
         sendJson(res, 429, { error: 'rate_limited' }, { 'retry-after': String(Math.max(1, Math.ceil(limited.retryAfterMs / 1000))) });
@@ -1324,10 +1340,43 @@ if (require.main === module) {
       || process.env.TOKEN_MONITOR_HUB_ACCOUNT_CONCURRENCY
       || 4),
     allowInsecureHttp: args.allowInsecureHttp || args['allow-insecure-http'] || process.env.TOKEN_MONITOR_ALLOW_INSECURE_HTTP,
+    trustProxy: args.trustProxy || args['trust-proxy'] || process.env.TOKEN_MONITOR_TRUST_PROXY,
     staleAfterMs
   });
   hub.start()
-    .then(() => console.log(`Token Monitor hub listening on ${hub.protocol}://${hub.bindHost}:${port}`))
+    .then(() => {
+      console.log(`Token Monitor hub listening on ${hub.protocol}://${hub.bindHost}:${port}`);
+
+      // Global uncaught exception and unhandled rejection protection
+      process.on('uncaughtException', (err) => {
+        console.error(`[hub-fatal] uncaughtException: ${err?.message || err}`);
+        if (err?.stack) console.error(err.stack);
+      });
+
+      process.on('unhandledRejection', (reason) => {
+        console.error(`[hub-warn] unhandledRejection: ${reason?.message || reason}`);
+        if (reason?.stack) console.error(reason.stack);
+      });
+
+      // Graceful shutdown on SIGTERM / SIGINT
+      let shuttingDown = false;
+      const gracefulShutdown = async (signal) => {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        console.log(`Received ${signal}, shutting down gracefully...`);
+        try {
+          await hub.stop();
+          console.log('Hub stopped cleanly.');
+          process.exit(0);
+        } catch (stopErr) {
+          console.error(`Error stopping hub: ${stopErr?.message || stopErr}`);
+          process.exit(1);
+        }
+      };
+
+      process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+      process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
+    })
     .catch((error) => { console.error(`Could not start hub: ${error.message}`); process.exitCode = 1; });
 }
 

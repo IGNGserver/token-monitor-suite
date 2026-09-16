@@ -104,6 +104,26 @@ class HubRepositoryTest {
     assertTrue(error.message.contains("pricing_not_found"))
   }
 
+  @Test fun allowInsecureHttpPermitsRemoteHttpEndpoint() = runBlocking {
+    val nonTestingFactory = HubApiFactory(json)
+    val insecureConfig = ConnectionConfig("http://remote.host:17321", "test-secret", allowInsecureHttp = true)
+    val request = nonTestingFactory.statsRequest(insecureConfig)
+    assertEquals("http://remote.host:17321/api/stats/stream", request.url.toString())
+  }
+
+  @Test fun disallowingInsecureHttpBlocksRemoteHttpEndpoint() {
+    val nonTestingFactory = HubApiFactory(json)
+    val insecureConfig = ConnectionConfig("http://remote.host:17321", "test-secret", allowInsecureHttp = false)
+    var thrown = false
+    try {
+      nonTestingFactory.statsRequest(insecureConfig)
+    } catch (e: IllegalArgumentException) {
+      thrown = true
+      assertTrue(e.message?.contains("Android 客户端只允许 HTTPS Hub") == true)
+    }
+    assertTrue(thrown)
+  }
+
   private class FakeConnectionStorage(private var config: ConnectionConfig) : ConnectionStorage {
     override fun read(): ConnectionConfig = config
     override fun save(config: ConnectionConfig) { this.config = config }

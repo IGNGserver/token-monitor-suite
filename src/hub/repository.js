@@ -26,7 +26,7 @@ function ensureNestedMap(map, key) {
 }
 
 function createMySqlPool(options = {}) {
-  return mysql.createPool({
+  const pool = mysql.createPool({
     host: options.host || process.env.MYSQL_HOST || '127.0.0.1',
     port: Number(options.port || process.env.MYSQL_PORT || 3306),
     user: options.user || process.env.MYSQL_USER || 'token_monitor',
@@ -36,8 +36,21 @@ function createMySqlPool(options = {}) {
     connectionLimit: Number(options.connectionLimit || process.env.MYSQL_CONNECTION_LIMIT || 10),
     timezone: 'Z',
     decimalNumbers: true,
-    dateStrings: false
+    dateStrings: false,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000
   });
+
+  if (typeof pool.on === 'function') {
+    pool.on('error', (err) => {
+      // Prevent unhandled pool errors from bubbling up and crashing the process
+      const code = err?.code || 'UNKNOWN';
+      const msg = err?.message || String(err);
+      console.warn?.(`[mysql-pool] background connection error (${code}): ${msg}`);
+    });
+  }
+
+  return pool;
 }
 
 function json(value) {
@@ -561,19 +574,47 @@ function createRepository(pool) {
     return result;
   }
 
+  const RETRYABLE_SQL_ERRORS = new Set([
+    'PROTOCOL_CONNECTION_LOST',
+    'ECONNRESET',
+    'ECONNREFUSED',
+    'ETIMEDOUT',
+    'EPIPE',
+    'ER_SERVER_SHUTDOWN'
+  ]);
+
   async function transaction(work) {
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const result = await work(connection);
-      await connection.commit();
-      return result;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
+    let lastError = null;
+    const maxAttempts = 2;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let connection;
+      try {
+        connection = await pool.getConnection();
+      } catch (connErr) {
+        if (attempt < maxAttempts && RETRYABLE_SQL_ERRORS.has(connErr?.code)) {
+          await new Promise((r) => setTimeout(r, 200));
+          continue;
+        }
+        throw connErr;
+      }
+      try {
+        await connection.beginTransaction();
+        const result = await work(connection);
+        await connection.commit();
+        return result;
+      } catch (error) {
+        try { await connection.rollback(); } catch (_) {}
+        if (attempt < maxAttempts && RETRYABLE_SQL_ERRORS.has(error?.code)) {
+          lastError = error;
+          await new Promise((r) => setTimeout(r, 200));
+          continue;
+        }
+        throw error;
+      } finally {
+        try { connection.release(); } catch (_) {}
+      }
     }
+    throw lastError;
   }
 
   return {

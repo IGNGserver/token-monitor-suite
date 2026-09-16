@@ -79,3 +79,30 @@ test('MySQL ingest snapshots prices and preserves baseline identity across delet
     await pool.end();
   }
 });
+
+test('transaction retries on transient connection lost errors', async () => {
+  let attempts = 0;
+  const fakePool = {
+    async getConnection() {
+      attempts++;
+      if (attempts === 1) {
+        const err = new Error('Connection lost');
+        err.code = 'PROTOCOL_CONNECTION_LOST';
+        throw err;
+      }
+      return {
+        async beginTransaction() {},
+        async commit() {},
+        async rollback() {},
+        release() {}
+      };
+    }
+  };
+  const repo = createRepository(fakePool);
+  const result = await repo.transaction(async (conn) => {
+    assert.ok(conn);
+    return 'ok';
+  });
+  assert.equal(result, 'ok');
+  assert.equal(attempts, 2);
+});

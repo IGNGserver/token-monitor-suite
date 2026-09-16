@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Switch
 
 import androidx.compose.ui.draw.clip
 
@@ -1651,6 +1652,35 @@ fun SettingsScreen(
           modifier = Modifier.fillMaxWidth()
 
         )
+
+        Spacer(Modifier.height(10.dp))
+
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+              haptics.perform(HapticEvent.Selection)
+              viewModel.updateAllowInsecureHttp(!state.allowInsecureHttp)
+            },
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Column(modifier = Modifier.weight(1f)) {
+            Text("允许远程 HTTP 连接", style = MaterialTheme.typography.bodyMedium)
+            Text(
+              "用于无 TLS 的外网穿透或局域网；数据在传输中不会加密。",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+          }
+          Spacer(Modifier.width(8.dp))
+          Switch(
+            checked = state.allowInsecureHttp,
+            onCheckedChange = { checked ->
+              haptics.perform(HapticEvent.Selection)
+              viewModel.updateAllowInsecureHttp(checked)
+            }
+          )
+        }
 
         Spacer(Modifier.height(12.dp))
 

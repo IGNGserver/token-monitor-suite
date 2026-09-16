@@ -163,11 +163,12 @@ function hasExplicitLimitProviderConfig(provider, options = {}) {
 
 function credentialOriginForRow(provider, row, options = {}) {
   const explicit = String(row?.credentialOrigin ?? row?.credential_origin ?? '').trim().toLowerCase();
-  if (explicit === 'manual' || explicit === 'automatic' || explicit === 'unknown') return explicit;
+  if (explicit === 'manual' || explicit === 'automatic') return explicit;
   const configured = options.limitCredentialOrigins?.[provider];
-  if (configured === 'manual' || configured === 'automatic' || configured === 'unknown') return configured;
+  if (configured === 'manual' || configured === 'automatic') return configured;
   if (row?.sourceDetail === 'managed' || row?.sourceDetail === 'manual') return 'manual';
   if (options.suppressAutoDetectedAccounts === true) return 'manual';
+  if (explicit === 'unknown' || configured === 'unknown') return 'unknown';
   return 'automatic';
 }
 

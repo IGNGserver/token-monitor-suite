@@ -308,6 +308,7 @@ function createHub({
   accountRefreshMs = 5 * 60 * 1000,
   accountConcurrency = 4,
   accountProbe,
+  oauthFetch: injectedOAuthFetch = null,
   logger = console
 } = {}) {
   const ownedPool = !repository && !pool;
@@ -331,6 +332,10 @@ function createHub({
       || ''
   ).trim();
     const outboundFetch = createOutboundFetch(process.env);
+    // Tests inject a fake token endpoint; production keeps the proxy-aware fetch.
+    const oauthHttpFetch = typeof injectedOAuthFetch === 'function'
+      ? injectedOAuthFetch
+      : (accountProbe ? undefined : outboundFetch);
     const accountService = accountsEnabled !== false
     && resolvedAccountCredentialKey
     && typeof store.listHubAccounts === 'function'
@@ -340,7 +345,7 @@ function createHub({
       refreshMs: accountRefreshMs,
       concurrency: accountConcurrency,
       probe: accountProbe,
-      oauthFetch: accountProbe ? undefined : outboundFetch,
+      oauthFetch: oauthHttpFetch,
       logger,
       onUpdate: () => { void broadcastStats('account-update'); }
     })
@@ -1015,7 +1020,7 @@ function createHub({
           return sendJson(res, 400, { error: 'invalid_params', message: 'sessionId and redirectUrl are required' });
         }
         const exchanged = await oauthManager.exchangeSession(sessionId, redirectUrl, {
-          fetch: accountProbe ? undefined : outboundFetch
+          fetch: oauthHttpFetch
         });
         const account = await accountService.addAccount({
           provider: exchanged.provider,

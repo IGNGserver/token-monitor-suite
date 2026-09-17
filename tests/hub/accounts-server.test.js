@@ -275,3 +275,60 @@ test('Hub account API supports adding codex and antigravity accounts with explic
     await hub.stop();
   }
 });
+
+test('Hub Antigravity OAuth add exchanges the bare code Google displays', async () => {
+  const repository = new MemoryRepository();
+  const tokenRequests = [];
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    adminSecret: 'admin-token',
+    accountCredentialKey: 'account-encryption-key',
+    accountProbe: async (provider) => accountProbe(provider),
+    accountRefreshMs: 60_000,
+    repository,
+    oauthFetch: async (url, init) => {
+      tokenRequests.push({ url, body: new URLSearchParams(String(init?.body || '')) });
+      return new Response(JSON.stringify({
+        access_token: 'agy-access',
+        refresh_token: 'agy-refresh',
+        expires_in: 3600
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+    logger: { error() {}, warn() {}, info() {} }
+  });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const start = await requestJson(port, '/api/accounts/oauth/start', {
+      method: 'POST',
+      token: 'admin-token',
+      body: { provider: 'antigravity' }
+    });
+    assert.equal(start.response.status, 200);
+    assert.ok(start.body.sessionId);
+
+    // The user copies the code Google shows on the page, not a callback URL.
+    const exchange = await requestJson(port, '/api/accounts/oauth/exchange', {
+      method: 'POST',
+      token: 'admin-token',
+      body: {
+        sessionId: start.body.sessionId,
+        redirectUrl: '4/0AX4XfWhGoogleCode-server-example',
+        name: 'agy-code-paste'
+      }
+    });
+    assert.equal(exchange.response.status, 201);
+    assert.equal(exchange.body.account.provider, 'antigravity');
+    assert.equal(exchange.body.account.name, 'agy-code-paste');
+    assert.equal(JSON.stringify(exchange.body).includes('agy-refresh'), false);
+
+    assert.equal(tokenRequests.length, 1);
+    assert.equal(tokenRequests[0].url, 'https://oauth2.googleapis.com/token');
+    assert.equal(tokenRequests[0].body.get('grant_type'), 'authorization_code');
+    assert.equal(tokenRequests[0].body.get('code'), '4/0AX4XfWhGoogleCode-server-example');
+    assert.ok(tokenRequests[0].body.get('client_secret'));
+  } finally {
+    await hub.stop();
+  }
+});

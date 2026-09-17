@@ -50,6 +50,13 @@ account-encryption key from it. `TOKEN_MONITOR_HUB_CREDENTIAL_KEY` remains an
 optional legacy override. Changing the effective encryption key requires
 re-adding the affected accounts.
 
+Antigravity (`agy`) accounts can be added with the OAuth wizard instead of pasting
+an endpoint and CSRF token: the Hub generates a Google consent link and the user
+pastes back the authorization code Google displays on its page. That code — not
+the page URL, which does not carry it — is what the Hub exchanges. The Hub pins
+the public installed-app client secret that Google requires for this client;
+`AGY_OAUTH_CLIENT_SECRET` overrides it if Google ever rotates that value.
+
 ---
 
 ## Headless agent & Docker Compose Hub (`.env`)

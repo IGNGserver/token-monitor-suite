@@ -2526,7 +2526,8 @@ function renderAccounts() {
           <div class="account-oauth-step account-oauth-step-secondary">
             <strong>${escapeHtml(tr('accounts.oauthStep2'))}</strong>
             <p class="muted tiny">${escapeHtml(tr('accounts.oauthStep2Desc'))}</p>
-            <input name="redirectUrl" required placeholder="${escapeHtml(tr('accounts.oauthUrlPlaceholder'))}" class="account-oauth-redirect-input" spellcheck="false" autocomplete="off" />
+            <input name="redirectUrl" required placeholder="${escapeHtml(tr('accounts.oauthUrlPlaceholder'))}" class="account-oauth-redirect-input" spellcheck="false" autocomplete="off" autocapitalize="off" />
+            <p class="muted tiny">${escapeHtml(tr(currentProvider === 'antigravity' ? 'accounts.oauthCodeHint' : 'accounts.oauthUrlHint'))}</p>
             <input type="hidden" name="oauthSessionId" value="${escapeHtml(session.sessionId)}" />
           </div>
         ` : ''}
@@ -2645,7 +2646,7 @@ async function saveAccountFromForm(form) {
     if (agree !== 'on') throw new Error(tr('accounts.disclaimerRequired'));
     const sessionId = String(values.get('oauthSessionId') || '').trim();
     const redirectUrl = String(values.get('redirectUrl') || '').trim();
-    if (!sessionId || !redirectUrl) throw new Error(tr('accounts.oauthStep2Desc'));
+    if (!sessionId || !redirectUrl) throw new Error(tr('accounts.oauthInputRequired'));
 
     state.accountsSaving = true;
     state.accountFormError = '';

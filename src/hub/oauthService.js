@@ -11,9 +11,15 @@ const CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const CODEX_REDIRECT_URI = 'http://localhost:1455/auth/callback';
 
 // Antigravity CLI uses Google's installed-app OAuth flow. The callback is a
-// hosted page; the Hub still receives the final URL from the user and binds it
-// to this server-side PKCE session.
+// hosted page that displays the authorization code for the user to copy, so the
+// Hub accepts either that bare code or a full callback URL and binds it to this
+// server-side PKCE session.
 const AGY_OAUTH_CLIENT_ID = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
+// Google requires the installed-app client secret on both the authorization-code
+// and refresh-token grants, even with PKCE. It ships with the public Antigravity
+// CLI and is not a confidential secret, so it is pinned here next to the client
+// id. Set AGY_OAUTH_CLIENT_SECRET to override it if Google ever rotates it.
+const AGY_OAUTH_CLIENT_SECRET = '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';
 const AGY_AUTH_URL = 'https://accounts.google.com/o/oauth2/auth';
 const AGY_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const AGY_REDIRECT_URI = 'https://antigravity.google/oauth-callback';
@@ -31,6 +37,13 @@ const AGY_CALLBACK_ORIGINS = new Set(['https://antigravity.google']);
 
 const SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_REDIRECT_URL_LENGTH = 16 * 1024;
+const MAX_AUTHORIZATION_CODE_LENGTH = 2048;
+const AUTHORIZATION_INPUT_HINT = 'Paste the authorization code shown on the provider page (a Google code looks like 4/0A...), or the full redirected callback URL.';
+
+// Google authorization codes look like `4/0AX4XfWh...`; when the user copies the
+// whole page excerpt instead of using the copy button, extract the code from it.
+const AUTHORIZATION_CODE_PATTERN = /^[A-Za-z0-9._~+/=-]{8,}$/;
+const EMBEDDED_GOOGLE_CODE_PATTERN = /4\/[A-Za-z0-9._~+/-]{20,}/;
 
 function base64UrlEncode(buffer) {
   return buffer.toString('base64')
@@ -74,12 +87,17 @@ function validateTokenResponse(tokens, provider, nowMs = Date.now()) {
   };
 }
 
-function oauthProviderConfig(provider) {
+function oauthProviderConfig(provider, env) {
   if (provider === 'codex') {
-    return { clientId: CODEX_OAUTH_CLIENT_ID, tokenUrl: CODEX_TOKEN_URL, label: 'OpenAI' };
+    return { clientId: CODEX_OAUTH_CLIENT_ID, clientSecret: '', tokenUrl: CODEX_TOKEN_URL, label: 'OpenAI' };
   }
   if (provider === 'antigravity') {
-    return { clientId: AGY_OAUTH_CLIENT_ID, tokenUrl: AGY_TOKEN_URL, label: 'Google' };
+    return {
+      clientId: AGY_OAUTH_CLIENT_ID,
+      clientSecret: String(env?.AGY_OAUTH_CLIENT_SECRET || '').trim() || AGY_OAUTH_CLIENT_SECRET,
+      tokenUrl: AGY_TOKEN_URL,
+      label: 'Google'
+    };
   }
   throw oauthError('provider_unsupported', `Unsupported OAuth provider: ${provider}`);
 }
@@ -87,12 +105,13 @@ function oauthProviderConfig(provider) {
 async function refreshOAuthToken(provider, refreshToken, deps = {}) {
   const token = String(refreshToken || '').trim();
   if (!token) throw oauthError('refresh_token_missing', `${provider} refresh token is missing`);
-  const config = oauthProviderConfig(provider);
+  const config = oauthProviderConfig(provider, deps.env || process.env);
   const fetchFn = deps.fetch || createOutboundFetch(deps.env || process.env, deps);
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     client_id: config.clientId,
-    refresh_token: token
+    refresh_token: token,
+    ...(config.clientSecret ? { client_secret: config.clientSecret } : {})
   }).toString();
   let res;
   try {
@@ -224,42 +243,77 @@ function createOAuthSessionManager({ now = Date.now, ttlMs = SESSION_TTL_MS } = 
     return { sessionId, authUrl, provider };
   }
 
+  // OAuth providers hand the user one of three shapes, and all three must work:
+  //   1. a full callback URL (Codex's localhost callback, a hosted callback page),
+  //   2. a schemeless URL or bare query string (`...?code=...&state=...`),
+  //   3. a bare authorization code (Google's Antigravity flow shows the code on
+  //      the page with a copy button and never puts it in the address bar).
+  function normalizeAuthorizationInput(value) {
+    return String(value || '')
+      .trim()
+      .replace(/^[`'"]+/, '')
+      .replace(/[`'"]+$/, '')
+      .replace(/[\s\u200b]+/g, ' ')
+      .replace(/[.,;:。，；：]+$/, '')
+      .trim();
+  }
+
+  function queryStringParams(text) {
+    const cuts = [text.indexOf('?'), text.indexOf('#')].filter((index) => index >= 0);
+    const start = cuts.length > 0 ? Math.min(...cuts) + 1 : 0;
+    return new URLSearchParams(text.slice(start).replace(/&amp;/g, '&'));
+  }
+
+  function authorizationCodeFromText(text) {
+    if (text.length <= MAX_AUTHORIZATION_CODE_LENGTH && AUTHORIZATION_CODE_PATTERN.test(text)) return text;
+    const embedded = text.match(EMBEDDED_GOOGLE_CODE_PATTERN);
+    return embedded ? embedded[0] : '';
+  }
+
   function parseRedirectUrl(rawUrl, expectedState = '') {
-    const raw = String(rawUrl || '').trim();
+    const raw = normalizeAuthorizationInput(rawUrl);
     if (!raw || raw.length > MAX_REDIRECT_URL_LENGTH) {
       throw oauthError('invalid_redirect_url', 'Invalid redirect URL');
     }
-    let parsed;
-    let queryOnly = false;
-    try {
-      parsed = new URL(raw);
-    } catch (_) {
-      // If user pasted query string directly
+
+    let source = 'code';
+    let parsed = null;
+    let params;
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
       try {
-        parsed = new URL(`http://localhost/redirect${raw.replace(/^\?/, '?')}`);
-        queryOnly = true;
+        parsed = new URL(raw);
       } catch (_) {
         throw oauthError('invalid_redirect_url', 'Invalid redirect URL');
       }
-    }
-    if (!['http:', 'https:'].includes(parsed.protocol)) {
-      throw oauthError('invalid_redirect_url', 'OAuth callback must use HTTP or HTTPS');
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        throw oauthError('invalid_redirect_url', 'OAuth callback must use HTTP or HTTPS');
+      }
+      params = parsed.searchParams;
+      source = 'url';
+    } else if (/(^|[?&#])code=/.test(raw)) {
+      // Schemeless callback URL or a query string copied from the address bar.
+      params = queryStringParams(raw);
+      source = 'query';
+    } else {
+      const code = authorizationCodeFromText(raw);
+      if (!code) throw oauthError('invalid_redirect_url', AUTHORIZATION_INPUT_HINT);
+      params = new URLSearchParams({ code });
     }
 
-    // Query params or Hash params
-    const queryParams = parsed.searchParams;
+    // Query params or Hash params (full callback URLs may carry either).
     let hashParams = new URLSearchParams();
-    if (parsed.hash && parsed.hash.length > 1) {
+    if (parsed && parsed.hash && parsed.hash.length > 1) {
       hashParams = new URLSearchParams(parsed.hash.slice(1));
     }
+    const readParam = (key) => params.get(key) || hashParams.get(key) || '';
 
-    const code = queryParams.get('code') || hashParams.get('code') || '';
-    const state = queryParams.get('state') || hashParams.get('state') || '';
-    const accessToken = queryParams.get('access_token') || hashParams.get('access_token') || '';
-    const apiKey = queryParams.get('api_key') || hashParams.get('api_key') || '';
-    const token = queryParams.get('token') || hashParams.get('token') || '';
-    const error = queryParams.get('error') || hashParams.get('error') || '';
-    const errorDescription = queryParams.get('error_description') || hashParams.get('error_description') || '';
+    const code = readParam('code').trim();
+    const state = readParam('state').trim();
+    const accessToken = readParam('access_token').trim();
+    const apiKey = readParam('api_key').trim();
+    const token = readParam('token').trim();
+    const error = readParam('error').trim();
+    const errorDescription = readParam('error_description').trim();
 
     if (error) {
       const err = new Error(errorDescription || `OAuth authorization failed: ${error}`);
@@ -267,20 +321,36 @@ function createOAuthSessionManager({ now = Date.now, ttlMs = SESSION_TTL_MS } = 
       throw err;
     }
 
-    if (expectedState && state !== expectedState) {
-      throw oauthError('oauth_state_mismatch', 'OAuth state mismatch. Session may have expired or was tampered.');
+    // A URL pasted without any credential is almost always the provider's own
+    // page (e.g. Google's approval page) instead of a callback: say so directly
+    // instead of reporting a misleading state mismatch.
+    if (source === 'url' && !code && !accessToken && !apiKey && !token && !state) {
+      throw oauthError('code_missing', AUTHORIZATION_INPUT_HINT);
+    }
+
+    if (expectedState) {
+      // A full callback URL must round-trip the state we issued. A pasted code
+      // (or a query string without one) cannot: Google's copy-code page does not
+      // echo the state, so those inputs are bound to this session by its PKCE
+      // verifier and the code's single use instead — the same tradeoff gcloud
+      // and the Gemini CLI make. A state that is present must still match.
+      const stateRequired = source === 'url';
+      if (state !== expectedState && (stateRequired || state)) {
+        throw oauthError('oauth_state_mismatch', 'OAuth state mismatch. Session may have expired or was tampered.');
+      }
     }
 
     return {
       code,
       state,
-      origin: parsed.origin,
-      queryOnly,
+      origin: parsed ? parsed.origin : '',
+      queryOnly: source !== 'url',
+      source,
       accessToken,
       apiKey: apiKey || token,
-      refreshToken: queryParams.get('refresh_token') || hashParams.get('refresh_token') || '',
-      idToken: queryParams.get('id_token') || hashParams.get('id_token') || '',
-      expiresIn: queryParams.get('expires_in') || hashParams.get('expires_in') || ''
+      refreshToken: readParam('refresh_token'),
+      idToken: readParam('id_token'),
+      expiresIn: readParam('expires_in')
     };
   }
 
@@ -325,10 +395,12 @@ function createOAuthSessionManager({ now = Date.now, ttlMs = SESSION_TTL_MS } = 
   }
 
   async function exchangeAntigravityToken(code, verifier, deps = {}) {
-    const fetchFn = deps.fetch || createOutboundFetch(deps.env || process.env, deps);
+    const env = deps.env || process.env;
+    const fetchFn = deps.fetch || createOutboundFetch(env, deps);
     const body = new URLSearchParams({
       grant_type: 'authorization_code',
       client_id: AGY_OAUTH_CLIENT_ID,
+      client_secret: oauthProviderConfig('antigravity', env).clientSecret,
       code,
       code_verifier: verifier,
       redirect_uri: AGY_REDIRECT_URI
@@ -374,7 +446,7 @@ function createOAuthSessionManager({ now = Date.now, ttlMs = SESSION_TTL_MS } = 
 
     if (session.provider === 'codex') {
       if (!parsed.code && !parsed.accessToken) {
-        const error = new Error('No authorization code found in the pasted URL.');
+        const error = new Error(AUTHORIZATION_INPUT_HINT);
         error.code = 'code_missing';
         throw error;
       }
@@ -409,7 +481,7 @@ function createOAuthSessionManager({ now = Date.now, ttlMs = SESSION_TTL_MS } = 
 
     if (session.provider === 'antigravity') {
       if (!parsed.code && !parsed.accessToken && !parsed.apiKey) {
-        throw oauthError('code_missing', 'No authorization code found in the pasted URL.');
+        throw oauthError('code_missing', AUTHORIZATION_INPUT_HINT);
       }
       const tokens = parsed.code
         ? await exchangeAntigravityToken(parsed.code, session.verifier, deps)
@@ -438,6 +510,7 @@ function createOAuthSessionManager({ now = Date.now, ttlMs = SESSION_TTL_MS } = 
   return {
     startSession,
     parseRedirectUrl,
+    parseAuthorizationInput: parseRedirectUrl,
     exchangeSession,
     _sessions: sessions
   };
@@ -451,6 +524,7 @@ module.exports = {
   CODEX_REDIRECT_URI,
   AGY_AUTH_URL,
   AGY_OAUTH_CLIENT_ID,
+  AGY_OAUTH_CLIENT_SECRET,
   AGY_TOKEN_URL,
   AGY_REDIRECT_URI,
   refreshOAuthCredential,

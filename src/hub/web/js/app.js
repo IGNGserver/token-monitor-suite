@@ -1422,6 +1422,8 @@ function localizeWindowLabel(window) {
   if (window?.kind === 'balanceUsd') return tr('limits.balanceUsd');
   if (window?.kind === 'balance') return tr('limits.balance');
   if (window?.kind === 'resetCredits') return tr('limits.resetCredits');
+  if (window?.kind === 'named') return window?.label || tr('limits.window.named');
+  if (window?.kind === 'credits') return tr('limits.credits');
   if (window?.kind === 'session') return tr('limits.window.session');
   if (window?.kind === 'weekly') return tr('limits.window.weekly');
   if (window?.kind === 'billing' || window?.kind === 'monthly') return tr('limits.window.monthly');
@@ -1474,6 +1476,9 @@ function renderLimitCards(cards, { compact = false } = {}) {
                 </div>
               </div>`;
             }).join('')}
+          </div>
+          <div class="limit-card-foot" title="${escapeHtml(card.updatedAt ? formatReset(card.updatedAt, state.locale) : '')}">
+            <span>${tr('limits.lastFetched', { time: formatRelative(card.updatedAt, state.locale) })}</span>
           </div>
         </article>`;
       }).join('')}

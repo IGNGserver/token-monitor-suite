@@ -11,7 +11,7 @@ const VALID_LIMIT_WINDOW_SOURCES = new Set(['web', 'local']);
 const VALID_SOURCE_DETAILS = new Set(['app', 'cli', 'ide', 'managed', 'unknown']);
 const VALID_CREDENTIAL_ORIGINS = new Set(['manual', 'automatic', 'unknown']);
 const VALID_AUTHORITIES = new Set(['hub', 'device', 'none', 'unsupported']);
-const WINDOW_ORDER = ['session', 'weekly', 'billing'];
+const WINDOW_ORDER = ['session', 'weekly', 'billing', 'named', 'credits'];
 const CODEX_TRANSIENT_WINDOW_RETENTION_MS = 10 * 60 * 1000;
 const CODEX_TRANSIENT_PROVIDER_STATUSES = new Set(['unavailable', 'error', 'rateLimited', 'sourceRateLimited']);
 const MAX_ACCOUNT_LABEL_INPUT_LENGTH = 256;
@@ -108,6 +108,12 @@ function normalizeWindowKind(value) {
   if (raw === 'session') return 'session';
   if (raw === 'weekly') return 'weekly';
   if (raw === 'billing' || raw === 'billingcycle' || raw === 'monthly') return 'billing';
+  // Named allowances that are metered separately from the plan cadence (Codex's
+  // Luna Reserve / Spark, code review, individual spend limits). They carry their
+  // own short label, so renderers print it instead of a cadence name.
+  if (raw === 'named') return 'named';
+  // A purchased credit pool: an absolute amount with no percentage of a plan cap.
+  if (raw === 'credits') return 'credits';
   return null;
 }
 

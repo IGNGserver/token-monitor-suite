@@ -233,7 +233,9 @@ test('qoderCnDataPaths resolves QoderCN DB path per platform', () => {
     platform: 'linux',
     env: { QODERCN_CONFIG_DIR: '/var/lib/qodercn' }
   });
-  assert.deepEqual(customConfig.transcriptRoots, [path.join('/var/lib/qodercn', 'projects')]);
+  // Configured roots go through path.resolve, so build the expectation the same
+  // way: on Windows the POSIX-style input resolves onto the current drive.
+  assert.deepEqual(customConfig.transcriptRoots, [path.join(path.resolve('/var/lib/qodercn'), 'projects')]);
 
   const relativeConfig = qoderCnDataPaths({
     homeDir: '/home/test',

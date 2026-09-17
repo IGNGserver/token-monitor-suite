@@ -1334,11 +1334,23 @@ test('watchPathsForClients watches only Proma data that is currently parsed', ()
 
 test('clientDataDirPresence still detects cursor/antigravity via their cache dirs', () => {
   const previousXdg = process.env.XDG_CONFIG_HOME;
+  const previousAppData = process.env.APPDATA;
+  const previousLocalAppData = process.env.LOCALAPPDATA;
   delete process.env.XDG_CONFIG_HOME;
-  const tmp = withTmpHome([
-    path.join('.config', 'tokscale', 'cursor-cache'),
-    path.join('.config', 'tokscale', 'antigravity-cache')
-  ]);
+  const tmp = withTmpHome([]);
+  // tokscale's config root is %APPDATA%\tokscale on Windows and
+  // $XDG_CONFIG_HOME|~/.config/tokscale elsewhere, so pin both env roots at the
+  // temporary home before creating the fixture in the platform's own location.
+  const appData = path.join(tmp, 'AppData', 'Roaming');
+  if (process.platform === 'win32') {
+    process.env.APPDATA = appData;
+    process.env.LOCALAPPDATA = path.join(tmp, 'AppData', 'Local');
+  }
+  const tokscaleDir = process.platform === 'win32'
+    ? path.join(appData, 'tokscale')
+    : path.join(tmp, '.config', 'tokscale');
+  fs.mkdirSync(path.join(tokscaleDir, 'cursor-cache'), { recursive: true });
+  fs.mkdirSync(path.join(tokscaleDir, 'antigravity-cache'), { recursive: true });
   const originalHomedir = os.homedir;
   os.homedir = () => tmp;
   try {
@@ -1349,6 +1361,10 @@ test('clientDataDirPresence still detects cursor/antigravity via their cache dir
   } finally {
     if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = previousXdg;
+    if (previousAppData === undefined) delete process.env.APPDATA;
+    else process.env.APPDATA = previousAppData;
+    if (previousLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = previousLocalAppData;
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });

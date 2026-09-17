@@ -2457,6 +2457,15 @@ function renderProviderWindows(provider, color) {
       if (!session) weeklyNode.classList.add('limit-window-wide');
       windows.append(weeklyNode);
     }
+    // Separately metered allowances (Luna Reserve, Spark, code review, individual
+    // spend limits) and the purchased-credit balance render as their own rows.
+    for (const allowance of windowsForKind(provider, 'named')) {
+      windows.append(limitWindowNode(allowance.label || 'Allowance', allowance, color, 0.68, null, allowance.detail || ''));
+    }
+    const creditsWindow = windowForKind(provider, 'credits');
+    if (creditsWindow) {
+      windows.append(limitWindowNode(creditsWindow.label || 'Balance', creditsWindow, color, 0.68, null, creditsWindow.detail || ''));
+    }
     const resetNode = codexResetCreditsNode(provider.resetCredits);
     if (resetNode) windows.append(resetNode);
   } else if (provider.provider === 'cursor') {

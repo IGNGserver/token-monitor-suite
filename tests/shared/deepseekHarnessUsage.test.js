@@ -59,9 +59,12 @@ function sessionFixture(id = 'session-1') {
 test('DeepSeek Harness resolves DSH_HOME and preserves the upstream client id', () => {
   assert.equal(normalizeClientName('DeepSeek Harness'), 'deepseek-harness');
   assert.equal(normalizeClientName('deepseek'), 'deepseek');
+  // The resolver feeds the value through path.resolve, so the expectation has to
+  // follow the same platform rules: on Windows a POSIX-style input gains the
+  // current drive (D:\tmp\...), which is the only usable Windows reading of it.
   assert.equal(
     resolveDeepSeekHarnessHome({ homeDir: '/tmp/test-home', env: { DSH_HOME: '~/custom-dsh' } }),
-    '/tmp/test-home/custom-dsh'
+    path.resolve(path.join('/tmp/test-home', 'custom-dsh'))
   );
 });
 

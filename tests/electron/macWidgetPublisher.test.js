@@ -84,7 +84,11 @@ test('publisher writes a private atomic snapshot and reloads WidgetKit for fresh
   await publisher.whenIdle();
   const snapshot = JSON.parse(fs.readFileSync(fixture.snapshotPath, 'utf8'));
   assert.equal(snapshot.periods.day.overview.totalTokens, 123);
-  assert.equal(fs.statSync(fixture.snapshotPath).mode & 0o777, 0o600);
+  // 0600 is a POSIX guarantee; Windows has no equivalent mode bits, so Node
+  // reports a plain writable file as 0666 there.
+  if (process.platform !== 'win32') {
+    assert.equal(fs.statSync(fixture.snapshotPath).mode & 0o777, 0o600);
+  }
   assert.deepEqual(launches, [[helper, ['com.example.widget']]]);
   assert.deepEqual(fs.readdirSync(fixture.directory).filter((name) => name.endsWith('.tmp')), []);
 });

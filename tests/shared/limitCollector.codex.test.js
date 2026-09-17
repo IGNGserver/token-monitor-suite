@@ -1279,3 +1279,133 @@ test('LimitsRuntime compatibility snapshot probes initially and reuses the confi
   assert.equal(calls, 2);
   collector.stop();
 });
+
+test('Codex usage keeps reserve, spark, code review and credit allowances', async () => {
+  const providers = await fetchCodexLimits({
+    codexAccessToken: 'oauth-access-token',
+    codexAccountId: 'workspace-1',
+    codexAccountEmail: 'user@example.com',
+    codexAccountLabel: 'Plus'
+  }, {
+    now: () => Date.parse('2026-09-17T00:00:00Z'),
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        plan_type: 'plus',
+        rate_limit: {
+          primary_window: { used_percent: 2, limit_window_seconds: 18000, reset_at: 1789658130 },
+          secondary_window: { used_percent: 98, limit_window_seconds: 604800, reset_at: 1789805331 }
+        },
+        additional_rate_limits: [
+          {
+            limit_name: 'gpt-reserve',
+            metered_feature: 'gpt-reserve',
+            rate_limit: {
+              allowed: true,
+              limit_reached: false,
+              primary_window: { used_percent: 0, limit_window_seconds: 604800, reset_at: 1790000000 }
+            }
+          },
+          {
+            limit_name: 'gpt-5.3-codex-spark',
+            metered_feature: 'codex-spark',
+            rate_limit: { primary_window: { used_percent: 40, limit_window_seconds: 18000, reset_at: 1790000000 } }
+          }
+        ],
+        code_review_rate_limit: {
+          primary_window: { used_percent: 5, limit_window_seconds: 604800, reset_at: 1790000000 }
+        },
+        individual_limit: { limit: '50.00', used: '12.00', remaining_percent: 76, resets_at: 1790000000 },
+        credits: {
+          has_credits: true,
+          unlimited: false,
+          balance: '820.6969075',
+          approx_local_messages: [12, 40],
+          approx_cloud_messages: [3, 9]
+        }
+      })
+    }),
+    readCodexResetCredits: async () => ({ availableCount: 2 })
+  });
+
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0].status, 'ok');
+  assert.deepEqual(providers[0].windows.map((window) => window.kind), [
+    'session', 'weekly', 'named', 'named', 'named', 'named', 'credits'
+  ]);
+  const byLabel = new Map(providers[0].windows.map((window) => [window.label, window]));
+  // Reserve must stay a separate meter instead of folding into the weekly plan window.
+  assert.equal(byLabel.get('Luna Reserve Weekly').remainingPercent, 100);
+  assert.equal(byLabel.get('Luna Reserve Weekly').detail, 'gpt-reserve');
+  assert.equal(byLabel.get('Spark 5h').remainingPercent, 60);
+  assert.equal(byLabel.get('Code review Weekly').remainingPercent, 95);
+  assert.equal(byLabel.get('Spend limit Monthly').remainingPercent, 76);
+  const credits = byLabel.get('Credits');
+  assert.equal(credits.remaining, 820);
+  assert.equal(credits.metric, 'credits');
+  assert.equal(credits.showMeter, false);
+  assert.match(credits.detail, /~12-40 local messages/);
+  assert.equal(providers[0].resetCredits.availableCount, 2);
+});
+
+test('Codex accepts a reserve-only response after the plan windows are exhausted away', async () => {
+  const providers = await fetchCodexLimits({
+    codexAccessToken: 'oauth-access-token',
+    codexAccountId: 'workspace-1'
+  }, {
+    now: () => Date.parse('2026-09-17T00:00:00Z'),
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        plan_type: 'plus',
+        rate_limit: { allowed: false, limit_reached: true, primary_window: null, secondary_window: null },
+        additional_rate_limits: [
+          {
+            limit_name: 'gpt-reserve',
+            metered_feature: 'gpt-reserve',
+            rate_limit: { primary_window: { used_percent: 25, limit_window_seconds: 604800, reset_at: 1790000000 } }
+          }
+        ]
+      })
+    }),
+    readCodexResetCredits: async () => ({ availableCount: 0 })
+  });
+
+  assert.equal(providers.length, 1);
+  assert.equal(providers[0].status, 'ok');
+  assert.deepEqual(providers[0].windows.map((window) => window.label), ['Luna Reserve Weekly']);
+  assert.equal(providers[0].windows[0].remainingPercent, 75);
+});
+
+test('Codex hides the credit row while the account has no credits', () => {
+  const provider = mapCodexRateLimitsToProvider({
+    rateLimits: { primary: { usedPercent: 10, windowDurationMins: 300 } },
+    credits: { has_credits: false, unlimited: false, balance: '0' }
+  }, { source: 'api', updatedAt: '2026-09-17T00:00:00Z' });
+
+  assert.equal(provider.windows.some((window) => window.kind === 'credits'), false);
+});
+
+test('Codex reads CLI RPC allowances from extra rate limit ids', () => {
+  const provider = mapCodexRateLimitsToProvider({
+    rateLimitsByLimitId: {
+      codex: {
+        primary: { usedPercent: 12, resetsAt: '2026-06-01T05:00:00Z', windowDurationMins: 300 },
+        secondary: { usedPercent: 34, resetsAt: '2026-06-07T00:00:00Z', windowDurationMins: 10080 }
+      },
+      'gpt-reserve': {
+        limitName: 'Luna Reserve',
+        primary: { usedPercent: 0, resetsAt: '2026-06-07T00:00:00Z', windowDurationMins: 10080 }
+      }
+    }
+  }, { source: 'rpc', sourceDetail: 'app', updatedAt: '2026-06-01T00:00:00Z' });
+
+  assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly', 'named']);
+  assert.equal(provider.windows[0].usedPercent, 12);
+  assert.equal(provider.windows[1].usedPercent, 34);
+  // The plan keeps its own windows even though the reserve allowance disagrees.
+  assert.equal(provider.windows[2].label, 'Luna Reserve Weekly');
+  assert.equal(provider.windows[2].remainingPercent, 100);
+});

@@ -536,10 +536,18 @@ export function limitCards(stats, locale = 'en') {
   return providers.map((provider, index) => {
     const id = String(provider?.provider || '').toLowerCase();
     const peers = providers.filter((p) => String(p?.provider || '').toLowerCase() === id);
+    // Providers that report a balance object already get its own row below, so a
+    // credits window that only carries an absolute count would duplicate it.
+    const providerBalance = Number(provider?.balance?.amount);
+    const balanceRowCoversCount = Number.isFinite(providerBalance);
     const windows = (provider?.windows || []).map((window) => {
       const remaining = Number.isFinite(Number(window.remainingPercent))
         ? Number(window.remainingPercent)
         : (Number.isFinite(Number(window.usedPercent)) ? 100 - Number(window.usedPercent) : null);
+      // Windows whose unit is an amount (Codex credits) report `remaining` as a
+      // count without any percentage, matching how the widget renders them.
+      const count = Number(window.remaining);
+      const countValue = remaining == null && !balanceRowCoversCount && Number.isFinite(count) ? String(count) : '';
       const metric = String(window.metric || '').toLowerCase() === 'credits' ? 'credits' : '';
       const showMeter = window.showMeter === false ? false : remaining != null;
       return {
@@ -548,7 +556,7 @@ export function limitCards(stats, locale = 'en') {
         remaining,
         used: remaining == null ? null : 100 - remaining,
         resetsAt: window.resetsAt || '',
-        value: window.value || '',
+        value: window.value || countValue,
         metric,
         showMeter,
         detail: String(window.detail || '').trim()
@@ -640,6 +648,9 @@ export function limitCards(stats, locale = 'en') {
       source: provider.source || '',
       status: provider.status || 'unknown',
       stale: Boolean(provider.stale),
+      // When the provider snapshot was last refreshed. The limits page shows it so
+      // a stale quota reading is obvious without guessing from the badge alone.
+      updatedAt: provider.updatedAt || '',
       color: clientColor(id),
       windows,
       lowestRemaining: lowest ?? 100

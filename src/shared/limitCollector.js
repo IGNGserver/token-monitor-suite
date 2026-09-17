@@ -2125,11 +2125,186 @@ function codexAlternateResetCredits(snapshot) {
   return normalizeLimitProvider({ provider: 'codex', resetCredits }).resetCredits;
 }
 
+// Named allowances that sit beside the plan windows and are metered separately.
+// The usage endpoint reports them as `additional_rate_limits` entries (Luna
+// Reserve's `gpt-reserve`, model-specific Spark tiers, ...) and the CLI RPC
+// reports them as extra `rateLimitsByLimitId` keys. Treating them as plan
+// aliases — which is what the old "unambiguous alternate" guard did once a
+// reserve entry disagreed with the plan — hid the whole allowance from the UI.
+const CODEX_EXTRA_QUOTA_HINT = /(reserve|luna|spark|bengalfox|review)/i;
+
+// Codex sends credit balances as strings ("0", "820.6969075") and spend-control
+// numbers as numbers, so accept both spellings before display math.
+function codexNumericValue(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value.replace(/[%,\s$]/g, ''));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function codexAdditionalRateLimits(payload = {}) {
+  const raw = payload.additional_rate_limits ?? payload.additionalRateLimits;
+  return Array.isArray(raw) ? raw.filter((entry) => entry && typeof entry === 'object') : [];
+}
+
+function codexQuotaDisplayName(name, meteredFeature = '') {
+  const probe = `${name || ''} ${meteredFeature || ''}`.toLowerCase();
+  if (probe.includes('reserve') || probe.includes('luna')) return 'Luna Reserve';
+  if (probe.includes('spark') || probe.includes('bengalfox')) return 'Spark';
+  if (probe.includes('review')) return 'Code review';
+  const source = String(name || meteredFeature || '').trim().replace(/^codex[-_]/i, '');
+  const words = source.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!words) return 'Quota';
+  return words.replace(/\b[a-z]/g, (ch) => ch.toUpperCase()).slice(0, 24);
+}
+
+function codexQuotaPeriodSuffix(window, key) {
+  const minutes = Number(window?.windowDurationMins ?? window?.window_duration_mins);
+  if (Number.isFinite(minutes) && minutes > 0) {
+    if (minutes >= 30 * 24 * 60) return 'Monthly';
+    if (minutes >= 7 * 24 * 60) return 'Weekly';
+    if (minutes % 1440 === 0) return `${minutes / 1440}d`;
+    if (minutes % 60 === 0) return `${minutes / 60}h`;
+    return `${Math.round(minutes)}m`;
+  }
+  return key === 'secondary' ? 'Weekly' : '';
+}
+
+// Additional metered allowances become their own labelled windows so a reserve
+// week never reads as the plan's weekly window. Window labels share the plan's
+// period vocabulary because both are rolling caps.
+function codexNamedQuotaWindows(planSnapshot, payload = {}) {
+  const planSignature = planSnapshot ? codexRateLimitWindowSignature(planSnapshot) : '';
+  const windows = [];
+  const seen = new Set();
+  const push = (name, meteredFeature, primary, secondary) => {
+    const first = codexUsageWindow(primary);
+    const second = codexUsageWindow(secondary);
+    if (!first && !second) return;
+    const snapshot = { ...(first ? { primary: first } : {}), ...(second ? { secondary: second } : {}) };
+    // An alias of the plan meter is not a separate allowance.
+    if (planSignature && codexRateLimitWindowSignature(snapshot) === planSignature) return;
+    const displayName = codexQuotaDisplayName(name, meteredFeature);
+    const detailName = String(name || meteredFeature || '').trim();
+    const nameDiffers = detailName
+      && detailName.replace(/[-_\s]+/g, '').toLowerCase() !== displayName.replace(/\s+/g, '').toLowerCase();
+    for (const [key, window] of [['primary', first], ['secondary', second]]) {
+      if (!window) continue;
+      const period = codexQuotaPeriodSuffix(window, key);
+      const label = period ? `${displayName} ${period}` : displayName;
+      const signature = `${label}|${window.usedPercent}|${window.resetsAt}`;
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+      windows.push({
+        kind: 'named',
+        label,
+        usedPercent: window.usedPercent,
+        resetsAt: window.resetsAt,
+        windowMinutes: window.windowDurationMins,
+        ...(nameDiffers ? { detail: detailName } : {})
+      });
+    }
+  };
+
+  const byId = codexRateLimitsById(payload);
+  for (const [id, snapshot] of Object.entries(byId)) {
+    if (String(id).trim().toLowerCase() === 'codex') continue;
+    if (!snapshot || typeof snapshot !== 'object' || !hasCodexRateLimitWindows(snapshot)) continue;
+    const name = snapshot.limitName || snapshot.limit_name || id;
+    const feature = snapshot.meteredFeature || snapshot.metered_feature || '';
+    // `rateLimitsByLimitId` also carries per-model views of the plan meter
+    // (gpt-5.4, gpt-5.4-mini, ...). Only ids that name a separate allowance are
+    // their own window, so a model alias never shows up as a phantom quota.
+    if (!CODEX_EXTRA_QUOTA_HINT.test(`${id} ${name} ${feature}`)) continue;
+    push(name, feature, snapshot.primary, snapshot.secondary);
+  }
+  for (const entry of codexAdditionalRateLimits(payload)) {
+    const rate = entry.rate_limit || entry.rateLimit || {};
+    push(
+      entry.limit_name || entry.limitName || '',
+      entry.metered_feature || entry.meteredFeature || '',
+      rate.primary_window || rate.primary,
+      rate.secondary_window || rate.secondary
+    );
+  }
+  const review = payload.code_review_rate_limit || payload.codeReviewRateLimit || null;
+  if (review && typeof review === 'object') {
+    push('Code review', '', review.primary_window || review.primary, review.secondary_window || review.secondary);
+  }
+  const individualLimit = payload.individual_limit || payload.individualLimit || null;
+  if (individualLimit && typeof individualLimit === 'object') {
+    const remainingPercent = codexNumericValue(individualLimit.remaining_percent ?? individualLimit.remainingPercent);
+    const resetsAt = individualLimit.resets_at ?? individualLimit.resetsAt;
+    if (remainingPercent !== null || resetsAt !== undefined) {
+      windows.push({
+        kind: 'named',
+        label: 'Spend limit Monthly',
+        ...(remainingPercent !== null ? { usedPercent: Math.max(0, Math.min(100, 100 - remainingPercent)) } : {}),
+        ...(resetsAt !== undefined ? { resetsAt } : {}),
+        windowMinutes: 30 * 24 * 60,
+        detail: 'individual limit'
+      });
+    }
+  }
+  return windows;
+}
+
+// Purchased credits fund usage past the plan windows, so they belong on the card
+// as an absolute amount rather than a percentage: the API never reports a
+// maximum for the pool. The dedicated `credits` window kind is what both
+// renderers already label and format without a meter.
+function codexCreditsWindow(payload = {}) {
+  const credits = payload.credits ?? payload.creditSnapshot ?? null;
+  if (!credits || typeof credits !== 'object') return null;
+  const unlimited = credits.unlimited === true;
+  const hasCredits = credits.has_credits === true || credits.hasCredits === true;
+  const rawBalance = codexNumericValue(credits.balance ?? credits.remaining);
+  const amount = rawBalance === null ? null : Math.max(0, Math.floor(rawBalance));
+  if (!unlimited && !hasCredits && !(amount > 0)) return null;
+
+  const detail = [];
+  if (credits.overage_limit_reached === true || credits.overageLimitReached === true) detail.push('overage limit reached');
+  const approx = codexApproxMessages(credits);
+  if (approx) detail.push(approx);
+  return {
+    kind: 'credits',
+    metric: 'credits',
+    label: 'Credits',
+    ...(unlimited ? {} : { remaining: amount }),
+    showMeter: false,
+    ...(detail.length > 0 ? { detail: detail.join(' · ') } : {})
+  };
+}
+
+// Codex reports "approximately how many messages fit in the remaining balance"
+// as a [min, max] pair. Keep it bounded and only when it says something.
+function codexApproxMessages(credits) {
+  const local = credits.approx_local_messages ?? credits.approxLocalMessages;
+  const cloud = credits.approx_cloud_messages ?? credits.approxCloudMessages;
+  const span = (value) => {
+    if (!Array.isArray(value) || value.length === 0) return null;
+    const numbers = value.map((entry) => codexNumericValue(entry)).filter((entry) => entry !== null && entry > 0);
+    if (numbers.length === 0) return null;
+    const min = Math.floor(Math.min(...numbers));
+    const max = Math.floor(Math.max(...numbers));
+    return min === max ? `~${min}` : `~${min}-${max}`;
+  };
+  const localSpan = span(local);
+  const cloudSpan = span(cloud);
+  const parts = [];
+  if (localSpan) parts.push(`${localSpan} local messages`);
+  if (cloudSpan) parts.push(`${cloudSpan} cloud messages`);
+  return parts.join(' · ');
+}
+
 function unambiguousAlternateCodexRateLimits(rateLimitsById) {
   // Object key order is not a quota-selection contract. Keep agreed window
   // data, but only carry optional metadata when every alternate agrees too.
+  // Named allowances (Reserve, Spark, code review) are not plan aliases.
   const candidates = Object.entries(rateLimitsById)
-    .filter(([id, snapshot]) => id !== 'codex' && hasCodexRateLimitWindows(snapshot))
+    .filter(([id, snapshot]) => id !== 'codex' && !CODEX_EXTRA_QUOTA_HINT.test(id) && hasCodexRateLimitWindows(snapshot))
     .sort(([left], [right]) => left.localeCompare(right));
   if (candidates.length === 0) return null;
   const signatures = new Set(candidates.map(([, snapshot]) => codexRateLimitWindowSignature(snapshot)));
@@ -2263,7 +2438,14 @@ function normalizeCodexUsagePayload(payload) {
     ...(primary ? { primary } : {}),
     ...(secondary ? { secondary } : {})
   };
-  if (!primary && !secondary) {
+  // A reserve-only or credits-only response is still usable: the plan windows can
+  // be exhausted away (`secondary_window: null`) while a separately metered
+  // allowance keeps the account working, so refuse only a payload with nothing.
+  const hasExtraQuota = codexAdditionalRateLimits(payload).length > 0
+    || Boolean(payload.code_review_rate_limit || payload.codeReviewRateLimit)
+    || Boolean(codexCreditsWindow(payload))
+    || Object.keys(codexRateLimitsById(payload)).length > 0;
+  if (!primary && !secondary && !hasExtraQuota) {
     throw errorWithStatus('unavailable', 'Codex usage response has no rate-limit windows');
   }
   return {
@@ -2463,6 +2645,9 @@ function mapCodexRateLimitsToProvider(payload, meta = {}) {
       windowMinutes: window.windowDurationMins ?? window.window_duration_mins
     });
   }
+  windows.push(...codexNamedQuotaWindows(rateLimits, payload));
+  const creditsWindow = codexCreditsWindow(payload);
+  if (creditsWindow) windows.push(creditsWindow);
   return normalizeLimitProvider({
     provider: 'codex',
     accountKey: meta.accountKey || '',

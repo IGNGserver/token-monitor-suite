@@ -216,9 +216,14 @@ function verifyMacWidgetApp({
   if (!schemes.includes(config.urlScheme)) fail('packaged app is missing the Widget URL scheme');
   if (!/^\d+\.\d+(?:\.\d+)?$/.test(String(config.marketingVersion || ''))) fail('invalid marketing version');
   if (!/^\d+(?:\.\d+){0,2}$/.test(String(config.bundleVersion || ''))) fail('invalid bundle version');
+  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(String(config.packageVersion || ''))) fail('invalid package version');
+  // electron-builder stamps the package version (prerelease suffix included) into
+  // the app bundle, while Xcode can only accept the numeric projection for the
+  // Widget extension. Compare each artifact with the version source that actually
+  // produced it instead of demanding one shared string.
   if (
-    appInfo.CFBundleShortVersionString !== config.marketingVersion
-    || appInfo.CFBundleVersion !== config.bundleVersion
+    appInfo.CFBundleShortVersionString !== config.packageVersion
+    || appInfo.CFBundleVersion !== config.packageVersion
     || extensionInfo.CFBundleShortVersionString !== config.marketingVersion
     || extensionInfo.CFBundleVersion !== config.bundleVersion
   ) {

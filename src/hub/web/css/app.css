@@ -462,6 +462,12 @@ html[data-theme="dark"] .primary-btn { color: #0b0c0e; }
 .limit-card {
   padding: 14px;
 }
+.limit-card-foot {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+}
 .limit-head {
   display: flex;
   align-items: center;

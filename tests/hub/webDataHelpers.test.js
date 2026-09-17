@@ -396,3 +396,34 @@ test('hub web app wires tool drill and trends stack', () => {
   assert.match(app, /data-jump-usage-tab="models"/);
   assert.match(app, /switchView\(/);
 });
+
+test('limitCards surfaces named Codex allowances, credit counts and fetch time', () => {
+  const { limitCards } = dataApi;
+  const cards = limitCards({
+    limits: {
+      providers: [{
+        provider: 'codex',
+        accountEmail: 'user@example.com',
+        updatedAt: '2026-09-17T10:00:00.000Z',
+        windows: [
+          { kind: 'session', usedPercent: 2, resetsAt: '2026-09-17T15:00:00.000Z' },
+          { kind: 'named', label: 'Luna Reserve Weekly', usedPercent: 0, resetsAt: '2026-09-19T16:00:00.000Z' },
+          { kind: 'credits', metric: 'credits', label: 'Credits', remaining: 820, showMeter: false, detail: '~12-40 local messages' }
+        ]
+      }]
+    }
+  });
+
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].updatedAt, '2026-09-17T10:00:00.000Z');
+  const reserve = cards[0].windows.find((window) => window.kind === 'named');
+  assert.equal(reserve.label, 'Luna Reserve Weekly');
+  assert.equal(reserve.remaining, 100);
+  assert.equal(reserve.showMeter, true);
+  const credits = cards[0].windows.find((window) => window.kind === 'credits');
+  // A count-only pool keeps its amount visible even though it has no percentage.
+  assert.equal(credits.remaining, null);
+  assert.equal(credits.value, '820');
+  assert.equal(credits.showMeter, false);
+  assert.equal(credits.detail, '~12-40 local messages');
+});

@@ -555,7 +555,7 @@ export function limitCards(stats, locale = 'en') {
       };
     });
 
-    if (Number.isFinite(Number(provider?.balanceUsd))) {
+    if (provider?.balanceUsd !== null && provider?.balanceUsd !== undefined && Number.isFinite(Number(provider.balanceUsd))) {
       const amount = Math.max(0, Number(provider.balanceUsd || 0));
       windows.push({
         kind: 'balanceUsd',
@@ -570,7 +570,7 @@ export function limitCards(stats, locale = 'en') {
       });
     }
 
-    if (provider?.balance && Number.isFinite(Number(provider.balance.amount))) {
+    if (provider?.balance && provider.balance.amount !== null && provider.balance.amount !== undefined && Number.isFinite(Number(provider.balance.amount))) {
       const amount = Math.max(0, Number(provider.balance.amount || 0));
       const spend = Math.max(0, Number(provider.balance.monthSpend || 0));
       const todaySpend = Math.max(0, Number(provider.balance.todaySpend || 0));
@@ -601,21 +601,21 @@ export function limitCards(stats, locale = 'en') {
     if (resetCredits && typeof resetCredits === 'object') {
       const available = Number(resetCredits.availableCount ?? resetCredits.available ?? resetCredits.remaining);
       const total = Number(resetCredits.totalCount ?? resetCredits.total ?? resetCredits.limit);
-      const parts = [];
-      if (Number.isFinite(available)) parts.push(String(available));
-      if (Number.isFinite(total)) parts.push(`/ ${total}`);
-      if (parts.length) {
+      const hasAvailable = Number.isFinite(available) && available > 0;
+      const hasTotal = Number.isFinite(total) && total > 0;
+      if (hasAvailable || hasTotal) {
+        const parts = [];
+        if (Number.isFinite(available)) parts.push(String(available));
+        if (Number.isFinite(total)) parts.push(`/ ${total}`);
         windows.push({
           kind: 'resetCredits',
           label: 'Reset credits',
-          remaining: Number.isFinite(available) && Number.isFinite(total) && total > 0
-            ? (available / total) * 100
-            : null,
+          remaining: hasAvailable && hasTotal ? (available / total) * 100 : null,
           used: null,
           resetsAt: '',
           value: parts.join(' '),
           metric: 'credits',
-          showMeter: Number.isFinite(available) && Number.isFinite(total) && total > 0,
+          showMeter: hasAvailable && hasTotal,
           detail: ''
         });
       }

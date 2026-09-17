@@ -1422,6 +1422,9 @@ function localizeWindowLabel(window) {
   if (window?.kind === 'balanceUsd') return tr('limits.balanceUsd');
   if (window?.kind === 'balance') return tr('limits.balance');
   if (window?.kind === 'resetCredits') return tr('limits.resetCredits');
+  if (window?.kind === 'session') return tr('limits.window.session');
+  if (window?.kind === 'weekly') return tr('limits.window.weekly');
+  if (window?.kind === 'billing' || window?.kind === 'monthly') return tr('limits.window.monthly');
   return window?.label || '—';
 }
 

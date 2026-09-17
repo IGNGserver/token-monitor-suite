@@ -215,6 +215,19 @@ test('limitCards separates balance without inventing spend meter', () => {
   assert.equal(balance.value.includes('80'), true);
   const credits = cards[0].windows.find((w) => w.kind === 'weekly');
   assert.equal(credits.metric, 'credits');
+
+  const zeroCards = limitCards({
+    limits: {
+      providers: [{
+        provider: 'codex',
+        balanceUsd: null,
+        resetCredits: { availableCount: 0, nextExpiresAt: null },
+        windows: [{ kind: 'weekly', remainingPercent: 10 }]
+      }]
+    }
+  });
+  assert.equal(zeroCards[0].windows.length, 1);
+  assert.equal(zeroCards[0].windows[0].kind, 'weekly');
 });
 
 test('providerDisplayName and planLabel handle identity fields', () => {

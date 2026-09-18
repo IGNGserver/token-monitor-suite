@@ -26,7 +26,7 @@
 
 ## What is Token Monitor?
 
-A desktop app that shows live token usage and AI Tool Limits across 31+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project.
+A desktop app that shows live token usage and AI Tool Limits across 58+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project.
 
 ## Supported Tools
 
@@ -59,12 +59,39 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/` (default `~/.dsh/sessions/`; `session.jsonl[.zstd]` and versioned `session.v<N>.jsonl[.zstd]`) | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db` (CN only); Qoder dashboard cookie (big-model credits via Qoder usage API) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/gemini.png" width="28" alt="Gemini CLI" /> | Gemini CLI | `~/.gemini/tmp/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/roocode.png" width="28" alt="Roo Code" /> | Roo Code | VS Code globalStorage tasks (`.../rooveterinaryinc.roo-cline/tasks/`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/amp.png" width="28" alt="Amp" /> | Amp | `~/.local/share/amp/threads/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/droid.png" width="28" alt="Droid" /> | Droid | `~/.factory/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/mux.png" width="28" alt="Mux" /> | Mux | `~/.mux/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo CLI" /> | Kilo CLI | `~/.local/share/kilo/kilo.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/crush.png" width="28" alt="Crush" /> | Crush | `~/.local/share/crush/projects.json` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/goose.png" width="28" alt="Goose" /> | Goose | `~/.local/share/goose/sessions/sessions.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/codebuff.png" width="28" alt="Codebuff / Freebuff" /> | Codebuff / Freebuff | `~/.config/manicode/projects/` (`chats/*/chat-messages.json`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae" /> | Trae | `~/.config/tokscale/trae-cache/` (after `tokscale trae sync`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/warp.png" width="28" alt="Warp / Oz" /> | Warp / Oz | `~/.config/tokscale/warp-cache/` (after `tokscale warp sync`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/gjc.png" width="28" alt="Gajae-Code" /> | Gajae-Code | `~/.gjc/agent/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/jcode.png" width="28" alt="Jcode" /> | Jcode | `~/.jcode/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/junie.png" width="28" alt="Junie" /> | Junie | `~/.junie/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/opencodereview.png" width="28" alt="OpenCodeReview" /> | OpenCodeReview | `~/.opencodereview/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/devin.png" width="28" alt="Devin CLI / Devin Desktop" /> | Devin CLI / Devin Desktop | `~/.local/share/devin/cli/sessions.db`; `~/Library/Application Support/Devin/User/acp-events/` (macOS) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/senpi.png" width="28" alt="Senpi" /> | Senpi | `~/.senpi/agent/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/augment.png" width="28" alt="Augment Code" /> | Augment Code | `~/.augment/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/kimchi.png" width="28" alt="Kimchi" /> | Kimchi | `~/.config/kimchi/harness/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/prime-agent.png" width="28" alt="Prime Agent" /> | Prime Agent | `~/.prime/agent/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `~/.config/CherryStudio/.claude/projects/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/mcode.png" width="28" alt="MiniMax Code" /> | MiniMax Code | `~/.config/tokscale/headless/mcode/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/fx.png" width="28" alt="Fx" /> | Fx | `~/.fx/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/lmstudio.png" width="28" alt="LM Studio" /> | LM Studio | `~/.lmstudio/server-logs/` (final response usage only; local inference is $0) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/unsloth.png" width="28" alt="Unsloth" /> | Unsloth | `~/.unsloth/studio/studio.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/hindsight.png" width="28" alt="Hindsight" /> | Hindsight | `~/.hindsight/usage/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek | DeepSeek API key (balance via DeepSeek API) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API key (usage/key limit; balance when credits access is authorized, documented for Management keys) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" /> | Minimax | Minimax API key (Token Plan quota via Minimax API) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key or Volcengine AK/SK (Ark Coding Plan quota via Volcengine API) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/ollama.png" width="28" alt="Ollama" /> | Ollama | Ollama Cloud cookie (session/weekly usage via ollama.com/settings) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/newapi.png" width="28" alt="Third-party APIs" /> | Third-party APIs | New API-compatible account preset (including compatible One API forks), New API API-key preset, and a declarative Custom balance endpoint | — | ✅ | — |
+| <img src=".github/assets/tools-icon/sakana.png" width="28" alt="Sakana (Fugu)" /> | Sakana (Fugu) | Sakana billing console session cookie | — | ✅ | — |
 
 <details>
 <summary><strong>Notes, Custom balance endpoints, and data paths overridden by environment variables</strong></summary>
@@ -120,7 +147,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Tracking usage
 
-- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 25+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
+- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 51+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
 - **Per-session detail** — open a Claude Code, Codex, or OpenCode session to see tokens per prompt, expandable to each reply's exact token split and tools used (read on-demand from local transcripts or databases, never synced)
 - **Cache hit statistics** — click any tool or model to expand a detailed breakdown of input tokens (cache hit vs miss), output tokens, and hit-rate percentages
 - **Cost & currency** — cost alongside token counts, shown in USD, TWD, HKD, or CNY; exchange rates auto-update daily and can be manually overridden in Settings
@@ -128,7 +155,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Limits, trends & export
 
-- **AI Tool Limits detection** — provider-specific session, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 19+ providers, including multiple OpenRouter/third-party profiles and DeepSeek prepaid balance/spend
+- **AI Tool Limits detection** — provider-specific session, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 21+ providers, including multiple OpenRouter/third-party profiles and DeepSeek prepaid balance/spend
 - **Hub-managed account quotas** — add multiple provider accounts manually, keep their credentials in the Hub, refresh quotas centrally, and distribute the results to every connected device
 - **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
 - **Usage Trends & Dashboard** — a home-screen activity heatmap and trend chart, plus a dedicated dashboard window with streaks and stacked per-tool/per-model history (bar and K-line views) across all your devices

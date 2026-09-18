@@ -22,6 +22,12 @@ function num(value) {
   return 0;
 }
 
+// Session-time metrics are COMPUTED BY TOKSCALE and only normalized here.
+// `tokscale graph` already returns a top-level `timeMetrics` next to
+// `contributions` (the same numbers `tokscale time-metrics --json` prints), so
+// this function must never grow local recomputation: the counters depend on
+// per-Turn timing that only tokscale's parsers see. Read both spellings because
+// the Rust side emits snake_case and the CLI's JSON writer camelCase.
 function normalizeTimeMetrics(value) {
   if (!value || typeof value !== 'object') return null;
   return {

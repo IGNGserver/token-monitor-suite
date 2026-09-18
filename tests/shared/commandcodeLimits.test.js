@@ -119,6 +119,15 @@ test('normalizeCommandcodeCookieHeader forwards only Command Code session cookie
   assert.equal(normalizeCommandcodeCookieHeader(''), '');
 });
 
+test('the billing routes stay on the cookie-authenticated /internal paths', () => {
+  // The CLI calls `/alpha/billing/*`, which is Bearer-key auth and rejects a
+  // cookie session. Our whole credential model is the better-auth cookie, so a
+  // switch to `/alpha` would make every account read as unauthorized while
+  // looking superficially correct. Pin the paths.
+  assert.equal(COMMANDCODE_CREDITS_URL, 'https://api.commandcode.ai/internal/billing/credits');
+  assert.equal(COMMANDCODE_SUBSCRIPTIONS_URL, 'https://api.commandcode.ai/internal/billing/subscriptions');
+});
+
 test('normalizeCommandcodeCookieHeader accepts a DevTools "Copy as cURL" paste', () => {
   const curl = "curl 'https://api.commandcode.ai/internal/billing/credits' "
     + "-H 'accept: application/json' "

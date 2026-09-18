@@ -192,6 +192,11 @@ function normalizeClientName(value, options = {}) {
   if (raw.includes('qwen')) return 'qwen';
   if (raw.includes('grok')) return 'grok';
   if (raw.includes('copilot')) return 'copilot';
+  // tokscale 4.17 gives Oh My Pi its own `omp` client id (~/.omp/agent/sessions),
+  // but the product tracks it as one `Pi / Oh My Pi` client (`pi`): that is how
+  // the README, the watch path, and the WSL marker all present it. Fold the
+  // upstream id back so the two roots stay one row instead of splitting.
+  if (raw === 'omp' || raw === 'oh-my-pi' || raw === 'oh my pi') return 'pi';
   if (/\bpi\b/.test(raw)) return 'pi';
   if (raw.includes('zed')) return 'zed';
   if (raw.includes('kilocode')) return 'kilocode';
@@ -204,6 +209,10 @@ function normalizeClientName(value, options = {}) {
   if (raw.includes('proma')) return 'proma';
   if (raw.includes('qodercn') || raw === 'qoder-cn' || raw === 'qoder cn') return 'qodercn';
   if (raw.includes('reasonix')) return 'reasonix';
+  // Must precede the generic `opencode` test below: OpenCodeReview is a distinct
+  // tokscale client (~/.opencodereview/sessions) whose name merely contains
+  // "opencode", so the substring rule would silently fold its usage into OpenCode.
+  if (raw.includes('opencodereview') || raw === 'open-code-review' || raw === 'open code review') return 'opencodereview';
   if (raw.includes('opencode')) return 'opencode';
   if (raw.includes('openclaw') || raw.includes('clawd') || raw.includes('moltbot') || raw.includes('moldbot')) return 'openclaw';
   return raw.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || null;

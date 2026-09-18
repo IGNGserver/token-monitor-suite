@@ -11,6 +11,17 @@ const COMMANDCODE_FETCH_TIMEOUT_MS = 12_000;
 // hold back quota numbers that already arrived.
 const COMMANDCODE_SUBSCRIPTION_TIMEOUT_MS = 6_000;
 const COMMANDCODE_API_BASE = 'https://api.commandcode.ai';
+// Do NOT "modernize" this to the sibling `/alpha/billing/*` paths the CLI
+// (command-code 1.56.0) calls. They are alive but speak a DIFFERENT auth scheme:
+// `/alpha/*` reads an `Authorization: Bearer <api key>` and rejects a cookie
+// session outright ("Invalid 'Authorization' header or token."), while
+// `/internal/billing/*` reads the better-auth cookie below and answers a
+// cookie-less probe with a route-specific "You're logged out" — verified
+// 2026-09-18. Unknown paths under any prefix return the generic
+// `{"success":false,"status":404}` shape, so the 401 body is what identifies
+// these routes as both live and cookie-authenticated. The response bodies are
+// otherwise the same shape, which is why a wrong switch would look almost right
+// while silently reporting every account as unauthorized.
 const COMMANDCODE_CREDITS_URL = `${COMMANDCODE_API_BASE}/internal/billing/credits`;
 const COMMANDCODE_SUBSCRIPTIONS_URL = `${COMMANDCODE_API_BASE}/internal/billing/subscriptions`;
 const COMMANDCODE_WEB_ORIGIN = 'https://commandcode.ai';

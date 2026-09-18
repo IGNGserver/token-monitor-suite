@@ -18,7 +18,13 @@
 // it. Keeping them in one object would have to pick one of those lifetimes and
 // be wrong about the other.
 
-const SELF_SYNC_KINDS = ['cursor', 'antigravity'];
+// Clients whose tokscale cache is written by our own `<client> sync` call rather
+// than by the app itself. Every entry here must also be in collector.js's
+// SELF_SYNCED_CLIENTS (that is what keeps its cache dir out of the watcher), and
+// each needs a maybeSync* runner in collector.js gated on real credentials —
+// `trae`/`warp` authenticate through an interactive `tokscale <client> login`,
+// so an unauthenticated machine must skip rather than prompt on every tick.
+const SELF_SYNC_KINDS = ['cursor', 'antigravity', 'trae', 'warp'];
 const {
   normalizeClientSyncDetailCode,
   normalizeClientSyncExitCode,

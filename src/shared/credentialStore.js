@@ -33,6 +33,8 @@ const LEGACY_LOCAL_LIMIT_CREDENTIAL_PATHS = Object.freeze([
   ['providers', 'volcengine', 'secretAccessKey'],
   ['providers', 'qoder', 'cookie'],
   ['providers', 'commandcode', 'cookie'],
+  ['providers', 'amp', 'apiKey'],
+  ['providers', 'sakana', 'sessionCookie'],
   ['providers', 'kimi', 'apiKey'],
   ['providers', 'kimi', 'webAccessToken'],
   ['providers', 'ollama', 'cookie'],

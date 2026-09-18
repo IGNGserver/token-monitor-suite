@@ -50,6 +50,8 @@ const { volcengineCredentials, fetchVolcengineLimits } = volcengineLimits;
 const qoderLimits = require('./qoderLimits');
 const { qoderCookie, fetchQoderLimits } = qoderLimits;
 const commandcodeLimits = require('./commandcodeLimits');
+const ampLimits = require('./ampLimits');
+const sakanaLimits = require('./sakanaLimits');
 const { commandcodeCookie, fetchCommandcodeLimits } = commandcodeLimits;
 const ollamaLimits = require('./ollamaLimits');
 const { ollamaSessionCookie, fetchOllamaLimits } = ollamaLimits;
@@ -152,6 +154,8 @@ function hasExplicitLimitProviderConfig(provider, options = {}) {
     case 'volcengine': return Boolean(options.volcengineAccessKeyId && options.volcengineSecretAccessKey);
     case 'qoder': return Boolean(options.qoderCookie);
     case 'commandcode': return Boolean(options.commandcodeCookie);
+    case 'amp': return ampLimits.hasAmpCredentials(options);
+    case 'sakana': return sakanaLimits.hasSakanaCredentials(options);
     case 'ollama': return Boolean(options.ollamaCookie);
     case 'kimi': return Boolean(options.kimiApiKey || options.kimiWebAccessToken);
     case 'thirdparty': return hasEnabledProfileCredential(options.thirdPartyProfiles, (profile) => (
@@ -4285,6 +4289,8 @@ function providerFetchers(deps = {}) {
     zaiteam: (providerOptions, probeDeps) => zaiTeamLimits.fetchZaiTeamLimits(providerOptions, probeDeps),
     volcengine: (providerOptions, probeDeps) => volcengineLimits.fetchVolcengineLimits(providerOptions, probeDeps),
     commandcode: (providerOptions, probeDeps) => commandcodeLimits.fetchCommandcodeLimits(providerOptions, probeDeps),
+    amp: (providerOptions, probeDeps) => ampLimits.fetchAmpLimits(providerOptions, probeDeps),
+    sakana: (providerOptions, probeDeps) => sakanaLimits.fetchSakanaLimits(providerOptions, probeDeps),
     qoder: (providerOptions, probeDeps) => qoderLimits.fetchQoderLimits(providerOptions, probeDeps),
     ollama: (providerOptions, probeDeps) => ollamaLimits.fetchOllamaLimits(providerOptions, probeDeps),
     kimi: (providerOptions, probeDeps) => kimiLimits.fetchKimiLimits(providerOptions, probeDeps),

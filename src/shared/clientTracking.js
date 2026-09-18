@@ -5,7 +5,7 @@
 // `claude` client. tokscale 4.0.5 fixed the scan path but does not dedup imports, and
 // the imported rows aren't cleanly separable (MiMo is multi-model). It stays a known
 // client — one click to enable in Settings → tools — until tokscale dedups upstream.
-const DEFAULT_CLIENTS = 'claude,claude-desktop,codex,hermes,opencode,openclaw,cursor,antigravity,cline,kimi,qwen,grok,copilot,pi,zed,kilocode,commandcode,zcode,kiro,codebuddy,workbuddy,proma,deepseek-harness,reasonix';
+const DEFAULT_CLIENTS = 'claude,claude-desktop,codex,gemini,hermes,opencode,openclaw,cursor,antigravity,cline,kimi,qwen,grok,copilot,pi,zed,kilocode,roocode,commandcode,zcode,kiro,codebuddy,workbuddy,proma,deepseek-harness,reasonix,amp,droid,mux,kilo,crush,goose,codebuff,freebuff,trae,warp,gjc,jcode,junie,opencodereview,devin-cli,devin-desktop,senpi,augment,kimchi,prime-agent,cherrystudio,mcode,fx,lmstudio,unsloth,hindsight';
 
 // Every wired client id, including opt-in ones kept out of DEFAULT_CLIENTS (micode).
 // Display-preference normalization (hide/pin/reorder) keys off this list, so an opt-in

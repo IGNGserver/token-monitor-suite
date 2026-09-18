@@ -14,10 +14,14 @@
 })(typeof window !== 'undefined' ? window : null, function createLimitProvidersApi() {
   // Keep provider order stable: it is also the default order for a new install.
   // Saved user ordering is parsed separately and must not be overwritten.
+  // This order must match the ✅ rows of the README supported-tools table —
+  // tests/docs/readmeConsistency.test.js asserts the two agree, so a new provider
+  // is added in the same slot in both places (amp before deepseek, sakana last).
   const LIMIT_PROVIDER_IDS = Object.freeze([
     'claude', 'codex', 'opencode', 'cursor', 'antigravity', 'kimi', 'grok',
     'copilot', 'commandcode', 'mimo', 'zai', 'zaiteam', 'kiro', 'qoder',
-    'deepseek', 'openrouter', 'minimax', 'volcengine', 'ollama', 'thirdparty'
+    'amp', 'deepseek', 'openrouter', 'minimax', 'volcengine', 'ollama',
+    'thirdparty', 'sakana'
   ]);
 
   // These are the only window metrics that cross the shared limits schema.

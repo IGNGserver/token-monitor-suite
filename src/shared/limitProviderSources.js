@@ -7,7 +7,7 @@ const { LIMIT_PROVIDER_IDS } = require('./limitProviders');
 // with provider adapters that are also used by the Hub.
 const HUB_MANUAL_PROVIDER_IDS = Object.freeze(new Set([
   'claude', 'codex', 'antigravity', 'opencode', 'openrouter', 'deepseek', 'minimax', 'mimo',
-  'copilot', 'zai', 'zaiteam', 'volcengine', 'qoder', 'commandcode',
+  'copilot', 'zai', 'zaiteam', 'volcengine', 'qoder', 'commandcode', 'amp', 'sakana',
   'ollama', 'kimi', 'thirdparty'
 ]));
 
@@ -26,6 +26,11 @@ const MANUAL_PROVIDER_KEYS = Object.freeze({
   volcengine: ['volcengineAccessKeyId', 'volcengineSecretAccessKey'],
   qoder: ['qoderCookie'],
   commandcode: ['commandcodeCookie'],
+  // Amp authenticates with the API key from its own secrets.json locally, but the
+  // Hub has no such file and is the credential authority, so the key is pastable.
+  amp: ['ampApiKey'],
+  // Sakana is a cookie-authenticated HTML scrape of the billing console.
+  sakana: ['sakanaSessionCookie'],
   ollama: ['ollamaCookie'],
   kimi: ['kimiApiKey', 'kimiWebAccessToken'],
   thirdparty: ['thirdPartyProfiles']
@@ -46,6 +51,8 @@ const LIMIT_PROVIDER_SOURCE_CAPABILITIES = Object.freeze({
   volcengine: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.volcengine },
   qoder: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.qoder },
   commandcode: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.commandcode },
+  amp: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.amp },
+  sakana: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.sakana },
   ollama: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.ollama },
   kimi: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.kimi },
   thirdparty: { manual: true, automatic: false, authority: 'hub', manualKeys: MANUAL_PROVIDER_KEYS.thirdparty },

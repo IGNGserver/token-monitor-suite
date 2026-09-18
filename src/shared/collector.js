@@ -17,6 +17,7 @@ const {
   extractUsageBundleFromTokscale,
   extractUsageFromTokscale,
   mergePeriods,
+  normalizeClientName,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
@@ -33,6 +34,7 @@ const {
   mergeSelfSyncSelection
 } = require('./selfSyncThrottle');
 const cursorAuth = require('./cursorAuth');
+const clientSyncRunners = require('./clientSyncRunners');
 const { findSessionFiles, codexSessionFile } = require('./sessionFiles');
 const opencodeSession = require('./opencodeSession');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./promaUsage');
@@ -62,13 +64,7 @@ const {
   collectClaudeDesktopRows,
   desktopSessionWatchDirs
 } = require('./claudeDesktopUsage');
-const {
-  buildDeepSeekHarnessHistoryGraph,
-  buildDeepSeekHarnessPeriods,
-  buildDeepSeekHarnessRangeJson,
-  collectDeepSeekHarnessRows,
-  deepseekHarnessSessionsDir
-} = require('./deepseekHarnessUsage');
+const { resolveDeepSeekHarnessSessionsDir } = require('./deepseekHarnessPaths');
 const { hashKey } = require('./hashKey');
 const { filterPeriodByCustomRange, normalizeCustomRange } = require('./customRange');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
@@ -278,15 +274,39 @@ function spawnTokscaleJson(userArgs, commandTimeoutMs) {
 // `antigravity sync`), separate from the IDE-backed `antigravity`. Widen the
 // tokscale --client filter so those sub-source rows aren't filtered out;
 // extractUsageFromTokscale's normalizeClientName folds them back into the umbrella
-// id. Unknown ids are dropped silently by tokscale, so this is safe on any 4.x.
-const TOKSCALE_CLIENT_ALIASES = { antigravity: ['antigravity-cli'] };
+// id.
+//
+// `--client` is a clap value-enum: an id outside it is a hard usage error (exit
+// code 2, empty stdout), NOT a silently dropped filter — one bad id fails the
+// whole scan, including every valid client in the same call. So a tracked id
+// that tokscale spells differently must be RENAMED here, not merely aliased.
+// DeepSeek Harness is that case: its upstream id is the short `dsh` (the long
+// spelling is rejected), while the id we persist in settings stays
+// `deepseek-harness` for compatibility. normalizeClientName folds `dsh` back, so
+// the rename is invisible past this boundary.
+const TOKSCALE_CLIENT_RENAMES = { 'deepseek-harness': 'dsh' };
+
+// One tracked client whose usage tokscale splits across two ids. Both of Pi's
+// known roots must be requested or one silently stops being scanned:
+//   - `pi`  owns ~/.pi/agent/sessions
+//   - `omp` owns ~/.omp/agent/sessions (Oh My Pi)
+// tokscale 4.13 read both roots under `pi` alone; 4.17 (which added the separate
+// `omp` client) would otherwise silently drop every Oh My Pi user's usage. We
+// keep the single user-visible `pi` id — the README documents "Pi / Oh My Pi" as
+// one row, and the watch path + WSL marker already key .omp under `pi` — so
+// normalizeClientName folds `omp` back and the split stays invisible.
+const TOKSCALE_CLIENT_ALIASES = {
+  antigravity: ['antigravity-cli'],
+  pi: ['omp']
+};
 
 function tokscaleClientFilter(clients) {
   const ordered = [];
   const seen = new Set();
-  for (const id of String(clients ?? '').split(',').map((value) => value.trim()).filter(Boolean)) {
+  for (const raw of String(clients ?? '').split(',').map((value) => value.trim()).filter(Boolean)) {
+    const id = TOKSCALE_CLIENT_RENAMES[raw] || raw;
     if (!seen.has(id)) { seen.add(id); ordered.push(id); }
-    for (const alias of TOKSCALE_CLIENT_ALIASES[id] || []) {
+    for (const alias of TOKSCALE_CLIENT_ALIASES[id] || TOKSCALE_CLIENT_ALIASES[raw] || []) {
       if (!seen.has(alias)) { seen.add(alias); ordered.push(alias); }
     }
   }
@@ -595,7 +615,11 @@ function resetPromaPricingCache() {
   promaPricingCache.clear();
 }
 
-const LOCAL_PARSED_CLIENTS = new Set(['proma', 'claude-desktop', 'deepseek-harness', 'qodercn']);
+// Clients whose usage comes from a local adapter rather than the tokscale scan.
+// DeepSeek Harness is deliberately NOT here: tokscale 4.17+ reads its session
+// store natively (`--client dsh`), so it flows through the ordinary scan and the
+// local parser is gone.
+const LOCAL_PARSED_CLIENTS = new Set(['proma', 'claude-desktop', 'qodercn']);
 
 function collectionDate(now) {
   const value = typeof now === 'function' ? now() : now;
@@ -997,6 +1021,48 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
   });
 }
 
+// Trae and Warp/Oz are the two clients tokscale reads from a cache IT writes
+// (`<config>/tokscale/<client>-cache`), so without a sync they read as `missing`
+// forever. They are in SELF_SYNCED_CLIENTS to keep that write path out of the
+// watcher (issue #15), which is what makes this runner the only thing that can
+// refresh them.
+//
+// The credential gate is the important half: unlike cursor/antigravity, whose
+// auth is a local file the app itself wrote, `tokscale trae login` and `tokscale
+// warp login` are INTERACTIVE. Running the sync while unauthenticated would spawn
+// a subprocess that cannot succeed on every tick, so status is checked first and
+// a machine that has not logged in is skipped in silence (the client then reports
+// `missing`, which is the honest state).
+async function maybeSyncCachedClient(client, clientsCsv, logger, options = {}) {
+  const enabled = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
+  if (!enabled.has(client)) return { attempted: false, failed: false };
+  const hasCredentials = typeof options.hasCredentials === 'function'
+    ? await options.hasCredentials(client)
+    : await clientSyncRunners.hasClientCredentials(client, options);
+  if (!hasCredentials) return { attempted: false, failed: false };
+  const minIntervalMs = options.minIntervalMs ?? selfSyncThrottle.minIntervalForTick(
+    options.force === true ? { forceSelfSync: [client] } : {},
+    client
+  );
+  if (!selfSyncThrottle.claim(client, minIntervalMs)) return { attempted: false, failed: false };
+  const attempt = selfSyncThrottle.beginAttempt(client);
+  try {
+    await clientSyncRunners.runClientSync(client, options);
+    selfSyncThrottle.completeAttempt(client, attempt, false);
+    return { attempted: true, failed: false };
+  } catch (error) {
+    if (typeof logger === 'function') logger(`${client} sync failed: ${error.message}`);
+    const details = {
+      failureStage: error?.syncFailureStage,
+      detailCode: error?.syncDetailCode || classifyClientSyncDetailCode({ client, text: error?.message }),
+      exitCode: error?.syncExitCode
+    };
+    selfSyncThrottle.completeAttempt(client, attempt, true, 'sync-failed', { ...details });
+    options.onFailure?.(client);
+    return { attempted: true, failed: true, ...details };
+  }
+}
+
 const HISTORY_CAP_DAYS = 370;
 const HISTORY_TIMEOUT_MS = 60000;
 const DEFAULT_HISTORY_INTERVAL_MS = 15 * 60 * 1000;
@@ -1005,6 +1071,28 @@ const HISTORY_INTERVAL_VALUES = new Set([5, 10, 15, 30, 60].map((minutes) => min
 function normalizeHistoryIntervalMs(value) {
   const parsed = Number(value);
   return HISTORY_INTERVAL_VALUES.has(parsed) ? parsed : DEFAULT_HISTORY_INTERVAL_MS;
+}
+
+// tokscale's `graph` output keys its per-client stacks by the id tokscale itself
+// uses, which for a renamed client is the upstream spelling (`dsh` for DeepSeek
+// Harness, `antigravity-cli` for the Antigravity CLI). The period path already
+// folds those through normalizeClientName; the graph path did not, so a renamed
+// client surfaced in Trends under its upstream id and split away from the same
+// client's period totals. Rewrite the ids once, at the boundary, so every
+// consumer of the graph — parseGraphResult, the daily-history archive,
+// mergeHistories — sees the id the rest of the device record uses. Idempotent, so
+// it is safe on the locally built graphs that already use our ids.
+function normalizeGraphClientIds(graph) {
+  if (!graph || typeof graph !== 'object' || !Array.isArray(graph.contributions)) return graph;
+  for (const row of graph.contributions) {
+    if (!row || typeof row !== 'object' || !Array.isArray(row.clients)) continue;
+    for (const entry of row.clients) {
+      if (!entry || typeof entry !== 'object') continue;
+      const normalized = normalizeClientName(entry.client);
+      if (normalized) entry.client = normalized;
+    }
+  }
+  return graph;
 }
 
 async function collectHistoryOnce(options) {
@@ -1033,8 +1121,9 @@ async function collectHistoryOnce(options) {
   if (clients) {
     try {
       const graphJson = await runGraph({ clients, commandTimeoutMs: options.commandTimeoutMs || HISTORY_TIMEOUT_MS });
-      rawGraphs.push(graphJson);
-      histories.push(normalizeHistory(parseGraphResult(graphJson), { capDays, todayKey }));
+      const normalizedGraph = normalizeGraphClientIds(graphJson);
+      rawGraphs.push(normalizedGraph);
+      histories.push(normalizeHistory(parseGraphResult(normalizedGraph), { capDays, todayKey }));
     } catch (error) {
       failureCode = 'history-graph-failed';
       if (typeof options.logger === 'function') options.logger(`tokscale graph failed: ${error.message}`);
@@ -1137,11 +1226,10 @@ async function collectUsageOnce(options) {
   // Proma, DeepSeek Harness, and Qoder CN remain local compatibility adapters.
   // Reasonix aggregate usage is supplied by the same Tokscale path as every
   // other tracked client.
-  const localClients = new Set(['proma', 'claude-desktop', 'deepseek-harness', 'qodercn']);
+  const localClients = new Set(['proma', 'claude-desktop', 'qodercn']);
   const tokscaleClients = tokscaleClientsCsv(normalizedClients);
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesClaudeDesktop = normalizedClients.split(',').includes('claude-desktop');
-  const includesDeepSeekHarness = normalizedClients.split(',').includes('deepseek-harness');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
@@ -1170,9 +1258,6 @@ async function collectUsageOnce(options) {
   let claudeDesktopPeriods = null;
   let claudeDesktopRows = null;
   let claudeDesktopPricing = null;
-  let deepSeekHarnessPeriods = null;
-  let deepSeekHarnessRows = null;
-  let deepSeekHarnessPricing = null;
   let qoderCnPeriods = null;
   let qoderCnRows = null;
   let qoderCnMainRows = null;
@@ -1185,8 +1270,6 @@ async function collectUsageOnce(options) {
     const progress = { ...periods };
     if (claudeDesktopPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, claudeDesktopPeriods.today);
     if (claudeDesktopPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, claudeDesktopPeriods.month);
-    if (deepSeekHarnessPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, deepSeekHarnessPeriods.today);
-    if (deepSeekHarnessPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, deepSeekHarnessPeriods.month);
     if (qoderCnPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, qoderCnPeriods.today);
     if (qoderCnPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, qoderCnPeriods.month);
     try { options.onProgress({ ...progress, updatedAt: new Date().toISOString() }); } catch (_) {}
@@ -1197,6 +1280,17 @@ async function collectUsageOnce(options) {
       minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'cursor'),
       onFailure: options.onSelfSyncFailed
     });
+    // Trae/Warp read a tokscale-written cache, so this is the only refresh path.
+    // Both are credential-gated inside the runner; a failure is logged and the
+    // tick continues, because a stale cache is still readable data.
+    for (const cachedClient of ['trae', 'warp']) {
+      await maybeSyncCachedClient(cachedClient, syncClients, options.logger, {
+        minIntervalMs: selfSyncThrottle.minIntervalForTick(options, cachedClient),
+        onFailure: options.onSelfSyncFailed,
+        hasCredentials: options.hasClientCredentials,
+        runSync: options.runClientSync
+      });
+    }
     const antigravitySync = await maybeSyncAntigravity(syncClients, options.logger, options.homeDir || os.homedir(), {
       minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'antigravity'),
       run: options.runAntigravitySync,
@@ -1257,33 +1351,6 @@ async function collectUsageOnce(options) {
         };
       } catch (error) {
         if (typeof options.logger === 'function') options.logger(`claude-desktop parse failed: ${error.message}`);
-      }
-    }
-    if (includesDeepSeekHarness && (!targetRequested || targetClients.includes('deepseek-harness'))) {
-      try {
-        deepSeekHarnessRows = collectDeepSeekHarnessRows({
-          homeDir: options.homeDir || os.homedir(),
-          env: options.env || process.env,
-          logger: options.logger
-        });
-        deepSeekHarnessPricing = await resolvePromaPricing(deepSeekHarnessRows, {
-          lookupModelPricing: options.lookupModelPricing,
-          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
-          pricingRevision: options.pricingRevision
-        });
-        const harnessJson = buildDeepSeekHarnessPeriods({
-          now: collectedAt,
-          allTimeSince,
-          rows: deepSeekHarnessRows,
-          pricingByModel: deepSeekHarnessPricing
-        });
-        deepSeekHarnessPeriods = {
-          today: extractUsageFromTokscale(harnessJson.today),
-          month: extractUsageFromTokscale(harnessJson.month),
-          allTime: extractUsageFromTokscale(harnessJson.allTime)
-        };
-      } catch (error) {
-        if (typeof options.logger === 'function') options.logger(`deepseek-harness parse failed: ${error.message}`);
       }
     }
     if (includesQoderCn && (!targetRequested || targetClients.includes('qodercn'))) {
@@ -1436,7 +1503,6 @@ async function collectUsageOnce(options) {
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
       if (claudeDesktopPeriods) freshPartitions['claude-desktop'] = claudeDesktopPeriods.today;
-      if (deepSeekHarnessPeriods) freshPartitions['deepseek-harness'] = deepSeekHarnessPeriods.today;
       if (qoderCnPeriods) freshPartitions.qodercn = qoderCnPeriods.today;
       if (qoderCnPeriodReadFailed && anchor.todayPartitions?.qodercn) {
         // A transient local.db read failure must not turn the existing Qoder CN
@@ -1497,12 +1563,6 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, claudeDesktopPeriods.month);
       allTime = mergePeriods(allTime, claudeDesktopPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), 'claude-desktop': claudeDesktopPeriods.today };
-    }
-    if (deepSeekHarnessPeriods && !anchorUsed) {
-      today = mergePeriods(today, deepSeekHarnessPeriods.today);
-      month = mergePeriods(month, deepSeekHarnessPeriods.month);
-      allTime = mergePeriods(allTime, deepSeekHarnessPeriods.allTime);
-      todayPartitions = { ...(todayPartitions || {}), 'deepseek-harness': deepSeekHarnessPeriods.today };
     }
     if (qoderCnPeriods && !anchorUsed) {
       today = mergePeriods(today, qoderCnPeriods.today);
@@ -1758,16 +1818,6 @@ async function collectUsageOnce(options) {
         ? buildClaudeDesktopHistoryGraph({
           rows: claudeDesktopRows || collectClaudeDesktopRows({ homeDir: options.homeDir || os.homedir() }),
           pricingByModel: claudeDesktopPricing || {}
-        })
-        : null,
-      deepseekHarnessGraph: includesDeepSeekHarness
-        ? buildDeepSeekHarnessHistoryGraph({
-          rows: deepSeekHarnessRows || collectDeepSeekHarnessRows({
-            homeDir: options.homeDir || os.homedir(),
-            env: options.env || process.env,
-            logger: options.logger
-          }),
-          pricingByModel: deepSeekHarnessPricing || {}
         })
         : null,
       qoderCnGraph: historyQoderCnGraph || null,
@@ -2069,9 +2119,72 @@ function clientSourceRoots(clientsCsv, options = {}) {
   add('workbuddy', ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')]);
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
+  // tokscale 4.17's longer client tail. Each of these reads one home-relative
+  // store, so a single `add()` wires the watcher, the presence check and the
+  // attributed refresh lane to the same path. Only the shared, sync-only,
+  // exact-file and platform-specific roots carry a comment of their own.
+  add('gemini', ['gemini-tmp', path.join(home, '.gemini', 'tmp')]);
+  add('roocode', ['roocode-tasks', path.join(home, '.config', 'Code', 'User', 'globalStorage', 'rooveterinaryinc.roo-cline', 'tasks')]);
+  add('amp', ['amp-threads', path.join(home, '.local', 'share', 'amp', 'threads')]);
+  add('droid', ['droid-sessions', path.join(home, '.factory', 'sessions')]);
+  add('mux', ['mux-sessions', path.join(home, '.mux', 'sessions')]);
+  // Kilo CLI, Crush, Goose, Devin CLI and Unsloth Studio each expose one
+  // database (or JSON index) directly inside their own data root. Following the
+  // Zed `threads/` and Kiro `kiro-cli/` precedent, the watch root is the
+  // containing directory — so the database can appear after startup — while the
+  // directChildOnly() bounds further down keep the database family and prune the
+  // runtime files beside it.
+  add('kilo', ['kilo-db', path.join(home, '.local', 'share', 'kilo')]);
+  add('crush', ['crush-projects', path.join(home, '.local', 'share', 'crush')]);
+  add('goose', ['goose-sessions', path.join(home, '.local', 'share', 'goose', 'sessions')]);
+  // Codebuff and Freebuff share one store: both write their chats under
+  // ~/.config/manicode/projects, and tokscale separates them by the run's root
+  // agent id rather than by location. Only codebuff owns the watch root;
+  // freebuff's root is a presence check filtered out of the watch list (see
+  // INTERVAL_ONLY_SOURCE_CHECK_IDS), so chokidar is never handed one tree twice.
+  add('codebuff', ['codebuff-projects', path.join(home, '.config', 'manicode', 'projects')]);
+  add('freebuff', ['freebuff-projects', path.join(home, '.config', 'manicode', 'projects')]);
+  // Trae and Warp are API-backed: tokscale materializes their usage into its own
+  // config dir with `tokscale trae|warp sync`, exactly like the cursor and
+  // antigravity caches. Their roots are therefore presence checks rather than
+  // watch targets (SELF_SYNCED_CLIENTS) — the sync is what changes the numbers,
+  // and watching the file it just wrote would re-trigger forever (issue #15).
+  add('trae', ['trae-cache', tokscaleClientCacheDir('trae', { homeDir: home, env: process.env, platform: process.platform })]);
+  add('warp', ['warp-cache', tokscaleClientCacheDir('warp', { homeDir: home, env: process.env, platform: process.platform })]);
+  add('gjc', ['gjc-sessions', path.join(home, '.gjc', 'agent', 'sessions')]);
+  add('jcode', ['jcode-sessions', path.join(home, '.jcode', 'sessions')]);
+  add('junie', ['junie-sessions', path.join(home, '.junie', 'sessions')]);
+  add('opencodereview', ['opencodereview-sessions', path.join(home, '.opencodereview', 'sessions')]);
+  add('devin-cli', ['devin-cli-db', path.join(home, '.local', 'share', 'devin', 'cli')]);
+  // Devin Desktop journals ACP events into a per-platform app dir. macOS
+  // (Application Support) is the canonical root; tokscale also seeds the two
+  // home-relative `.config` spellings on every platform (the Zed/CodeBuddy
+  // pattern), so list all three — watchClientRootsForClients drops whichever is
+  // absent, which off macOS is everything but these.
+  add(
+    'devin-desktop',
+    ['devin-desktop-events', path.join(home, 'Library', 'Application Support', 'Devin', 'User', 'acp-events')],
+    ['devin-desktop-events', path.join(home, '.config', 'Devin', 'User', 'acp-events')],
+    ['devin-desktop-events', path.join(home, '.config', 'devin', 'User', 'acp-events')]
+  );
+  add('senpi', ['senpi-sessions', path.join(home, '.senpi', 'agent', 'sessions')]);
+  add('augment', ['augment-sessions', path.join(home, '.augment', 'sessions')]);
+  add('kimchi', ['kimchi-sessions', path.join(home, '.config', 'kimchi', 'harness', 'sessions')]);
+  add('prime-agent', ['prime-agent-sessions', path.join(home, '.prime', 'agent', 'sessions')]);
+  add('cherrystudio', ['cherrystudio-projects', path.join(home, '.config', 'CherryStudio', '.claude', 'projects')]);
+  // MiniMax Code is captured by tokscale's own `headless` workflow, and this is
+  // the directory that capture writes — a real data input, not one of the
+  // sync-only mirrors above, so it is safe to watch.
+  add('mcode', ['mcode-headless', path.join(home, '.config', 'tokscale', 'headless', 'mcode')]);
+  add('fx', ['fx-sessions', path.join(home, '.fx', 'sessions')]);
+  add('lmstudio', ['lmstudio-logs', path.join(home, '.lmstudio', 'server-logs')]);
+  add('unsloth', ['unsloth-db', path.join(home, '.unsloth', 'studio')]);
+  add('hindsight', ['hindsight-usage', path.join(home, '.hindsight', 'usage')]);
   // DeepSeek Harness — default JSONL session store at ~/.dsh/sessions, or the
-  // sessions directory under DSH_HOME when the upstream override is set.
-  add('deepseek-harness', ['deepseek-harness-sessions', deepseekHarnessSessionsDir({ homeDir: home, env: process.env })]);
+  // sessions directory under DSH_HOME when the upstream override is set. Usage
+  // itself is read by tokscale (`--client dsh`); this watch root only mirrors
+  // the directory tokscale reads so an append still refreshes in seconds.
+  add('deepseek-harness', ['deepseek-harness-sessions', resolveDeepSeekHarnessSessionsDir({ homeDir: home, env: process.env })]);
   add('claude-desktop', ...desktopSessionWatchDirs({ homeDir: home, includeMissing: true }).map((dir) => ['claude-desktop-sessions', dir]));
   // Qoder CN — legacy SQLite, the 0.1.x main.sqlite conversation store, and
   // the transcript tree. Each exact-file source carries its own sourcePath so
@@ -2163,13 +2276,16 @@ function qoderCnWatchPairs(clientsCsv, options = {}) {
 }
 
 // Sources that remain part of collection, health, and diagnostics but are too
-// broad for a persistent recursive watcher. Kiro globalStorage accepts every
-// `.chat`, `.json`, and extensionless file at any depth in tokscale, so a real
-// tree can require thousands of native directory watches; after descriptor
-// exhaustion the same tree becomes an even more expensive 2-second polling
-// watch. Regular interval ticks (five minutes by default), manual refreshes, and
-// hourly full reconciliation still scan it through the unchanged Kiro client.
-const INTERVAL_ONLY_SOURCE_CHECK_IDS = new Set(['kiro-ide-globalstorage']);
+// broad — or too redundant — for a persistent recursive watcher. Kiro
+// globalStorage accepts every `.chat`, `.json`, and extensionless file at any
+// depth in tokscale, so a real tree can require thousands of native directory
+// watches; after descriptor exhaustion the same tree becomes an even more
+// expensive 2-second polling watch. Freebuff's root id names the SAME directory
+// codebuff already watches, and one tree must not get two chokidar watches (the
+// failure the nested copilot-otel child is filtered for). Regular interval ticks
+// (five minutes by default), manual refreshes, and hourly full reconciliation
+// still scan both through their unchanged clients.
+const INTERVAL_ONLY_SOURCE_CHECK_IDS = new Set(['kiro-ide-globalstorage', 'freebuff-projects']);
 
 // The watcher only ever wants paths, so it keeps its original shape rather than
 // learning about check ids it would immediately discard.
@@ -2191,8 +2307,12 @@ function clientWatchCandidates(clientsCsv, options = {}) {
 }
 
 // Clients whose dirs are tokscale caches written only by our own maybeSync* calls.
-// Watching them turns every tick into the trigger for the next one (issue #15).
-const SELF_SYNCED_CLIENTS = new Set(['cursor', 'antigravity']);
+// Trae and Warp are the same shape as Cursor and Antigravity — `tokscale trae
+// sync` / `tokscale warp sync` fill a cache under the tokscale config dir, and
+// nothing else writes it. Watching them turns every tick into the trigger for
+// the next one (issue #15), so they keep presence-check-only roots here rather
+// than in the watch list.
+const SELF_SYNCED_CLIENTS = new Set(['cursor', 'antigravity', 'trae', 'warp']);
 
 // The Antigravity CLI's parse-local data dir (honors GEMINI_CLI_HOME like tokscale).
 // It belongs to the umbrella `antigravity` client but, unlike that client's IDE
@@ -2345,6 +2465,18 @@ const KIRO_DB_WATCH_PATTERN = /^data\.sqlite3(?:-(?:wal|shm))?$/;
 const ZED_DB_WATCH_PATTERN = /^threads\.db(?:-(?:wal|shm))?$/;
 const COPILOT_DB_WATCH_PATTERN = /^data\.db(?:-(?:wal|shm))?$/;
 const ZCODE_DB_WATCH_PATTERN = /^db\.sqlite(?:-(?:wal|shm))?$/;
+// The same shape for the tokscale 4.17 tail. Goose and UnsLoth each open one
+// database in a dir that also holds logs/state (Goose's sessions/ dir, UnsLoth's
+// studio/ dir), so only the database family may survive the bound. Kilo CLI's
+// dir is narrower but shares the same treatment.
+const KILO_DB_WATCH_PATTERN = /^kilo\.db(?:-(?:wal|shm))?$/;
+const GOOSE_DB_WATCH_PATTERN = /^sessions\.db(?:-(?:wal|shm))?$/;
+const UNSLOTH_DB_WATCH_PATTERN = /^studio\.db(?:-(?:wal|shm))?$/;
+const DEVIN_CLI_DB_WATCH_PATTERN = /^sessions\.db(?:-(?:wal|shm))?$/;
+// Crush keeps its whole session index in one JSON document next to its other
+// state files. The WAL/SHM names cannot occur for a JSON file, but the shared
+// pattern shape keeps the intent legible.
+const CRUSH_PROJECTS_WATCH_PATTERN = /^projects\.json$/;
 const GROK_UNIFIED_LOG_FILE = 'unified.jsonl';
 // Tokscale scans only these two CodeBuddy extension log subtrees. Keep their
 // recursive layout intact, but prune unrelated siblings under Logs before
@@ -2525,6 +2657,15 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   bound('zcode', withBasename('zcode', 'db'), directChildOnly((name) => ZCODE_DB_WATCH_PATTERN.test(name)));
   bound('kiro', withBasename('kiro', 'kiro-cli'), directChildOnly((name) => KIRO_DB_WATCH_PATTERN.test(name)));
   bound('zed', withBasename('zed', 'threads'), directChildOnly((name) => ZED_DB_WATCH_PATTERN.test(name)));
+  // The single-database roots from the tokscale 4.17 tail. Each watches its own
+  // data dir so the database can appear after startup, but only the database
+  // family (plus Goose/Devin's SQLite WAL/SHM sidecars) is a source — the logs,
+  // caches and state files beside it must not each become a scan trigger.
+  bound('kilo', withBasename('kilo', 'kilo'), directChildOnly((name) => KILO_DB_WATCH_PATTERN.test(name)));
+  bound('crush', withBasename('crush', 'crush'), directChildOnly((name) => CRUSH_PROJECTS_WATCH_PATTERN.test(name)));
+  bound('goose', withBasename('goose', 'sessions'), directChildOnly((name) => GOOSE_DB_WATCH_PATTERN.test(name)));
+  bound('devin-cli', withBasename('devin-cli', 'cli'), directChildOnly((name) => DEVIN_CLI_DB_WATCH_PATTERN.test(name)));
+  bound('unsloth', withBasename('unsloth', 'studio'), directChildOnly((name) => UNSLOTH_DB_WATCH_PATTERN.test(name)));
   bound('codebuddy', withBasename('codebuddy', 'Logs'), (parts) => !CODEBUDDY_EXTENSION_SOURCE_DIRS.has(parts[0]));
 
   // If a Qoder CN source was absent at startup, its watch root is an ancestor
@@ -3839,7 +3980,6 @@ async function collectCustomRangeOnce(options = {}) {
   const tokscaleClients = tokscaleClientsCsv(normalizedClients);
   const includesProma = includesLocalClient(normalizedClients, 'proma');
   const includesClaudeDesktop = includesLocalClient(normalizedClients, 'claude-desktop');
-  const includesDeepSeekHarness = includesLocalClient(normalizedClients, 'deepseek-harness');
   const homeDir = options.homeDir || os.homedir();
   let period = emptyPeriod();
 
@@ -3888,29 +4028,7 @@ async function collectCustomRangeOnce(options = {}) {
     }
   }
 
-  if (includesDeepSeekHarness) {
-    try {
-      const harnessRows = collectDeepSeekHarnessRows({
-        homeDir,
-        env: options.env || process.env,
-        logger: options.logger
-      });
-      const harnessPricing = await resolvePromaPricing(harnessRows, {
-        lookupModelPricing: options.lookupModelPricing,
-        commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
-        pricingRevision: options.pricingRevision
-      });
-      const harnessJson = buildDeepSeekHarnessRangeJson(range, {
-        rows: harnessRows,
-        pricingByModel: harnessPricing
-      });
-      period = mergePeriods(period, extractUsageFromTokscale(harnessJson));
-    } catch (err) {
-      if (typeof options.logger === 'function') options.logger(`deepseek-harness custom-range parse failed: ${err.message}`);
-    }
-  }
-
-  if (!tokscaleClients && !includesProma && !includesClaudeDesktop && !includesDeepSeekHarness) {
+  if (!tokscaleClients && !includesProma && !includesClaudeDesktop) {
     return { range, period: emptyPeriod(), updatedAt: new Date().toISOString() };
   }
 
@@ -3996,6 +4114,7 @@ module.exports = {
   shouldIncludeHistory,
   startCollector,
   TOKSCALE_CLIENT_ALIASES,
+  normalizeGraphClientIds,
   tokscaleClientFilter,
   tokscaleCommand,
   tokscaleEnvironment,

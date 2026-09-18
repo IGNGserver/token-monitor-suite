@@ -41,7 +41,34 @@ export const CLIENT_LABELS = {
   mistral: 'Mistral',
   cohere: 'Cohere',
   xiaomi: 'Xiaomi',
-  openrouter: 'OpenRouter'
+  openrouter: 'OpenRouter',
+  roocode: 'Roo Code',
+  amp: 'Amp',
+  droid: 'Droid',
+  mux: 'Mux',
+  kilo: 'Kilo CLI',
+  crush: 'Crush',
+  goose: 'Goose',
+  codebuff: 'Codebuff',
+  freebuff: 'Freebuff',
+  trae: 'Trae',
+  warp: 'Warp',
+  gjc: 'Gajae-Code',
+  jcode: 'Jcode',
+  junie: 'Junie',
+  opencodereview: 'OpenCodeReview',
+  'devin-cli': 'Devin CLI',
+  'devin-desktop': 'Devin Desktop',
+  senpi: 'Senpi',
+  augment: 'Augment Code',
+  kimchi: 'Kimchi',
+  'prime-agent': 'Prime Agent',
+  cherrystudio: 'Cherry Studio',
+  mcode: 'MiniMax Code',
+  fx: 'Fx',
+  lmstudio: 'LM Studio',
+  unsloth: 'Unsloth',
+  hindsight: 'Hindsight'
 };
 
 export const CLIENT_COLORS = {
@@ -87,6 +114,33 @@ export const CLIENT_COLORS = {
   qoder: '#2ADB5C',
   ollama: '#888888',
   openrouter: '#6b57ff',
+  roocode: '#7c3aed',
+  amp: '#f34e3f',
+  droid: '#000000',
+  mux: '#5b21b6',
+  kilo: '#F8F676',
+  crush: '#7d5cff',
+  goose: '#000000',
+  codebuff: '#4d8cff',
+  freebuff: '#22c55e',
+  trae: '#0ea5e9',
+  warp: '#01a4ff',
+  gjc: '#f59e0b',
+  jcode: '#6366f1',
+  junie: '#fe2857',
+  opencodereview: '#0ea5e9',
+  'devin-cli': '#111827',
+  'devin-desktop': '#111827',
+  senpi: '#8b5cf6',
+  augment: '#ff5c35',
+  kimchi: '#e11d48',
+  'prime-agent': '#0f766e',
+  cherrystudio: '#ff5a5f',
+  mcode: '#f23f5d',
+  fx: '#3b82f6',
+  lmstudio: '#5a67d8',
+  unsloth: '#22d3ee',
+  hindsight: '#a855f7',
   default: '#6ab4f0'
 };
 
@@ -110,6 +164,8 @@ export const PROVIDER_LABELS = {
   kimi: 'Kimi',
   ollama: 'Ollama',
   openrouter: 'OpenRouter',
+  amp: 'Amp',
+  sakana: 'Sakana (Fugu)',
   thirdparty: 'Third-party'
 };
 
@@ -148,7 +204,15 @@ const ICON_ALIASES = {
   // cache-control: no-store). The desktop widget already aliases them the same way.
   kimi: 'moonshot',
   zcode: 'zai',
-  'claude-desktop': 'claude'
+  'claude-desktop': 'claude',
+  // Clients that share a brand with an already-shipped mark. Keeping these as
+  // aliases avoids shipping duplicate artwork for one logo, and the icon test
+  // requires every alias target to exist.
+  mcode: 'minimax',
+  kilo: 'kilocode',
+  freebuff: 'codebuff',
+  'devin-cli': 'devin',
+  'devin-desktop': 'devin'
 };
 
 export function clientLabel(id) {

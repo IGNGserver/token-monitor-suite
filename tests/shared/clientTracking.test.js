@@ -59,14 +59,22 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in m
 });
 
 test('default tracked clients are accepted by bundled tokscale', () => {
-  const locallyParsedClients = new Set(['proma', 'claude-desktop', 'deepseek-harness']);
+  const locallyParsedClients = new Set(['proma', 'claude-desktop', 'qodercn']);
+  // Ids our settings persist but tokscale spells differently. The collector
+  // renames them before building `--client`, so the upstream spelling is what
+  // has to exist in the enum. A wrong id is a hard usage error (exit 2), not a
+  // silently dropped filter — which is why this test checks the rename.
+  const tokscaleSpellings = { 'deepseek-harness': 'dsh' };
   const result = spawnSync(process.execPath, [require.resolve('tokscale/bin.js'), '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const help = `${result.stdout || ''}\n${result.stderr || ''}`;
   const possibleValues = help.match(/\[possible values: ([^\]]+)\]/);
   assert.ok(possibleValues, 'tokscale --help should list --client possible values');
   const supported = new Set(possibleValues[1].split(',').map((client) => client.trim()).filter(Boolean));
-  const unsupported = DEFAULT_CLIENTS.split(',').filter((client) => !supported.has(client) && !locallyParsedClients.has(client));
+  const unsupported = DEFAULT_CLIENTS.split(',').filter((client) => {
+    if (locallyParsedClients.has(client)) return false;
+    return !supported.has(tokscaleSpellings[client] || client);
+  });
   assert.deepEqual(unsupported, []);
 });
 

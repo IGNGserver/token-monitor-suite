@@ -1,15 +1,10 @@
 'use strict';
 
 const fs = require('node:fs');
-const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { REASONIX_CLIENT } = require('./reasonixPaths');
 const { buildPromaPeriods, collectPromaRows } = require('./promaUsage');
-const {
-  buildDeepSeekHarnessPeriods,
-  collectDeepSeekHarnessRows
-} = require('./deepseekHarnessUsage');
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 
@@ -53,7 +48,39 @@ const WSL_DATA_MARKERS = [
   '.codebuddy/projects',
   '.workbuddy',
   '.proma/agent-sessions',
-  '.dsh/sessions'
+  '.dsh/sessions',
+  // tokscale 4.17 clients with home-relative Linux roots. devin-desktop is
+  // deliberately absent: its only root is macOS Application Support, which can
+  // never appear inside a WSL home. trae/warp caches live under .config/tokscale
+  // like the cursor/antigravity caches, but those are written by `tokscale <c>
+  // sync`, so a WSL home holding only one still needs the marker to be scanned.
+  '.gemini/tmp',
+  '.local/share/amp/threads',
+  '.factory/sessions',
+  '.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks',
+  '.vscode-server/data/User/globalStorage/rooveterinaryinc.roo-cline/tasks',
+  '.mux/sessions',
+  '.local/share/kilo/kilo.db',
+  '.local/share/crush/projects.json',
+  '.local/share/goose/sessions/sessions.db',
+  '.config/manicode/projects',
+  '.config/tokscale/trae-cache',
+  '.config/tokscale/warp-cache',
+  '.gjc/agent/sessions',
+  '.jcode/sessions',
+  '.junie/sessions',
+  '.opencodereview/sessions',
+  '.local/share/devin/cli/sessions.db',
+  '.senpi/agent/sessions',
+  '.augment/sessions',
+  '.config/kimchi/harness/sessions',
+  '.prime/agent/sessions',
+  '.config/CherryStudio/.claude/projects',
+  '.config/tokscale/headless/mcode',
+  '.fx/sessions',
+  '.lmstudio/server-logs',
+  '.unsloth/studio/studio.db',
+  '.hindsight/usage'
 ];
 
 // Maps every WSL_DATA_MARKERS entry to the tracked-client id that owns it, so a
@@ -96,7 +123,38 @@ const MARKER_CLIENTS = {
   '.codebuddy/projects': 'codebuddy',
   '.workbuddy': 'workbuddy',
   '.proma/agent-sessions': 'proma',
-  '.dsh/sessions': 'deepseek-harness'
+  '.dsh/sessions': 'deepseek-harness',
+  '.gemini/tmp': 'gemini',
+  '.local/share/amp/threads': 'amp',
+  '.factory/sessions': 'droid',
+  '.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks': 'roocode',
+  '.vscode-server/data/User/globalStorage/rooveterinaryinc.roo-cline/tasks': 'roocode',
+  '.mux/sessions': 'mux',
+  '.local/share/kilo/kilo.db': 'kilo',
+  '.local/share/crush/projects.json': 'crush',
+  '.local/share/goose/sessions/sessions.db': 'goose',
+  // One directory holds both Codebuff and Freebuff chats; tokscale tells them
+  // apart by the run's root agent id, not by location. Attribute the marker to
+  // codebuff (the base product) — both ids are tracked, and the marker's only job
+  // is deciding whether a WSL home is worth scanning at all.
+  '.config/manicode/projects': 'codebuff',
+  '.config/tokscale/trae-cache': 'trae',
+  '.config/tokscale/warp-cache': 'warp',
+  '.gjc/agent/sessions': 'gjc',
+  '.jcode/sessions': 'jcode',
+  '.junie/sessions': 'junie',
+  '.opencodereview/sessions': 'opencodereview',
+  '.local/share/devin/cli/sessions.db': 'devin-cli',
+  '.senpi/agent/sessions': 'senpi',
+  '.augment/sessions': 'augment',
+  '.config/kimchi/harness/sessions': 'kimchi',
+  '.prime/agent/sessions': 'prime-agent',
+  '.config/CherryStudio/.claude/projects': 'cherrystudio',
+  '.config/tokscale/headless/mcode': 'mcode',
+  '.fx/sessions': 'fx',
+  '.lmstudio/server-logs': 'lmstudio',
+  '.unsloth/studio/studio.db': 'unsloth',
+  '.hindsight/usage': 'hindsight'
 };
 
 // Default command runner. reg output is ANSI/utf8; wsl.exe output is UTF-16LE.
@@ -206,8 +264,6 @@ async function collectWslUsage(options = {}, deps = {}) {
   const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, now, runTokscale, logger, decoratePeriods } = options;
   const buildProma = options.buildPromaPeriods || buildPromaPeriods;
   const collectProma = options.collectPromaRows || collectPromaRows;
-  const buildDeepSeekHarness = options.buildDeepSeekHarnessPeriods || buildDeepSeekHarnessPeriods;
-  const collectDeepSeekHarness = options.collectDeepSeekHarnessRows || collectDeepSeekHarnessRows;
   const existsSync = deps.existsSync || fs.existsSync;
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const bundle = emptyWslBundle();
@@ -220,8 +276,10 @@ async function collectWslUsage(options = {}, deps = {}) {
   // the Linux-default `.reasonix/stats` path inside WSL. Native session files
   // are local-only as well.
   const tracked = new Set(String(trackedClients).split(',').map((c) => c.trim()).filter(Boolean));
+  // Only the local adapters are withheld from the tokscale scan. DeepSeek
+  // Harness stays in: the collector's runTokscale renames it to tokscale's `dsh`.
   const clientsCsv = String(clients || '').split(',').map((c) => c.trim()).filter(Boolean)
-    .filter((client) => client !== REASONIX_CLIENT && client !== 'proma' && client !== 'deepseek-harness')
+    .filter((client) => client !== REASONIX_CLIENT && client !== 'proma')
     .join(',');
   for (const home of wslUsageHomes(deps)) {
     // Attribution is marker-based, independent of whether a parser returns data.
@@ -255,28 +313,12 @@ async function collectWslUsage(options = {}, deps = {}) {
         if (typeof logger === 'function') logger(`wsl Proma usage parse failed for ${home}: ${error.message}`);
       }
     }
-    // DeepSeek Harness is local-parsed as well. An explicit dshHome keeps the
-    // host's DSH_HOME from leaking into a WSL scan; the WSL home's default is
-    // always /home/<user>/.dsh.
-    if (tracked.has('deepseek-harness') && homeDataClients.includes('deepseek-harness')) {
-      try {
-        const rows = collectDeepSeekHarness({
-          dshHome: path.join(home, '.dsh'),
-          homeDir: home,
-          env: {},
-          logger
-        });
-        const pricingByModel = typeof options.resolvePromaPricing === 'function'
-          ? await options.resolvePromaPricing(rows)
-          : options.deepSeekHarnessPricingByModel;
-        const harness = buildDeepSeekHarness({ now, allTimeSince, rows, pricingByModel });
-        bundle.today = mergePeriods(bundle.today, extractUsageFromTokscale(harness.today));
-        bundle.month = mergePeriods(bundle.month, extractUsageFromTokscale(harness.month));
-        bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(harness.allTime));
-      } catch (error) {
-        if (typeof logger === 'function') logger(`wsl DeepSeek Harness usage parse failed for ${home}: ${error.message}`);
-      }
-    }
+    // DeepSeek Harness is no longer locally parsed: tokscale reads its WSL
+    // session store through the ordinary `--home` scan below (upstream id `dsh`,
+    // which the collector's TOKSCALE_CLIENT_RENAMES maps from `deepseek-harness`).
+    // Tokscale resolves DSH_HOME relative to the scanned home, so a distro's
+    // ~/.dsh is read without the host's DSH_HOME leaking in. The marker above is
+    // kept so a dsh-only home is still discovered.
     // Tokscale 4.6+ keeps explicit --home scans isolated from host-native roots,
     // so every requested client can be passed through for each discovered home.
     // Keep the empty guard because an empty --client expands to all clients.

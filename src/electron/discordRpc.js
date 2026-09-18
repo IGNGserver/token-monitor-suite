@@ -14,7 +14,17 @@ const CLIENT_LABELS = {
   gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw',
   antigravity: 'Antigravity', cline: 'Cline',
   kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot',
-  pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', commandcode: 'Command Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', 'deepseek-harness': 'DeepSeek Harness', 'claude-desktop': 'Claude Desktop'
+  pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', commandcode: 'Command Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', 'deepseek-harness': 'DeepSeek Harness', 'claude-desktop': 'Claude Desktop',
+  // Text labels only: its small image key is used just when the id is in
+  // KNOWN_CLIENT_ASSETS (assets uploaded to the Discord app), and a missing
+  // asset there is a silent no-op, so new clients degrade to the text label.
+  roocode: 'Roo Code', amp: 'Amp', droid: 'Droid', mux: 'Mux', kilo: 'Kilo CLI',
+  crush: 'Crush', goose: 'Goose', codebuff: 'Codebuff', freebuff: 'Freebuff',
+  trae: 'Trae', warp: 'Warp', gjc: 'Gajae-Code', jcode: 'Jcode', junie: 'Junie',
+  opencodereview: 'OpenCodeReview', 'devin-cli': 'Devin CLI', 'devin-desktop': 'Devin Desktop',
+  senpi: 'Senpi', augment: 'Augment Code', kimchi: 'Kimchi', 'prime-agent': 'Prime Agent',
+  cherrystudio: 'Cherry Studio', mcode: 'MiniMax Code', fx: 'Fx', lmstudio: 'LM Studio',
+  unsloth: 'Unsloth', hindsight: 'Hindsight'
 };
 const UPDATE_MIN_INTERVAL_MS = 15000;
 const RECONNECT_DELAY_MS = 30000;

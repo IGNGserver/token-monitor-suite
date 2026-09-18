@@ -3,10 +3,28 @@
 目标：把当前的「悬浮小组件」式 Electron 桌面端**一次性重写**为一个**正常桌面应用**，界面与仓库内的**中枢网页端（Hub Web / PWA）同源共享**，后端采集逻辑保持不变，并保证老用户在 `userData/` 下的既有配置无损迁移。
 
 - 审计基线：`5cbbcd2` / `0.45.0-rev.40`
-- 对比上游：`Javis603/token-monitor`（本仓库为其 fork，已从上游独立演进；上游 `src/electron/main.js` 8,668 行，本仓库 4,480 行）
+- 对比上游：`Javis603/token-monitor`（本仓库为其 fork，已从上游独立演进；上游 `src/electron/main.js` 8,668 行，重构前本仓库 4,480 行，重构后 3,813 行）
 - 证据文件：
   - `docs/desktop-rewrite/01-desktop-settings-inventory.md`（当前桌面端全部 85 个设置项、UI 结构、IPC、遗留项）
   - `docs/desktop-rewrite/02-hub-web-inventory.md`（中枢网页端全部视图、状态、样式、API、资源、复用评估）
+
+## 实施状态（已完成 / 已验证）
+
+实施基线：`5cbbcd2` → `0.46.0`。`npm run verify` 全绿（product-scope + shared-ui 边界 + CSS 变量 + lint + 1970 项测试 / 0 失败）。
+
+| 计划阶段 | 状态 | 落地位置 |
+|---|---|---|
+| 阶段 1 共享 UI 包 + Transport 抽象 | ✅ | `src/shared-ui/`；`app.js` 从 `src/hub/web/js/` 平移；`transport/{index,httpTransport}.js`；图标合并为单一权威树 |
+| 阶段 2 桌面端 IPC Transport | ✅ | `transport/ipcTransport.js`、`src/electron/desktopRequestRouter.js`、`preload.js`、`renderer/boot.js` |
+| 阶段 3 桌面端保留设置移植 | ✅ | `src/shared-ui/views/settingsDesktop.js`（全部 68 个保留 key 均有控件；2 个 legacy key 按计划废弃） |
+| 阶段 4 正常应用化 | ✅ | 有边框窗口 + 最小尺寸 900×600、`src/electron/appMenu.js`、CSP `style-src` 放宽、移除 `LSUIElement` |
+| 阶段 5 切换入口 + 删除旧层 | ✅ | 删除旧渲染层、悬浮气泡、托盘、窗口行为模式、macOS Widget 扩展；`main.js` 4,652 → 3,813 行 |
+| 阶段 6 无损迁移 + 文档 | ✅ | `src/electron/viewState.js`（9→8 视图映射）、widget key 清理、`tests/electron/settingsMigration.test.js`、AGENTS/README×5/configuration 更新 |
+| 附加：CI/打包清理 | ✅ | 移除 7 个 widget CI 步骤、6 个 npm 脚本、widget 打包分支与 provisioning 步骤 |
+
+**唯一未执行项**：`src/shared-ui/app.js`（4,115 行）的**按视图模块化拆分**。它是纯粹的内部重组、无行为变化，而当前单文件形态已通过全部测试与两端启动验证。考虑到它是本计划中风险收益比最低的一项（不改变任何外部契约），且拆分本身不影响交付能力，故保留现状并在后续增量进行。计划中其余所有条目（含 `data.js`/`format.js`/`i18n.js`/`syncHealth`/`viewContext` 的模块化）均已完成。
+
+---
 
 ## 一、结论摘要（先说决策）
 

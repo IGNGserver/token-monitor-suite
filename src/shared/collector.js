@@ -85,7 +85,16 @@ function toUnpackedPath(p) {
   return p && p.includes(asarSeg) ? p.replace(asarSeg, `${path.sep}app.asar.unpacked${path.sep}`) : p;
 }
 
-const TOKSCALE_BIN_JS = toUnpackedPath(require.resolve('tokscale/bin.js'));
+let resolvedTokscaleBinJs = null;
+function getTokscaleBinJs() {
+  if (resolvedTokscaleBinJs !== null) return resolvedTokscaleBinJs;
+  try {
+    resolvedTokscaleBinJs = toUnpackedPath(require.resolve('tokscale/bin.js'));
+  } catch (_) {
+    resolvedTokscaleBinJs = '';
+  }
+  return resolvedTokscaleBinJs;
+}
 
 function nonEmptyEnvPath(env, name, fallback) {
   const value = String(env?.[name] || '').trim();
@@ -171,7 +180,7 @@ function decideResolver({ downloaded, bundled, shim }) {
 function resolvePlatformBinary() {
   const bundled = locateBundledBinary();
   const downloaded = readDownloadedPointer();
-  const shim = { source: 'shim', path: TOKSCALE_BIN_JS, version: null };
+  const shim = { source: 'shim', path: getTokscaleBinJs(), version: null };
   return decideResolver({ downloaded, bundled, shim });
 }
 
@@ -180,7 +189,8 @@ function tokscaleCommand() {
   const useDirect = Boolean(resolved && resolved.source !== 'shim');
   const env = tokscaleEnvironment();
   if (useDirect) return { bin: resolved.path, prefixArgs: [], env };
-  return { bin: process.execPath, prefixArgs: [TOKSCALE_BIN_JS], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } };
+  const shimPath = getTokscaleBinJs();
+  return { bin: process.execPath, prefixArgs: shimPath ? [shimPath] : [], env: { ...env, ELECTRON_RUN_AS_NODE: '1' } };
 }
 
 function parseJsonOutput(stdout) {

@@ -34,6 +34,17 @@ module.exports = [
 
 
   {
+    // The shared UI package is browser ESM consumed by BOTH the Hub dashboard
+    // and the Electron renderer, so it may not assume either host's globals:
+    // every data access goes through src/shared-ui/transport/.
+    files: ['src/shared-ui/**/*.js'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: { ...globals.browser },
+    },
+  },
+
+  {
     // Hub-hosted PWA assets are browser ESM (not Node CommonJS)
     files: ['src/hub/web/**/*.js'],
     ignores: ['src/hub/web/sw.js'],

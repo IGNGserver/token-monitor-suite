@@ -6,6 +6,10 @@ const path = require('node:path');
 const { corsHeaders } = require('../shared/http');
 
 const DEFAULT_WEB_ROOT = path.join(__dirname, 'web');
+// The dashboard's UI lives in a shared package so the Electron desktop client
+// renders the exact same code. Only the shell, PWA assets and the boot module
+// stay under src/hub/web; everything reusable is served from here.
+const SHARED_UI_ROOT = path.join(__dirname, '..', 'shared-ui');
 
 const SECURITY_HEADERS = Object.freeze({
   'content-security-policy': "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'",
@@ -160,6 +164,23 @@ async function tryServeStatic(req, res, { webRoot = DEFAULT_WEB_ROOT } = {}) {
   const url = new URL(req.url || '/', `http://${host}`);
   if (url.pathname.startsWith('/api/')) return false;
 
+  // /ui/* is the shared UI package (same files the Electron renderer loads).
+  if (url.pathname === '/ui' || url.pathname.startsWith('/ui/')) {
+    const rest = url.pathname.slice('/ui'.length) || '/';
+    const asset = await resolveStaticAsset(SHARED_UI_ROOT, rest);
+    if (asset) return sendFile(res, asset.filePath, asset.stat, { method: req.method });
+    return false;
+  }
+
+  // Client icons live in the shared package but keep their historical public
+  // path so existing dashboards, cached HTML and the PWA manifest are unaffected.
+  if (url.pathname.startsWith('/icons/clients/')) {
+    const rest = url.pathname.slice('/icons/clients'.length);
+    const asset = await resolveStaticAsset(path.join(SHARED_UI_ROOT, 'icons', 'clients'), rest);
+    if (asset) return sendFile(res, asset.filePath, asset.stat, { method: req.method });
+    return false;
+  }
+
   const asset = await resolveStaticAsset(webRoot, url.pathname);
   if (!asset) return false;
   return sendFile(res, asset.filePath, asset.stat, { method: req.method });
@@ -167,6 +188,7 @@ async function tryServeStatic(req, res, { webRoot = DEFAULT_WEB_ROOT } = {}) {
 
 module.exports = {
   DEFAULT_WEB_ROOT,
+  SHARED_UI_ROOT,
   MIME_TYPES,
   SECURITY_HEADERS,
   contentTypeFor,

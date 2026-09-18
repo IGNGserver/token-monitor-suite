@@ -159,9 +159,22 @@ export function clientColor(id) {
   return CLIENT_COLORS[id] || CLIENT_COLORS.default;
 }
 
+// The icon base is injected by the host so the same module works in the Hub
+// (served over HTTP at /icons/clients/) and in Electron (packaged asset tree).
+// The Hub default keeps an unconfigured host working unchanged.
+let iconBasePath = '/icons/clients';
+
+export function configureIconBase(basePath) {
+  const next = String(basePath || '').trim().replace(/\/+$/, '');
+  iconBasePath = next || '/icons/clients';
+}
+
+export function clientIconFile(id) {
+  return `${ICON_ALIASES[id] || id}.svg`;
+}
+
 export function clientIconPath(id) {
-  const key = ICON_ALIASES[id] || id;
-  return `/icons/clients/${key}.svg`;
+  return `${iconBasePath}/${clientIconFile(id)}`;
 }
 
 export function modelVendorFor(model) {

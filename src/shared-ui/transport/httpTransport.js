@@ -1,0 +1,333 @@
+// HTTP/SSE transport for the Hub dashboard.
+//
+// Extracted from the dashboard's original `js/api.js`; the SSE client is moved
+// verbatim because its reconnect/backoff/idle-watchdog behaviour is load-bearing
+// (a half-open socket otherwise leaves the UI advertising stale numbers under a
+// "live" badge). Only the request target became injectable.
+
+const STORAGE_SECRET = 'token-monitor.hub.secret';
+const STORAGE_SECRET_SESSION = 'token-monitor.hub.secret.session';
+const STORAGE_PREFS = 'token-monitor.hub.prefs';
+
+// A half-open socket leaves reader.read() pending forever, so the UI would keep
+// showing stale numbers under a "live" badge. The widget solved this with an idle
+// watchdog plus a request deadline; mirror that here.
+const SSE_IDLE_TIMEOUT_MS = 90_000;
+const SSE_CONNECT_TIMEOUT_MS = 15_000;
+
+function authHeaders(secret, extra = {}) {
+  const headers = { ...extra };
+  const value = String(secret || '').trim();
+  if (value) headers.authorization = `Bearer ${value}`;
+  return headers;
+}
+
+function createPrefsStore(storage) {
+  return {
+    load() {
+      try {
+        return JSON.parse(storage.local.getItem(STORAGE_PREFS) || '{}') || {};
+      } catch {
+        return {};
+      }
+    },
+    save(patch) {
+      const next = { ...this.load(), ...patch };
+      storage.local.setItem(STORAGE_PREFS, JSON.stringify(next));
+      return next;
+    }
+  };
+}
+
+function createSecretStore(storage) {
+  return {
+    load() {
+      return storage.session.getItem(STORAGE_SECRET_SESSION)
+        || storage.local.getItem(STORAGE_SECRET)
+        || '';
+    },
+    save(secret, remember) {
+      const value = String(secret || '').trim();
+      storage.session.removeItem(STORAGE_SECRET_SESSION);
+      storage.local.removeItem(STORAGE_SECRET);
+      if (!value) return;
+      if (remember) storage.local.setItem(STORAGE_SECRET, value);
+      else storage.session.setItem(STORAGE_SECRET_SESSION, value);
+    },
+    clear() {
+      storage.session.removeItem(STORAGE_SECRET_SESSION);
+      storage.local.removeItem(STORAGE_SECRET);
+    },
+    isRemembered() {
+      return Boolean(storage.local.getItem(STORAGE_SECRET));
+    }
+  };
+}
+
+function createFlagStore(storage) {
+  return {
+    read(key) {
+      try { return storage.local.getItem(key); } catch { return null; }
+    },
+    write(key, value) {
+      try {
+        if (value === null || value === undefined) storage.local.removeItem(key);
+        else storage.local.setItem(key, String(value));
+      } catch { /* storage may be unavailable */ }
+    }
+  };
+}
+
+/**
+ * @param {object} [options]
+ * @param {string} [options.baseUrl]        Hub origin; '' means same-origin.
+ * @param {() => string} [options.getSecret] Live secret provider.
+ * @param {object} [options.storage]        localStorage/sessionStorage stand-ins.
+ */
+export function createHttpTransport(options = {}) {
+  const baseUrl = String(options.baseUrl || '').replace(/\/+$/, '');
+  const getSecret = typeof options.getSecret === 'function' ? options.getSecret : () => '';
+  const storage = options.storage || {
+    local: typeof localStorage !== 'undefined' ? localStorage : memoryStorage(),
+    session: typeof sessionStorage !== 'undefined' ? sessionStorage : memoryStorage()
+  };
+
+  function resolveUrl(path) {
+    const target = String(path || '');
+    if (/^https?:\/\//i.test(target)) return target;
+    return `${baseUrl}${target}`;
+  }
+
+  async function request(path, { secret, method = 'GET', body, signal } = {}) {
+    const res = await fetch(resolveUrl(path), {
+      method,
+      signal,
+      cache: 'no-store',
+      headers: authHeaders(secret !== undefined ? secret : getSecret(), body ? { 'content-type': 'application/json' } : {}),
+      body: body ? JSON.stringify(body) : undefined
+    });
+    if (res.status === 401) {
+      const error = new Error('unauthorized');
+      error.status = 401;
+      throw error;
+    }
+    if (!res.ok) {
+      let payload = null;
+      try { payload = await res.json(); } catch { /* ignore */ }
+      const detail = payload?.message || payload?.error || '';
+      const error = new Error(detail || `http_${res.status}`);
+      error.status = res.status;
+      error.payload = payload;
+      throw error;
+    }
+    if (res.status === 204) return null;
+    return res.json();
+  }
+
+  async function health() {
+    const res = await fetch(resolveUrl('/api/health'), { cache: 'no-store' });
+    if (!res.ok) throw new Error(`health_${res.status}`);
+    return res.json();
+  }
+
+  function openStream({ secret, onStats, onStatus, onRetry } = {}) {
+    const controller = new AbortController();
+    let closed = false;
+    let retryTimer = null;
+    let retryResolve = null;
+    let retryAttempt = 0;
+    // Timestamp of the last frame the server sent. Reported so the UI can show how
+    // old the displayed data is instead of implying it is current.
+    let lastEventAt = null;
+
+    function retryDelay(attempt) {
+      return Math.min(30_000, 1_000 * (2 ** Math.min(attempt, 5)));
+    }
+
+    /** Abort the current socket after `timeoutMs` without progress. */
+    function watchdog(timeoutMs, arm) {
+      let timer = null;
+      const clear = () => { if (timer !== null) clearTimeout(timer); timer = null; };
+      const reset = () => {
+        clear();
+        if (!closed) timer = setTimeout(() => arm(clear), timeoutMs);
+      };
+      reset();
+      return { reset, clear };
+    }
+
+    async function run() {
+      while (!closed) {
+        onStatus?.(retryAttempt ? 'retrying' : 'connecting');
+        try {
+          // Bound the handshake too: a proxy that accepts the TCP connection but
+          // never responds would otherwise hang here forever with the UI stuck on
+          // "connecting".
+          const attempt = new AbortController();
+          const abortAttempt = () => { try { attempt.abort(); } catch { /* ignore */ } };
+          const connectTimer = setTimeout(abortAttempt, SSE_CONNECT_TIMEOUT_MS);
+          const onOuterAbort = () => abortAttempt();
+          controller.signal.addEventListener('abort', onOuterAbort, { once: true });
+          let res;
+          try {
+            res = await fetch(resolveUrl('/api/stats/stream'), {
+              headers: authHeaders(secret !== undefined ? secret : getSecret(), { accept: 'text/event-stream' }),
+              signal: attempt.signal,
+              cache: 'no-store'
+            });
+          } finally {
+            clearTimeout(connectTimer);
+            controller.signal.removeEventListener('abort', onOuterAbort);
+          }
+          if (res.status === 401) {
+            onStatus?.('unauthorized');
+            return;
+          }
+          if (!res.ok || !res.body) {
+            const error = new Error(`stream_${res.status}`);
+            error.status = res.status;
+            throw error;
+          }
+          retryAttempt = 0;
+          lastEventAt = Date.now();
+          // Status is only 'live' once a frame has actually arrived: the old code
+          // announced live on the response headers alone.
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          const idle = watchdog(SSE_IDLE_TIMEOUT_MS, (clear) => {
+            clear();
+            onStatus?.('idle-timeout', { lastEventAt });
+            try { reader.cancel(); } catch { /* already closed */ }
+            try { controller.abort(new Error('stream idle timeout')); } catch { /* ignore */ }
+          });
+          try {
+            while (!closed) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              idle.reset();
+              lastEventAt = Date.now();
+              buffer += decoder.decode(value, { stream: true });
+              const chunks = buffer.split('\n\n');
+              buffer = chunks.pop() || '';
+              for (const chunk of chunks) {
+                const lines = chunk.split('\n');
+                let event = 'message';
+                const dataLines = [];
+                for (const line of lines) {
+                  if (line.startsWith('event:')) event = line.slice(6).trim();
+                  else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+                }
+                if (!dataLines.length) continue;
+                // A heartbeat proves the socket is alive but carries no data, so it
+                // must not be mistaken for freshness.
+                if (event === 'heartbeat') continue;
+                try {
+                  const payload = JSON.parse(dataLines.join('\n'));
+                  if (event === 'snapshot' || event === 'stats' || payload?.stats) {
+                    onStats?.(payload.stats || payload, event, { at: payload.at || null, lastEventAt });
+                    onStatus?.('live', { lastEventAt });
+                  }
+                } catch {
+                  /* ignore malformed frames */
+                }
+              }
+            }
+          } finally {
+            idle.clear();
+          }
+          if (closed) return;
+          onStatus?.('disconnected');
+        } catch (error) {
+          if (closed || controller.signal.aborted) return;
+          onStatus?.(error?.status === 401 ? 'unauthorized' : 'error');
+          if (error?.status === 401) return;
+        }
+
+        if (closed) return;
+        const delay = retryDelay(retryAttempt);
+        retryAttempt += 1;
+        onRetry?.(delay);
+        await new Promise((resolve) => {
+          retryResolve = resolve;
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            retryResolve = null;
+            resolve();
+          }, delay);
+        });
+      }
+    }
+
+    run();
+    return () => {
+      closed = true;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+        retryResolve?.();
+        retryResolve = null;
+      }
+      controller.abort();
+    };
+  }
+
+  return {
+    capabilities: {
+      // The Hub dashboard is a normal web page: it can use browser dialogs,
+      // window.open and the clipboard directly.
+      pwa: true,
+      nativeDialogs: false,
+      externalOpen: 'window',
+      clipboard: 'navigator',
+      routing: 'history',
+      localCollector: false,
+      updater: false,
+      desktopSettings: false,
+      serviceStatus: false,
+      themeEditor: false,
+      accounts: true,
+      subscriptions: true,
+      pricing: true
+    },
+    request,
+    fetchJson: request,
+    health,
+    openStream,
+    prefs: createPrefsStore(storage),
+    secret: createSecretStore(storage),
+    flags: createFlagStore(storage),
+    openExternal(url) {
+      if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener');
+    },
+    copyText(text) {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        return navigator.clipboard.writeText(String(text ?? ''));
+      }
+      return Promise.resolve(false);
+    },
+    confirm(message) {
+      return Promise.resolve(typeof window !== 'undefined' ? window.confirm(message) : false);
+    },
+    buildRouteUrl(view, params) {
+      const query = params && Object.keys(params).length
+        ? `?${new URLSearchParams(params).toString()}`
+        : '';
+      return `/${view === 'overview' ? '' : view}${query}`;
+    },
+    pushRoute(view, params) {
+      if (typeof window !== 'undefined' && window.history?.pushState) {
+        window.history.pushState({ view }, '', this.buildRouteUrl(view, params));
+      }
+    }
+  };
+}
+
+function memoryStorage() {
+  const map = new Map();
+  return {
+    getItem: (key) => (map.has(key) ? map.get(key) : null),
+    setItem: (key, value) => { map.set(key, String(value)); },
+    removeItem: (key) => { map.delete(key); }
+  };
+}

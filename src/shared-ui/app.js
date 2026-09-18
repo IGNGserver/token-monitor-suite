@@ -1,14 +1,23 @@
 import {
+  capabilities,
   clearSecret,
+  confirmAction,
+  copyText,
   fetchHealth,
   fetchJson,
+  isCapable,
   loadPrefs,
   loadSecret,
+  openExternal,
   openStatsStream,
+  promptAction,
+  readFlag,
   savePrefs,
-  saveSecret
-} from './api.js';
-import { applyI18n, resolveLocale, t } from './i18n.js';
+  saveSecret,
+  secretIsRemembered,
+  writeFlag
+} from './transport/index.js';
+import { applyI18n, resolveLocale, t } from './core/i18n.js';
 import {
   configureRates,
   formatCompact,
@@ -17,7 +26,7 @@ import {
   formatRelative,
   formatReset,
   toDatetimeLocalValue
-} from './format.js';
+} from './core/format.js';
 import {
   toolRows,
   mapRows,
@@ -43,7 +52,7 @@ import {
   HUB_ACCOUNT_PROVIDERS,
   periodTokenMetrics,
   periodActivityCounts
-} from './data.js';
+} from './core/data.js';
 
 const UI_ICON_PATHS = Object.freeze({
   home: '<path d="M3.5 10.5 12 3l8.5 7.5v8a1 1 0 0 1-1 1h-5v-5h-5v5h-5a1 1 0 0 1-1-1z"/><path d="M8 20.5h8"/>',
@@ -178,7 +187,6 @@ function viewFromLocation() {
 
 function syncUrlForView(viewId, { replace = false, tab = '' } = {}) {
   const targetPath = VIEW_PATHS[viewId] || '/';
-  const currentPath = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
   try {
     const params = new URLSearchParams();
     const nextTab = tab || (viewId === 'usage'
@@ -194,6 +202,18 @@ function syncUrlForView(viewId, { replace = false, tab = '' } = {}) {
       params.set('tab', nextTab);
     }
     const query = params.toString();
+    // Desktop loads from file://, where there is no server-side SPA fallback and
+    // a path change would 404. Its transport reports routing:'hash' and builds a
+    // `#/view` URL instead.
+    if (isCapable('routing') && capabilities().routing === 'hash') {
+      const hashUrl = `#${targetPath}${query ? `?${query}` : ''}`;
+      if (window.location.hash === hashUrl) return;
+      const url = `${window.location.pathname}${hashUrl}`;
+      if (replace) window.history.replaceState({ view: viewId }, '', url);
+      else window.history.pushState({ view: viewId }, '', url);
+      return;
+    }
+    const currentPath = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
     const url = `${targetPath}${query ? `?${query}` : ''}`;
     if (currentPath === targetPath && window.location.search === (query ? `?${query}` : '') && !window.location.hash) return;
     if (replace) {
@@ -343,7 +363,7 @@ const state = {
     pricing: null,
     accounts: null
   },
-  pwaDismissed: localStorage.getItem('token-monitor.hub.pwaDismissed') === '1'
+  pwaDismissed: readFlag('token-monitor.hub.pwaDismissed') === '1'
 };
 
 function tr(key, params) {
@@ -2968,7 +2988,7 @@ async function toggleAccount(accountId) {
 async function deleteAccount(accountId) {
   const account = state.accounts?.find((a) => a.id === accountId);
   if (!account) return;
-  if (!window.confirm(tr('accounts.confirmDelete', { name: account.name || account.provider }))) return;
+  if (!(await confirmAction(tr('accounts.confirmDelete', { name: account.name || account.provider })))) return;
   state.accountsSaving = true;
   render();
   try {
@@ -3032,7 +3052,7 @@ async function tryConnect(secret, remember = true) {
 
 async function deleteDevice(deviceId) {
   if (!deviceId) return;
-  if (!window.confirm(tr('devices.confirmDelete'))) return;
+  if (!(await confirmAction(tr('devices.confirmDelete')))) return;
   await fetchJson(`/api/devices/${encodeURIComponent(deviceId)}`, {
     secret: state.secret,
     method: 'DELETE'
@@ -3043,9 +3063,9 @@ async function deleteDevice(deviceId) {
 
 async function renameDevice(deviceId) {
   if (!deviceId) return;
-  const nextDeviceId = String(window.prompt(tr('devices.renamePrompt'), deviceId) || '').trim();
+  const nextDeviceId = String(await promptAction(tr('devices.renamePrompt'), deviceId) || '').trim();
   if (!nextDeviceId || nextDeviceId === deviceId) return;
-  if (!window.confirm(tr('devices.renameCredentialWarning'))) return;
+  if (!(await confirmAction(tr('devices.renameCredentialWarning')))) return;
   await fetchJson(`/api/devices/${encodeURIComponent(deviceId)}/rename`, {
     secret: state.secret,
     method: 'POST',
@@ -3138,7 +3158,7 @@ async function saveSubscriptions(next) {
 
 async function deleteSubscription(id) {
   const record = subscriptionRecords().find((entry) => entry.id === id);
-  if (!record || !window.confirm(tr('subscriptions.confirmDelete'))) return;
+  if (!record || !(await confirmAction(tr('subscriptions.confirmDelete')))) return;
   await saveSubscriptions(subscriptionRecords().filter((entry) => entry.id !== id));
 }
 
@@ -3541,22 +3561,27 @@ function bindEvents() {
     const accountOAuthOpen = event.target.closest('[data-account-oauth-open]');
     if (accountOAuthOpen) {
       const url = accountOAuthOpen.dataset.accountOauthOpen;
-      const opened = window.open(url, '_blank', 'noopener,noreferrer');
-      if (!opened) showToast(tr('error.generic'));
+      void (async () => {
+        try {
+          await openExternal(url);
+        } catch {
+          showToast(tr('error.generic'));
+        }
+      })();
       return;
     }
     const accountOAuthCopy = event.target.closest('[data-account-oauth-copy]');
     if (accountOAuthCopy) {
       const url = accountOAuthCopy.dataset.accountOauthCopy;
-      if (!navigator.clipboard?.writeText) {
-        showToast(tr('error.generic'));
-        return;
-      }
-      void navigator.clipboard.writeText(url).then(() => {
-        showToast(tr('accounts.oauthLinkCopied'));
-      }).catch(() => {
-        showToast(tr('error.generic'));
-      });
+      void (async () => {
+        try {
+          const ok = await copyText(url);
+          if (ok === false) throw new Error('clipboard_unavailable');
+          showToast(tr('accounts.oauthLinkCopied'));
+        } catch {
+          showToast(tr('error.generic'));
+        }
+      })();
       return;
     }
     const topUpAdd = event.target.closest('[data-topup-add]');
@@ -3864,18 +3889,22 @@ function bindEvents() {
     el.addEventListener('click', () => openSettings(false));
   });
 
-  window.addEventListener('beforeinstallprompt', (event) => {
-    event.preventDefault();
-    state.deferredInstall = event;
-    refreshPwaUi();
-  });
-  window.addEventListener('appinstalled', () => {
-    state.deferredInstall = null;
-    state.pwaDismissed = true;
-    localStorage.setItem('token-monitor.hub.pwaDismissed', '1');
-    refreshPwaUi();
-    showToast(tr('pwa.installed'));
-  });
+  // The install prompt and offline shell only exist in a browser. The desktop
+  // client sets capabilities.pwa=false and these listeners stay unbound.
+  if (isCapable('pwa')) {
+    window.addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault();
+      state.deferredInstall = event;
+      refreshPwaUi();
+    });
+    window.addEventListener('appinstalled', () => {
+      state.deferredInstall = null;
+      state.pwaDismissed = true;
+      writeFlag('token-monitor.hub.pwaDismissed', '1');
+      refreshPwaUi();
+      showToast(tr('pwa.installed'));
+    });
+  }
   if (els.pwaInstallBtn) {
     els.pwaInstallBtn.addEventListener('click', async () => {
       if (!state.deferredInstall) return;
@@ -3893,7 +3922,7 @@ function bindEvents() {
   if (els.pwaDismissBtn) {
     els.pwaDismissBtn.addEventListener('click', () => {
       state.pwaDismissed = true;
-      localStorage.setItem('token-monitor.hub.pwaDismissed', '1');
+      writeFlag('token-monitor.hub.pwaDismissed', '1');
       refreshPwaUi();
     });
   }
@@ -3944,7 +3973,7 @@ async function init() {
   bindEvents();
   renderChrome();
 
-  if ('serviceWorker' in navigator && window.isSecureContext) {
+  if (isCapable('pwa') && 'serviceWorker' in navigator && window.isSecureContext) {
     try {
       const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
       if (reg?.update) void reg.update();
@@ -3952,7 +3981,7 @@ async function init() {
       /* optional when the browser rejects the worker */
     }
   }
-  refreshPwaUi();
+  if (isCapable('pwa')) refreshPwaUi();
 
   // Display rates come from the Hub so this dashboard renders costs in the same
   // currency units as the widget (which uses live rates); the built-in table is
@@ -3980,7 +4009,7 @@ async function init() {
   }
 
   if (state.secret) {
-    const ok = await tryConnect(state.secret, Boolean(localStorage.getItem('token-monitor.hub.secret')));
+    const ok = await tryConnect(state.secret, secretIsRemembered());
     if (ok) return;
   }
   showAuth(true);

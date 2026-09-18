@@ -10,7 +10,8 @@ const {
   resolveWebFile,
   resolveStaticAsset,
   tryServeStatic,
-  DEFAULT_WEB_ROOT
+  DEFAULT_WEB_ROOT,
+  SHARED_UI_ROOT
 } = require('../../src/hub/static');
 const { createHub } = require('../../src/hub/server');
 const { MemoryRepository } = require('./memory-repository');
@@ -33,7 +34,7 @@ test('resolveStaticAsset serves the SPA shell and real assets', async () => {
   assert.ok(index);
   assert.equal(path.basename(index.filePath), 'index.html');
 
-  const css = await resolveStaticAsset(DEFAULT_WEB_ROOT, '/css/app.css');
+  const css = await resolveStaticAsset(SHARED_UI_ROOT, '/styles/app.css');
   assert.ok(css);
   assert.equal(path.basename(css.filePath), 'app.css');
 
@@ -101,17 +102,26 @@ test('hub serves the web UI on the same port without a secret', async () => {
     assert.match(icon.headers.get('content-type') || '', /image\/png/);
     assert.ok((await icon.arrayBuffer()).byteLength > 0);
 
-    const css = await fetch(`${base}/css/app.css`);
+    // The UI is served from the shared package; the shell keeps its own boot
+    // module and the client icons keep their historical public path.
+    const css = await fetch(`${base}/ui/styles/app.css`);
     assert.equal(css.status, 200);
     assert.ok((await css.text()).length > 0);
 
-    const appJs = await fetch(`${base}/js/app.js`);
+    const appJs = await fetch(`${base}/ui/app.js`);
     assert.equal(appJs.status, 200);
     const appSource = await appJs.text();
     assert.match(appSource, /openStatsStream|serviceWorker/);
     assert.match(appSource, /function openNav\(/);
     assert.match(appSource, /menuToggle/);
-    assert.match(appSource, /beforeinstallprompt/);
+
+    const bootJs = await fetch(`${base}/js/boot.js`);
+    assert.equal(bootJs.status, 200);
+    assert.match(await bootJs.text(), /configureTransport/);
+
+    const clientIcon = await fetch(`${base}/icons/clients/claude.svg`);
+    assert.equal(clientIcon.status, 200);
+    assert.match(clientIcon.headers.get('content-type') || '', /svg/);
 
     const manifestBody = body;
     assert.equal(manifestBody.display, 'standalone');

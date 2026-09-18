@@ -5,10 +5,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const dataPath = path.join(__dirname, '../../src/hub/web/js/data.js');
+const dataPath = path.join(__dirname, '../../src/shared-ui/core/data.js');
 const source = fs.readFileSync(dataPath, 'utf8');
 
-/** @type {Awaited<typeof import('../../src/hub/web/js/data.js')>} */
+/** @type {Awaited<typeof import('../../src/shared-ui/core/data.js')>} */
 let dataApi;
 
 test.before(async () => {
@@ -36,14 +36,14 @@ test('hub web data exports expected helper surface', () => {
 });
 
 test('openrouter client icon is published for hub web', () => {
-  const icon = path.join(__dirname, '../../src/hub/web/icons/clients/openrouter.svg');
+  const icon = path.join(__dirname, '../../src/shared-ui/icons/clients/openrouter.svg');
   assert.equal(fs.existsSync(icon), true);
   const svg = fs.readFileSync(icon, 'utf8');
   assert.match(svg, /OpenRouter|openrouter/i);
 });
 
 test('hub web app wires status, heatmap, and active-days controls', () => {
-  const app = fs.readFileSync(path.join(__dirname, '../../src/hub/web/js/app.js'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
   assert.match(app, /data-heatmap-metric|heatmap-metric/);
   assert.match(app, /data-active-days-window|active-days-window/);
   assert.match(app, /data-device-period|deviceDetailPeriod/);
@@ -79,7 +79,7 @@ test('hub web app wires status, heatmap, and active-days controls', () => {
 });
 
 test('hub web navigation exposes the new page model and compatibility routes', () => {
-  const app = fs.readFileSync(path.join(__dirname, '../../src/hub/web/js/app.js'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
   for (const view of ['overview', 'usage', 'devices', 'limits', 'trends', 'accounts', 'management', 'settings']) {
     assert.match(app, new RegExp(`id: '${view}'`));
   }
@@ -95,9 +95,9 @@ test('hub web navigation exposes the new page model and compatibility routes', (
 });
 
 test('hub account UI keeps the shared form system and reports OAuth failures', () => {
-  const app = fs.readFileSync(path.join(__dirname, '../../src/hub/web/js/app.js'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
   const index = fs.readFileSync(path.join(__dirname, '../../src/hub/web/index.html'), 'utf8');
-  const css = fs.readFileSync(path.join(__dirname, '../../src/hub/web/css/app.css'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/styles/app.css'), 'utf8');
 
   assert.match(app, /const UI_ICON_PATHS/);
   assert.match(app, /data-account-mode="\$\{escapeHtml\(effectiveMode\)\}"/);
@@ -398,7 +398,7 @@ test('limitRemainingTone matches desktop thresholds', () => {
 
 
 test('hub web app wires tool drill and trends stack', () => {
-  const app = fs.readFileSync(path.join(__dirname, '../../src/hub/web/js/app.js'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
   assert.match(app, /function renderTools\(/);
   assert.match(app, /data-select-tool/);
   assert.match(app, /selectedToolId/);
@@ -452,7 +452,7 @@ test('every id the dashboard can request an icon for resolves to a shipped file'
   // and re-requests it on every re-render (responses are cache-control: no-store).
   // `claude-desktop` (a default client), `commandcode`, `kimi` and `zcode` were
   // all missing this way.
-  const iconsDir = path.join(__dirname, '../../src/hub/web/icons/clients');
+  const iconsDir = path.join(__dirname, '../../src/shared-ui/icons/clients');
   const shipped = new Set(
     fs.readdirSync(iconsDir).filter((name) => name.endsWith('.svg')).map((name) => name.replace(/\.svg$/, ''))
   );
@@ -489,7 +489,7 @@ test('the shared client list is fully branded on the dashboard', async () => {
   const aliases = Object.fromEntries(
     [...aliasBlock.matchAll(/^\s*'?([a-z0-9-]+)'?:\s*'([a-z0-9-]+)'/gm)].map((match) => [match[1], match[2]])
   );
-  const iconsDir = path.join(__dirname, '../../src/hub/web/icons/clients');
+  const iconsDir = path.join(__dirname, '../../src/shared-ui/icons/clients');
   const shipped = new Set(
     fs.readdirSync(iconsDir).filter((name) => name.endsWith('.svg')).map((name) => name.replace(/\.svg$/, ''))
   );
@@ -498,7 +498,7 @@ test('the shared client list is fully branded on the dashboard', async () => {
 });
 
 test('the dashboard rate table is configurable and falls back to shared defaults', async () => {
-  const formatPath = path.join(__dirname, '../../src/hub/web/js/format.js');
+  const formatPath = path.join(__dirname, '../../src/shared-ui/core/format.js');
   const format = await import(pathToFileUrl(formatPath));
 
   // Defaults must match src/shared/currency.js so the two clients agree before the
@@ -531,7 +531,7 @@ test('the dashboard rate table is configurable and falls back to shared defaults
 });
 
 test('the dashboard fetches its rates from the Hub during boot', () => {
-  const appSource = fs.readFileSync(path.join(__dirname, '../../src/hub/web/js/app.js'), 'utf8');
+  const appSource = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
   assert.match(appSource, /fetch\('\/api\/rates'/, 'the dashboard should read the Hub rate feed');
   assert.match(appSource, /configureRates\(payload\.rates/, 'the fetched rates should be applied');
 });
@@ -564,12 +564,12 @@ test('the dashboard detects an idle stream and reports how old its data is', () 
   // A half-open socket leaves reader.read() pending forever, so the badge used to
   // read "live" while the numbers were arbitrarily old. The widget solved this
   // with an idle watchdog; the dashboard must too.
-  const apiSource = fs.readFileSync(path.join(__dirname, '../../src/hub/web/js/api.js'), 'utf8');
+  const apiSource = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/transport/httpTransport.js'), 'utf8');
   assert.match(apiSource, /SSE_IDLE_TIMEOUT_MS/, 'the stream needs an idle timeout');
   assert.match(apiSource, /onStatus\?\.\('idle-timeout'/, 'an idle stream should report a distinct status');
   assert.match(apiSource, /if \(event === 'heartbeat'\) continue;/, 'heartbeats prove liveness but not freshness');
 
-  const appSource = fs.readFileSync(path.join(__dirname, '../../src/hub/web/js/app.js'), 'utf8');
+  const appSource = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
   assert.match(appSource, /'idle-timeout': 'status\.idleTimeout'/, 'the new status needs a label');
   assert.match(appSource, /state\.dataAsOf/, 'the app should record when the data last arrived');
   assert.match(appSource, /tr\('status\.dataAsOf'\)/, 'the UI should state the data age');
@@ -579,7 +579,7 @@ test('a custom range derives the per-client model split from its sessions', () =
   // /api/usage/range returns flat clients/models maps, so the nested split the
   // Usage -> Tools view renders was empty ("No usage") for every custom range
   // while the preset periods showed it.
-  const appSource = fs.readFileSync(path.join(__dirname, '../../src/hub/web/js/app.js'), 'utf8');
+  const appSource = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
   assert.match(appSource, /function deriveClientModels\(/, 'the derivation helper should exist');
   assert.match(appSource, /clientModels: payload\.clientModels \|\| deriveClientModels\(payload\.sessions, 'models'\)/);
   assert.match(appSource, /clientModelCosts: payload\.clientModelCosts \|\| deriveClientModels\(payload\.sessions, 'modelCosts'\)/);

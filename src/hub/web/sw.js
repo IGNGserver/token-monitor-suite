@@ -1,14 +1,16 @@
 /* Token Monitor hub web shell — cache app shell for offline reopen on mobile. */
-const CACHE = 'token-monitor-web-v4';
+const CACHE = 'token-monitor-web-v5';
 const PRECACHE = [
   '/',
   '/index.html',
-  '/css/app.css',
-  '/js/app.js',
-  '/js/api.js',
-  '/js/i18n.js',
-  '/js/format.js',
-  '/js/data.js',
+  '/js/boot.js',
+  '/ui/styles/app.css',
+  '/ui/app.js',
+  '/ui/transport/index.js',
+  '/ui/transport/httpTransport.js',
+  '/ui/core/i18n.js',
+  '/ui/core/format.js',
+  '/ui/core/data.js',
   '/manifest.webmanifest',
   '/favicon.png',
   '/icons/icon-192.png',

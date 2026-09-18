@@ -24,15 +24,12 @@ import { applyI18n, resolveLocale, t } from './core/i18n.js';
 import { configureViewContext } from './core/viewContext.js';
 import { renderDesktopSettings, readDesktopSettingsPatch } from './views/settingsDesktop.js';
 import { renderLimits } from './views/limits.js';
+import { renderHome } from './views/home.js';
 import { renderUsage } from './views/usage.js';
 import { renderDevices } from './views/devices.js';
 import {
   renderTrends,
-  renderSparkline,
-  renderHeatmap,
   renderCompletenessNotice,
-  renderHistoryScopeNotice,
-  historySource,
   historyHasBreakdown
 } from './views/trends.js';
 import {
@@ -44,18 +41,11 @@ import {
   toDatetimeLocalValue
 } from './core/format.js';
 import {
-  toolRows,
-  modelRows,
-  deviceRows,
-  limitCards,
-  historyDaily,
-  clientLabel,
   clientIconPath,
-  devicePlatformLabel,
-  countActiveDays,
-  limitRemainingTone,
+  clientLabel,
   clampHomeLimitAccountCount,
   HUB_ACCOUNT_PROVIDERS,
+  toolRows
 } from './core/data.js';
 
 const UI_ICON_PATHS = Object.freeze({
@@ -956,168 +946,6 @@ function renderHero() {
 
 
 
-function renderHome() {
-  const period = activePeriod();
-  const stats = viewStats();
-  const tools = toolRows(period).slice(0, 5);
-  const models = modelRows(period).slice(0, 5);
-  const devices = deviceRows(stats, state.customPeriod ? 'today' : state.prefs.period).slice(0, 5);
-  const limits = limitCards(stats, state.locale).slice(0, clampHomeLimitAccountCount(state.prefs.homeLimitAccountCount, 3));
-  const history = historySource();
-  const daily = historyDaily(history, 14);
-  const heatDaily = historyDaily(history, 90);
-  const heatMetric = state.prefs.heatmapMetric === 'tokens' ? 'tokens' : 'cost';
-  const activeDaysWindow = state.prefs.activeDaysWindow === 'year' ? 'year' : 'all';
-  const summary = history?.summary || null;
-  const displayActiveDays = countActiveDays(history?.daily || [], activeDaysWindow);
-  const summaryActiveDays = Number(summary?.activeDays);
-  const activeDaysValue = activeDaysWindow === 'year'
-    ? displayActiveDays
-    : (Number.isFinite(summaryActiveDays) ? summaryActiveDays : displayActiveDays);
-
-  const totalTokens = Math.max(1, period.totalTokens || 0);
-
-  // Tools: interactive visual proportion bars with client icons
-  const toolsBody = tools.length
-    ? `<div class="stack">${tools.map((row) => {
-        const pct = Math.round((row.value / totalTokens) * 100);
-        return `
-          <button type="button" class="home-interactive-row" data-jump-view="tool" data-jump-tool="${escapeHtml(row.key)}">
-            <div class="row">
-              <div class="row-main">
-                <img class="client-icon" src="${clientIconPath(row.key)}" alt="" onerror="this.style.display='none'" />
-                <div class="row-copy">
-                  <div class="row-name">${escapeHtml(row.name)}</div>
-                  <div class="row-sub">${pct}% · ${formatCost(row.cost, state.prefs.currency)}</div>
-                </div>
-              </div>
-              <div class="row-metrics">
-                <div class="row-value">${formatCompact(row.value)}</div>
-              </div>
-            </div>
-            <div class="share-meter"><span style="width:${Math.max(2, Math.min(100, pct))}%; background:${row.color}"></span></div>
-          </button>
-        `;
-      }).join('')}</div>`
-    : emptyHtml('empty.usage');
-
-  // Models: interactive visual proportion bars with model colors
-  const modelsBody = models.length
-    ? `<div class="stack">${models.map((row) => {
-        const pct = Math.round((row.value / totalTokens) * 100);
-        return `
-          <button type="button" class="home-interactive-row" data-jump-view="model" data-jump-usage-tab="models">
-            <div class="row">
-              <div class="row-main">
-                <span class="swatch" style="background:${row.color}"></span>
-                <div class="row-copy">
-                  <div class="row-name">${escapeHtml(row.name)}</div>
-                  <div class="row-sub">${pct}% · ${formatCost(row.cost, state.prefs.currency)}</div>
-                </div>
-              </div>
-              <div class="row-metrics">
-                <div class="row-value">${formatCompact(row.value)}</div>
-              </div>
-            </div>
-            <div class="share-meter"><span style="width:${Math.max(2, Math.min(100, pct))}%; background:${row.color}"></span></div>
-          </button>
-        `;
-      }).join('')}</div>`
-    : emptyHtml('empty.usage');
-
-  // Devices: cards with status & quick jump
-  const devicesBody = devices.length
-    ? `<div class="stack">${devices.map((row) => `
-        <button type="button" class="home-interactive-row" data-jump-view="device" data-jump-device="${escapeHtml(row.key)}">
-          <div class="row">
-            <div class="row-main">
-              <span class="swatch" style="background:${row.color}"></span>
-              <div class="row-copy">
-                <div class="row-name">${escapeHtml(row.name)}</div>
-                <div class="row-sub">${escapeHtml(row.platformDisplay || devicePlatformLabel(row.platform, row.osName, row.osVersion))}${row.stale ? ` · ${escapeHtml(tr('devices.stale'))}` : ''}</div>
-              </div>
-            </div>
-            <div class="row-metrics">
-              <div class="row-value">${formatCompact(row.value)}</div>
-              <div class="row-cost">${formatCost(row.cost, state.prefs.currency)}</div>
-            </div>
-          </div>
-        </button>
-      `).join('')}</div>`
-    : emptyHtml('empty.usage');
-
-  // Limits: graphical cards with progress bars and remaining tone
-  const limitsBody = limits.length
-    ? `<div class="home-limits-grid">${limits.map((card) => {
-        const remaining = card.lowestRemaining;
-        const tone = remaining == null ? 'unknown' : limitRemainingTone(remaining);
-        const toneClass = `meter-${tone}`;
-        const pct = remaining == null ? 0 : Math.max(0, Math.min(100, Math.round(remaining)));
-        return `
-          <button type="button" class="home-limit-card" data-jump-view="limits">
-            <div class="home-limit-head">
-              <div class="home-limit-identity">
-                <img class="client-icon" src="${clientIconPath(card.provider)}" alt="" onerror="this.style.display='none'" />
-                <span class="home-limit-name">${escapeHtml(card.name)}</span>
-              </div>
-              <span class="home-limit-val remaining-tone-${tone}">${remaining == null ? '—' : `${pct}%`}</span>
-            </div>
-            <div class="home-limit-bar ${toneClass}"><span style="width:${pct}%"></span></div>
-            <div class="home-limit-sub">${escapeHtml(clientLabel(card.provider))}${card.plan ? ` · ${escapeHtml(card.plan)}` : ''}</div>
-          </button>
-        `;
-      }).join('')}</div>`
-    : emptyHtml('empty.limits');
-
-  const activeTime = Number(summary?.activeTimeMs || 0);
-  const completeness = renderCompletenessNotice(stats, state.prefs.period);
-
-  const viewAllAction = (targetView) => `<button type="button" class="panel-head-action" data-jump-view="${targetView}"><span>${tr(`nav.${targetView}`)}</span>${uiIcon('arrowUpRight')}</button>`;
-
-  const sparklineHeader = `
-    <div class="home-sparkline-head">
-      <div class="home-sparkline-pills">
-        <div class="home-pill"><span class="home-pill-label">${tr('home.activeDays')}:</span><span class="home-pill-val">${formatNumber(activeDaysValue)}</span></div>
-        <div class="home-pill"><span class="home-pill-label">${tr('home.streak')}:</span><span class="home-pill-val">${formatNumber(summary?.currentStreak || 0)}d</span></div>
-        <div class="home-pill"><span class="home-pill-label">${tr('home.peakDay')}:</span><span class="home-pill-val">${formatCompact(summary?.peakDayTokens || 0)}</span></div>
-        ${activeTime > 0 ? `<div class="home-pill"><span class="home-pill-label">${tr('home.activeTime')}:</span><span class="home-pill-val">${formatDuration(activeTime)}</span></div>` : ''}
-      </div>
-      ${viewAllAction('trends')}
-    </div>
-  `;
-
-  const sparklineBlock = `
-    ${sparklineHeader}
-    ${renderSparkline(daily)}
-  `;
-
-  const heatmapBody = (summary || heatDaily.length)
-    ? `
-      <div class="toolbar-row">
-        <div class="seg" role="group" aria-label="${tr('home.heatmapMetric')}">
-          ${segButtons([['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')]], heatMetric, 'heatmap-metric')}
-        </div>
-        <div class="seg" role="group" aria-label="${tr('home.activeDaysWindow')}">
-          ${segButtons([['all', tr('home.activeDaysWindow.all')], ['year', tr('home.activeDaysWindow.year')]], activeDaysWindow, 'active-days-window')}
-        </div>
-      </div>
-      ${renderHeatmap(heatDaily, heatMetric)}
-    `
-    : emptyHtml('empty.history');
-
-  return `
-    ${completeness}
-    ${renderHistoryScopeNotice()}
-    ${panel(tr('home.activity'), sparklineBlock, daily.length ? `${daily.length}d` : '')}
-    <div class="grid-2">
-      ${panel(tr('home.tools'), toolsBody, '', viewAllAction('tool'))}
-      ${panel(tr('home.models'), modelsBody, '', viewAllAction('model'))}
-      ${panel(tr('home.devices'), devicesBody, '', viewAllAction('device'))}
-      ${panel(tr('home.limits'), limitsBody, '', viewAllAction('limits'))}
-    </div>
-    ${panel(tr('home.summary'), heatmapBody)}
-  `;
-}
 
 function formatSubscriptionMoney(amountMinor, currency) {
   const code = ['USD', 'CNY', 'TWD', 'HKD'].includes(String(currency || '').toUpperCase())

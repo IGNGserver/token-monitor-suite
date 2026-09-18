@@ -1464,6 +1464,103 @@ function localizeWindowLabel(window) {
   return window?.label || '—';
 }
 
+function groupAntigravityWindows(windows = []) {
+  const groups = new Map();
+  const ungrouped = [];
+  const suffixPattern = /\s+(?:5-hour|weekly)$/i;
+
+  for (const window of windows) {
+    const rawLabel = String(window.label || '').trim();
+    const match = rawLabel.match(suffixPattern);
+    if ((window.kind === 'session' || window.kind === 'weekly') && match) {
+      const groupName = rawLabel.replace(suffixPattern, '').trim() || 'General';
+      const cleanWindow = {
+        ...window,
+        displayLabel: window.kind === 'session' ? tr('limits.window.session') : tr('limits.window.weekly')
+      };
+      if (!groups.has(groupName)) groups.set(groupName, []);
+      groups.get(groupName).push(cleanWindow);
+    } else {
+      ungrouped.push(window);
+    }
+  }
+
+  if (groups.size === 0) return null;
+  return {
+    groups: [...groups.entries()].map(([title, items]) => ({ title, items })),
+    ungrouped
+  };
+}
+
+function renderSingleLimitWindow(window) {
+  const isBalanceKind = window.kind === 'balance' || window.kind === 'balanceUsd';
+  const showMeter = window.showMeter !== false && window.remaining != null && !isBalanceKind;
+  const tone = showMeter ? limitRemainingTone(window.remaining) : 'unknown';
+  const primary = (isBalanceKind || !showMeter)
+    ? (window.value || (window.remaining != null ? `${Math.round(window.remaining)}%` : '—'))
+    : `${Math.round(window.remaining)}%`;
+  const metricHint = window.metric === 'credits' ? tr('limits.credits') : window.metric === 'resets' ? tr('limits.resetCredits') : '';
+  const label = window.displayLabel || localizeWindowLabel(window);
+  const isWide = window.kind === 'named' || window.kind === 'resetCredits' || isBalanceKind;
+
+  return `
+  <div class="limit-window${isWide ? ' limit-window-wide' : ''}">
+    <div class="limit-window-label">
+      <span>${escapeHtml(label)}${metricHint ? ` · ${escapeHtml(metricHint)}` : ''}</span>
+      <strong class="remaining-tone remaining-tone-${tone}">${escapeHtml(String(primary))}</strong>
+    </div>
+    ${showMeter ? `<div class="meter meter-${limitRemainingTone(window.remaining)}"><span style="width:${Math.max(0, Math.min(100, window.remaining))}%"></span></div>` : '<div class="limit-balance-line"></div>'}
+    <div class="row-sub" style="margin-top:8px">
+      ${window.value && showMeter ? escapeHtml(window.value) : ''}
+      ${window.detail ? escapeHtml(window.detail) : ''}
+      ${window.resetsAt ? `${tr('limits.reset')} ${escapeHtml(formatReset(window.resetsAt, state.locale))}` : ''}
+    </div>
+  </div>`;
+}
+
+function renderLimitCardWindows(card) {
+  if (!card.windows || !card.windows.length) {
+    return renderSingleLimitWindow({ label: '—', remaining: null, showMeter: false });
+  }
+
+  if (card.provider === 'antigravity') {
+    const agyGrouped = groupAntigravityWindows(card.windows);
+    if (agyGrouped) {
+      const groupsHtml = agyGrouped.groups.map((group) => `
+        <div class="limit-window-group">
+          <div class="limit-window-group-title">${escapeHtml(group.title)}</div>
+          <div class="limit-window-group-items">
+            ${group.items.map(renderSingleLimitWindow).join('')}
+          </div>
+        </div>
+      `).join('');
+      const ungroupedHtml = agyGrouped.ungrouped.length
+        ? `<div class="limit-window-group-items" style="margin-top:8px">${agyGrouped.ungrouped.map(renderSingleLimitWindow).join('')}</div>`
+        : '';
+      return `<div class="limit-windows limit-windows-antigravity-grouped">${groupsHtml}${ungroupedHtml}</div>`;
+    }
+  }
+
+  return `<div class="limit-windows">${card.windows.map(renderSingleLimitWindow).join('')}</div>`;
+}
+
+function formatLimitBadge(card) {
+  if (card.stale) {
+    return `<span class="badge stale">${escapeHtml(tr('limits.stale'))}</span>`;
+  }
+  const status = String(card.status || '').toLowerCase();
+  if (status === 'ok') {
+    return `<span class="badge ok">${escapeHtml(tr('accounts.statusOk'))}</span>`;
+  }
+  if (status === 'disabled') {
+    return `<span class="badge">${escapeHtml(tr('accounts.statusDisabled'))}</span>`;
+  }
+  if (status === 'unauthorized') {
+    return `<span class="badge warn">${escapeHtml(tr('accounts.statusError'))}</span>`;
+  }
+  return `<span class="badge warn">${escapeHtml(card.status || tr('accounts.statusError'))}</span>`;
+}
+
 function renderLimitCards(cards, { compact = false } = {}) {
   if (!cards.length) return emptyHtml('empty.limits');
   return `
@@ -1485,32 +1582,9 @@ function renderLimitCards(cards, { compact = false } = {}) {
                 <div class="row-sub">${escapeHtml(sub)}</div>
               </div>
             </div>
-            <span class="badge ${card.stale ? 'stale' : (String(card.status).toLowerCase() === 'ok' ? 'ok' : 'warn')}">${card.stale ? tr('devices.stale') : escapeHtml(card.status)}</span>
+            ${formatLimitBadge(card)}
           </div>
-          <div class="limit-windows">
-            ${(card.windows.length ? card.windows : [{ label: '—', remaining: null, showMeter: false }]).map((window) => {
-              const showMeter = window.showMeter !== false && window.remaining != null;
-              const tone = showMeter ? limitRemainingTone(window.remaining) : 'unknown';
-              const primary = showMeter
-                ? `${Math.round(window.remaining)}%`
-                : (window.value || '—');
-              const metricHint = window.metric === 'credits' ? tr('limits.credits') : '';
-              const label = localizeWindowLabel(window);
-              return `
-              <div class="limit-window">
-                <div class="limit-window-label">
-                  <span>${escapeHtml(label)}${metricHint ? ` · ${escapeHtml(metricHint)}` : ''}</span>
-                  <strong class="remaining-tone remaining-tone-${tone}">${escapeHtml(String(primary))}</strong>
-                </div>
-                ${showMeter ? `<div class="meter meter-${limitRemainingTone(window.remaining)}"><span style="width:${Math.max(0, Math.min(100, window.remaining))}%"></span></div>` : '<div class="limit-balance-line"></div>'}
-                <div class="row-sub" style="margin-top:8px">
-                  ${window.value && showMeter ? escapeHtml(window.value) : ''}
-                  ${window.detail ? escapeHtml(window.detail) : ''}
-                  ${window.resetsAt ? `${tr('limits.reset')} ${escapeHtml(formatReset(window.resetsAt, state.locale))}` : ''}
-                </div>
-              </div>`;
-            }).join('')}
-          </div>
+          ${renderLimitCardWindows(card)}
           <div class="limit-card-foot" title="${escapeHtml(card.updatedAt ? formatReset(card.updatedAt, state.locale) : '')}">
             <span>${tr('limits.lastFetched', { time: formatRelative(card.updatedAt, state.locale) })}</span>
           </div>
@@ -2456,6 +2530,11 @@ function renderAccounts() {
   let simpleFieldsHtml;
   switch (currentProvider) {
     case 'claude':
+      simpleFieldsHtml = `
+        <label class="field field-wide"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="sessionKey=... / cookie" ${isEditing ? '' : 'required'} /></label>
+        <p class="muted tiny notice warn" style="margin-top:4px">${escapeHtml(tr('accounts.claudeRiskNotice'))}</p>
+      `;
+      break;
     case 'commandcode':
     case 'ollama':
       simpleFieldsHtml = `
@@ -2471,8 +2550,9 @@ function renderAccounts() {
       break;
     case 'antigravity':
       simpleFieldsHtml = `
-        <label class="field"><span>${tr('accounts.agyEndpoint')}</span><input name="endpoint" type="url" value="${accountCredentialField(editing, 'endpoint')}" spellcheck="false" placeholder="http://127.0.0.1:port" ${isEditing ? '' : 'required'} /></label>
+        <label class="field"><span>${tr('accounts.agyEndpoint')}</span><input name="endpoint" type="url" value="${accountCredentialField(editing, 'endpoint')}" spellcheck="false" placeholder="http://hub-accessible-host:port" ${isEditing ? '' : 'required'} /></label>
         <label class="field"><span>${tr('accounts.agyCsrfToken')}</span><input name="csrfToken" type="password" autocomplete="off" spellcheck="false" placeholder="csrf token" ${isEditing ? '' : 'required'} /></label>
+        <p class="muted tiny" style="grid-column:1 / -1;margin-top:2px">${escapeHtml(tr('accounts.agyEndpointHint'))}</p>
       `;
       break;
     case 'qoder':
@@ -2483,7 +2563,10 @@ function renderAccounts() {
       break;
     case 'mimo':
       simpleFieldsHtml = `
-        <label class="field field-wide"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="userId=...; serviceToken=..." ${isEditing ? '' : 'required'} /></label>
+        <label class="field"><span>${tr('accounts.mimoServiceToken')}</span><input name="serviceToken" type="password" autocomplete="off" spellcheck="false" placeholder="api-platform_serviceToken" /></label>
+        <label class="field"><span>${tr('accounts.mimoUserId')}</span><input name="userId" autocomplete="off" spellcheck="false" placeholder="1000..." /></label>
+        <label class="field field-wide"><span>${tr('accounts.cookie')} (Header)</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="userId=...; api-platform_serviceToken=..." /></label>
+        <p class="muted tiny" style="grid-column:1 / -1;margin-top:2px">${escapeHtml(tr('accounts.mimoHint'))}</p>
       `;
       break;
     case 'copilot':
@@ -2524,6 +2607,7 @@ function renderAccounts() {
       simpleFieldsHtml = `
         <label class="field"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." /></label>
         <label class="field"><span>Web Access Token</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="Access token" /></label>
+        <p class="muted tiny" style="grid-column:1 / -1;margin-top:2px">${escapeHtml(tr('accounts.kimiKeyHelp'))}</p>
       `;
       break;
     case 'opencode':
@@ -2566,6 +2650,11 @@ function renderAccounts() {
           <div class="account-oauth-step account-oauth-step-secondary">
             <strong>${escapeHtml(tr('accounts.oauthStep2'))}</strong>
             <p class="muted tiny">${escapeHtml(tr('accounts.oauthStep2Desc'))}</p>
+            ${currentProvider === 'codex' ? `
+              <div class="notice warn" style="margin:4px 0 8px">
+                <span class="tiny">${escapeHtml(tr('accounts.codexOauthLocalhostNotice'))}</span>
+              </div>
+            ` : ''}
             <input name="redirectUrl" required placeholder="${escapeHtml(tr('accounts.oauthUrlPlaceholder'))}" class="account-oauth-redirect-input" spellcheck="false" autocomplete="off" autocapitalize="off" />
             <p class="muted tiny">${escapeHtml(tr(currentProvider === 'antigravity' ? 'accounts.oauthCodeHint' : 'accounts.oauthUrlHint'))}</p>
             <input type="hidden" name="oauthSessionId" value="${escapeHtml(session.sessionId)}" />
@@ -2746,10 +2835,20 @@ async function saveAccountFromForm(form) {
     const endpoint = String(values.get('endpoint') || '').trim();
     const csrfToken = String(values.get('csrfToken') || '').trim();
     const accountId = String(values.get('accountId') || '').trim();
+    const serviceToken = String(values.get('serviceToken') || '').trim();
+    const userId = String(values.get('userId') || '').trim();
 
     const credObj = {};
     if (apiKey) credObj.apiKey = apiKey;
     if (cookie) credObj.cookie = cookie;
+    if (serviceToken || userId) {
+      if (!credObj.cookie) {
+        const parts = [];
+        if (serviceToken) parts.push(`api-platform_serviceToken=${serviceToken}`);
+        if (userId) parts.push(`userId=${userId}`);
+        credObj.cookie = parts.join('; ');
+      }
+    }
     if (accessToken) credObj.accessToken = accessToken;
     if (accessKeyId) credObj.accessKeyId = accessKeyId;
     if (secretAccessKey) credObj.secretAccessKey = secretAccessKey;

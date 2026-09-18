@@ -16,8 +16,8 @@ const {
   verifyUpdaterArtifactNames
 } = require('../../scripts/verify-updater-artifact-names');
 
-const APPIMAGE = 'Token-Monitor-0.45.0-rev.39.AppImage';
-const DEB = 'Token-Monitor-0.45.0-rev.39.deb';
+const APPIMAGE = 'Token-Monitor-0.45.0-rev.40.AppImage';
+const DEB = 'Token-Monitor-0.45.0-rev.40.deb';
 
 function makeDist(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'updater-feed-'));
@@ -34,7 +34,7 @@ function linuxFeed({ files, primary, withArtifacts = true }) {
     '    size: 100'
   ].join('\n')).join('\n');
   return {
-    'latest-linux.yml': `version: 0.45.0-rev.39\nfiles:\n${list}\npath: ${primary}\nsha512: ${'A'.repeat(88)}==\n`,
+    'latest-linux.yml': `version: 0.45.0-rev.40\nfiles:\n${list}\npath: ${primary}\nsha512: ${'A'.repeat(88)}==\n`,
     ...(withArtifacts ? Object.fromEntries(files.map((name) => [name, 'artifact'])) : {})
   };
 }
@@ -51,7 +51,7 @@ test('rejects the historical deb-only feed', () => {
   const dir = makeDist(linuxFeed({ files: [DEB], primary: DEB }));
   assert.throws(
     () => verifyLinuxAppImageUpdaterFeed(dir),
-    /path is Token-Monitor-0\.45\.0-rev\.39\.deb.*AppImage/s
+    new RegExp(`path is ${DEB.replace(/\./g, '\\.')}.*AppImage`, 's')
   );
 });
 
@@ -70,8 +70,8 @@ test('rejects a feed referencing an AppImage that is not on disk', () => {
 
 test('is a no-op when the linux feed is not part of the build', () => {
   const dir = makeDist({
-    'latest.yml': 'version: 0.45.0-rev.39\nfiles:\n  - url: Token-Monitor-Setup-0.45.0-rev.39.exe\n    sha512: x\npath: Token-Monitor-Setup-0.45.0-rev.39.exe\n',
-    'Token-Monitor-Setup-0.45.0-rev.39.exe': 'installer'
+    'latest.yml': 'version: 0.45.0-rev.40\nfiles:\n  - url: Token-Monitor-Setup-0.45.0-rev.40.exe\n    sha512: x\npath: Token-Monitor-Setup-0.45.0-rev.40.exe\n',
+    'Token-Monitor-Setup-0.45.0-rev.40.exe': 'installer'
   });
   assert.deepEqual(verifyLinuxAppImageUpdaterFeed(dir), { skipped: true });
 });

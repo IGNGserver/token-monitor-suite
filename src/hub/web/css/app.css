@@ -480,6 +480,31 @@ html[data-theme="dark"] .primary-btn { color: #0b0c0e; }
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
+.limit-windows-antigravity-grouped {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+.limit-window-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.limit-window-group-title {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding-left: 2px;
+}
+.limit-window-group-items {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.limit-window-wide {
+  grid-column: 1 / -1;
+}
 .limit-window {
   padding: 10px;
   border-radius: 12px;

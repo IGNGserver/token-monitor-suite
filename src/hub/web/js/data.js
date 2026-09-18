@@ -290,6 +290,11 @@ export function providerDisplayName(provider, peers = [], locale = 'en') {
     return email || workspace || specificLabel || (PROVIDER_LABELS[id] || id || 'Account');
   }
 
+  if (email && workspace) {
+    const sameEmail = (peers || []).filter((p) => String(p?.accountEmail || '').trim().toLowerCase() === email.toLowerCase()).length > 1;
+    return sameEmail ? `${email} · ${workspace}` : (accountName || email);
+  }
+
   return accountName || accountLabel || email || (PROVIDER_LABELS[id] || id || 'Account');
 }
 
@@ -597,7 +602,7 @@ export function limitCards(stats, locale = 'en') {
         used: null,
         resetsAt: '',
         value: `$${amount.toFixed(2)}`,
-        metric: '',
+        metric: 'currency',
         showMeter: false,
         detail: ''
       });
@@ -624,7 +629,7 @@ export function limitCards(stats, locale = 'en') {
         used: hasSpend && total > 0 ? (spend / total) * 100 : null,
         resetsAt: '',
         value: `${amount}${currency ? ` ${currency}` : ''}`.trim(),
-        metric: '',
+        metric: 'currency',
         showMeter: hasSpend && total > 0,
         detail: spendBits.join(' · ')
       });
@@ -647,7 +652,7 @@ export function limitCards(stats, locale = 'en') {
           used: null,
           resetsAt: '',
           value: parts.join(' '),
-          metric: 'credits',
+          metric: 'resets',
           showMeter: hasAvailable && hasTotal,
           detail: ''
         });

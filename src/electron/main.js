@@ -36,6 +36,7 @@ const {
 const { collectCustomRangeOnce, lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { createRequestRouter } = require('./desktopRequestRouter');
+const { createAppMenu } = require('./appMenu');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { requireSafeHubTransport } = require('../shared/hubTransport');
@@ -137,7 +138,6 @@ const {
 } = require('./tray');
 const {
   macActivationPolicyMode,
-  mainWindowCloseAction,
   normalizeTrayModeSettings,
   shouldCreateTray,
   trayToggleAction
@@ -172,7 +172,6 @@ const {
   floatingBubbleInitialRendererQuery,
   floatingBubbleNativeGlassEnabled,
   floatingBubbleSide,
-  floatingBubbleWindowChrome,
   normalizeInitialRendererViewState,
   moveFloatingBubbleBounds
 } = require('./floatingBubble');
@@ -208,14 +207,24 @@ const APP_ICON_PATH = process.platform === 'win32' && fs.existsSync(WIN_ICON_PAT
   ? WIN_ICON_PATH
   : PNG_ICON_PATH;
 
-const DEFAULT_WINDOW = { width: 340, height: 650 };
-const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
+// A normal desktop window: big enough that the shared UI's sidebar layout has
+// room (its narrowest breakpoint is 860px), with a floor the user cannot drag
+// under and a ceiling that still leaves the desktop usable.
+const DEFAULT_WINDOW = { width: 1180, height: 780 };
+const WINDOW_LIMITS = { minWidth: 900, minHeight: 600, maxWidth: 2560, maxHeight: 1600 };
 const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
+// The shared UI is also served to browsers by the Hub, where its CSP allows
+// inline styles because the view templates carry per-row colours and bar widths
+// as `style` attributes. The desktop renderer loads the same code, so
+// `style-src` must match or every bar, swatch and share meter renders unstyled.
+// `script-src` deliberately stays strict: no inline script is used anywhere.
+// `img-src` gains `file:` because the packaged client icons resolve from the
+// app's asset tree rather than an HTTP route.
 const CSP_HEADER = [
   "default-src 'self'",
   "script-src 'self'",
-  "style-src 'self'",
-  "img-src 'self' data:",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: file:",
   "font-src 'self'",
   "connect-src 'self'",
   "object-src 'none'",
@@ -239,6 +248,9 @@ const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
 const DEFAULT_VIEW_LIST = ['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'].map((id) => ({ id }));
 const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends'].map((id) => ({ id }));
 const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
+// View ids the shared UI knows. The app menu navigates by these; the widget's
+// own ids above are kept only for the tray submenu until the tray is removed.
+const SHARED_UI_VIEW_IDS = new Set(['overview', 'usage', 'devices', 'limits', 'trends', 'accounts', 'management', 'settings']);
 
 let mainWindow = null;
 let dashboardWindow = null;
@@ -809,16 +821,6 @@ function expandFloatingBubble(options = {}) {
     mainWindow.show();
   }
   return true;
-}
-
-function scheduleFloatingBubbleAutoCollapse() {
-  stopFloatingBubbleAutoCollapseTimer();
-  if (!canUseFloatingBubble(settings) || floatingBubbleState.collapsed) return;
-  floatingBubbleAutoCollapseTimer = setTimeout(() => {
-    floatingBubbleAutoCollapseTimer = null;
-    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isFocused()) return;
-    maybeCollapseFloatingBubble(mainWindow.getBounds());
-  }, 180);
 }
 
 function syncFloatingBubbleAvailability() {
@@ -1460,7 +1462,6 @@ function exportIntervalMs() {
   const v = Number(settings.exportIntervalMs);
   return Number.isFinite(v) && v >= 1000 ? v : DEFAULT_EXPORT_INTERVAL_MS;
 }
-let suppressNextBlurHide = false;
 const providerTrayIcons = {};
 let registeredWindowToggleShortcut = '';
 let windowToggleShortcutRegistered = false;
@@ -2337,12 +2338,7 @@ function showPopover() {
   const current = mainWindow.getBounds();
   const target = popoverBounds(tray, current.width, current.height);
   mainWindow.setBounds(target);
-  suppressNextBlurHide = true;
   mainWindow.show();
-  // The focus event itself may not fire a blur; the suppress flag covers the
-  // case where macOS fires blur immediately after show because the click that
-  // opened us still has the menu bar as the focused element.
-  setTimeout(() => { suppressNextBlurHide = false; }, 250);
 }
 
 function openMainWindowFromWidget() {
@@ -2539,6 +2535,15 @@ function openSettingsFromTray() {
 function openViewFromTray(viewId) {
   const normalized = String(viewId || '').trim().toLowerCase();
   if (!TRAY_OPEN_VIEW_IDS.has(normalized)) return;
+  focusExistingWindow();
+  sendMainWindowEvent('view:open', normalized);
+}
+
+// Navigation entry point for the application menu. The shared UI owns its own
+// route list, so this only validates against that set and hands the id over.
+function openSharedUiView(viewId) {
+  const normalized = String(viewId || '').trim().toLowerCase();
+  if (!SHARED_UI_VIEW_IDS.has(normalized)) return;
   focusExistingWindow();
   sendMainWindowEvent('view:open', normalized);
 }
@@ -3471,28 +3476,24 @@ function createWindow(boundsOverride, options = {}) {
   });
   const nativeWindowsBackdrop = windowsSurface.nativeBackdrop;
   const bounds = boundsOverride || restoredBounds() || DEFAULT_WINDOW;
-  const collapsedSizeLimits = {
-    minWidth: bounds.width,
-    minHeight: bounds.height,
-    maxWidth: bounds.width,
-    maxHeight: bounds.height
-  };
+  // A normal application window: framed, resizable, minimizable, and present in
+  // the taskbar/Dock. The widget's borderless always-on-top chrome is gone, so
+  // `frame: false`, `transparent`, `skipTaskbar` and the fixed collapsed size
+  // have no remaining caller. macOS keeps an inset title bar so the traffic
+  // lights sit on the app's own toolbar, which is the platform convention for a
+  // window with a full-height sidebar.
   const win = new BrowserWindow({
     width: bounds.width,
     height: bounds.height,
     ...(typeof bounds.x === 'number' ? { x: bounds.x, y: bounds.y } : {}),
-    ...(collapsedFloatingBubble ? collapsedSizeLimits : WINDOW_LIMITS),
-    frame: false,
-    transparent: !(process.platform === 'win32' && nativeWindowsBackdrop),
-    resizable: !collapsedFloatingBubble,
+    ...WINDOW_LIMITS,
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' } : {}),
     show: false,
-    backgroundColor: '#00000000',
+    backgroundColor: nativeWindowsBackdrop ? undefined : '#f4f5f7',
     icon: APP_ICON_PATH,
-    skipTaskbar: collapsedFloatingBubble || Boolean(settings?.trayMode),
-    ...(collapsedFloatingBubble ? { fullscreenable: false, maximizable: false, minimizable: false } : {}),
-    ...floatingBubbleWindowChrome(process.platform, collapsedFloatingBubble),
+    autoHideMenuBar: process.platform !== 'darwin',
     ...(process.platform === 'darwin' && glass && macosGlassStyle === MACOS_GLASS_VIBRANCY
-      ? { vibrancy: 'hud', visualEffectState: 'active' }
+      ? { vibrancy: 'under-window', visualEffectState: 'active' }
       : {}),
     ...(process.platform === 'win32' && nativeWindowsBackdrop
       ? { backgroundMaterial: windowsSurface.nativeMaterial }
@@ -3521,27 +3522,19 @@ function createWindow(boundsOverride, options = {}) {
   applyNativeMaterial();
   keepNativeBlurActive();
   win.on('focus', () => {
-    stopFloatingBubbleAutoCollapseTimer();
     keepNativeBlurActive();
   });
   win.on('blur', () => {
     keepNativeBlurActive();
-    if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) hidePopover();
-    else if (!quitRequested) scheduleFloatingBubbleAutoCollapse();
   });
   win.on('resized', persistBoundsSoon);
   win.on('moved', persistBoundsSoon);
+  // Closing is quitting. The widget used to hide into a tray popover or an
+  // accessory-mode window; a normal app closes when the user closes it, and the
+  // collector lifecycle is tied to the process either way.
   win.on('close', (event) => {
     if (quitRequested) return;
-    const action = mainWindowCloseAction(settings, { platform: process.platform });
-    if (action === 'hidePopover') {
-      event.preventDefault();
-      hidePopover();
-    } else if (action === 'hideWindow') {
-      event.preventDefault();
-      win.hide();
-      applyMacActivationPolicy({ mainWindowVisible: false });
-    }
+    void event;
   });
   win.webContents.on('before-input-event', handleZoomShortcut);
   win.webContents.once('did-finish-load', sendFloatingBubbleState);
@@ -4079,6 +4072,16 @@ app.whenReady().then(() => {
   cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
   ensureTray();
   if (settings.trayMode) enterTrayMode();
+  // A normal application has a menu bar. It also gives the shared UI a
+  // keyboard-reachable entry point to Settings and each view.
+  createAppMenu({
+    getWindow: () => mainWindow,
+    openView: openSharedUiView,
+    checkForUpdates: () => runAppUpdateCheck({ force: true }),
+    openUserData: () => { void shell.openPath(app.getPath('userData')); },
+    translate: (key, params) => translate(resolveLocale(settings?.language || 'auto'), key, params),
+    appVersion: appVersion()
+  });
   regenerateTokscalePricing();
   ensureMacWidgetPublisher();
   if (settings.discordRpcEnabled) startDiscordRpc();

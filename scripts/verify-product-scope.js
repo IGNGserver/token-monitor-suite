@@ -71,32 +71,44 @@ function verifyProductScope() {
   expect(!/settings\.hubMode\s*[!=]==?\s*['"]host['"]/.test(main), 'Electron must not branch into a Host mode');
   expect(!main.includes("require('../hub/server')"), 'Electron must not import the Docker-only Hub server');
 
-  const rendererHtml = read('src/electron/renderer/index.html');
-  expect((rendererHtml.match(/name="hubMode"/g) || []).length === 2, 'the sync settings UI must contain exactly two mode choices');
-  expect(!rendererHtml.includes('value="host"'), 'the sync settings UI must not expose Host mode');
-  expect(!rendererHtml.includes('id="hubHostFields"'), 'the sync settings UI must not contain embedded Hub fields');
+  // The sync UI now lives in the shared package, which both hosts render, so the
+  // two-mode boundary is asserted there rather than in a desktop-only file.
+  const desktopSettingsView = read('src/shared-ui/views/settingsDesktop.js');
+  // Match only the radio inputs: the view also queries '[name="hubMode"]:checked'
+  // when reading the form, which is not a mode choice.
+  const modeChoices = desktopSettingsView.match(/<input[^>]*name="hubMode"[^>]*>/g) || [];
+  expect(modeChoices.length === 2, 'the sync settings UI must contain exactly two mode choices');
+  expect(modeChoices.every((tag) => /type="radio"/.test(tag)), 'both mode choices must be radio inputs');
+  const modeValues = modeChoices.map((tag) => (tag.match(/value="([^"]+)"/) || [])[1]).sort();
+  expect(JSON.stringify(modeValues) === JSON.stringify(['client', 'local']), 'the only supported modes are local and client');
+  expect(!desktopSettingsView.includes('value="host"'), 'the sync settings UI must not expose Host mode');
+  expect(!desktopSettingsView.includes('id="hubHostFields"'), 'the sync settings UI must not contain embedded Hub fields');
 
   const runtimeConfig = read('src/electron/runtimeConfig.js');
   for (const marker of ['hubHostPort', 'hubHostSecret', 'hubHostAdminSecret', 'hubAccountCredentialKey']) {
     expect(!runtimeConfig.includes(marker), `runtime config must not retain removed Host setting: ${marker}`);
   }
 
-  const rendererApp = read('src/electron/renderer/app.js');
-  for (const marker of [
-    'hubHost',
-    'hubPortInput',
-    'hubSecretInput',
-    'renderHubStatus',
-    'refreshHubInfo',
-    'regenerateHubSecret',
-    'provisionHubDeviceCredential',
-    'revealHubAdminCredential',
-    'onHubPush'
-  ]) {
-    expect(!rendererApp.includes(marker), `renderer must not contain removed Host UI behavior: ${marker}`);
+  // No UI surface may reintroduce the removed embedded-Hub controls. Scanning the
+  // whole shared package covers both hosts with one assertion.
+  for (const relativePath of ['src/shared-ui/app.js', 'src/shared-ui/views/settingsDesktop.js']) {
+    const source = read(relativePath);
+    for (const marker of [
+      'hubHost',
+      'hubPortInput',
+      'hubSecretInput',
+      'renderHubStatus',
+      'refreshHubInfo',
+      'regenerateHubSecret',
+      'provisionHubDeviceCredential',
+      'revealHubAdminCredential',
+      'onHubPush'
+    ]) {
+      expect(!source.includes(marker), `${relativePath} must not contain removed Host UI behavior: ${marker}`);
+    }
   }
 
-  const webData = read('src/hub/web/js/data.js');
+  const webData = read('src/shared-ui/core/data.js');
   expect(!webData.includes("return 'embedded-hub'"), 'Hub dashboard must not display the removed embedded runtime label');
   const androidFormatters = read('android/app/src/main/java/com/igng/tokenmonitor/android/ui/components/Formatters.kt');
   expect(!androidFormatters.includes('"embedded-hub"'), 'Android must not display the removed embedded runtime label');

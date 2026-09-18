@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   prefsToSettingsPatch,
 
   getSettings: () => ipcRenderer.invoke('settings:get'),
+  getCatalog: () => ipcRenderer.invoke('desktop:catalog'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
   clearSessionUsageArchive: () => ipcRenderer.invoke('sessionUsageArchive:clear'),
   lookupModelPricing: (modelId) => ipcRenderer.invoke('pricing:lookup', modelId),

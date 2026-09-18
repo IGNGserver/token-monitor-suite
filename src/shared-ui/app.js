@@ -5,6 +5,7 @@ import {
   copyText,
   fetchHealth,
   fetchJson,
+  getTransport,
   isCapable,
   loadPrefs,
   loadSecret,
@@ -20,6 +21,8 @@ import {
   writeRoute
 } from './transport/index.js';
 import { applyI18n, resolveLocale, t } from './core/i18n.js';
+import { configureViewContext } from './core/viewContext.js';
+import { renderDesktopSettings, readDesktopSettingsPatch } from './views/settingsDesktop.js';
 import {
   configureRates,
   formatCompact,
@@ -348,7 +351,11 @@ const state = {
     pricing: null,
     accounts: null
   },
-  pwaDismissed: readFlag('token-monitor.hub.pwaDismissed') === '1'
+  pwaDismissed: readFlag('token-monitor.hub.pwaDismissed') === '1',
+  // Desktop-only settings, loaded from the main process when the host has them.
+  desktopSettings: null,
+  desktopCatalog: null,
+  desktopInfo: null
 };
 
 function tr(key, params) {
@@ -1894,7 +1901,9 @@ function renderSettingsPage() {
       <div class="settings-side-stack">
         <section class="panel settings-info-panel"><div class="panel-head"><h2 class="panel-title">${escapeHtml(tr('settings.connection'))}</h2></div><p class="muted tiny">${escapeHtml(tr('settings.connectionHint'))}</p><dl class="settings-definition-list"><div><dt>${escapeHtml(tr('settings.currentOrigin'))}</dt><dd>${escapeHtml(origin)}</dd></div><div><dt>${escapeHtml(tr('settings.role'))}</dt><dd>${escapeHtml(scopes.length ? scopes.join(' · ') : '—')}</dd></div><div><dt>${escapeHtml(tr('settings.stream'))}</dt><dd>${escapeHtml(streamLabel)}</dd></div></dl><div class="settings-capabilities"><span class="summary-label">${escapeHtml(tr('settings.capabilities'))}</span>${capabilityHtml}</div></section>
         <section class="panel settings-info-panel"><div class="panel-head"><h2 class="panel-title">${escapeHtml(tr('settings.pwa'))}</h2></div><p class="muted tiny">${escapeHtml(pwaStatusText())}</p>${state.deferredInstall ? `<button type="button" class="ghost-btn" data-pwa-install>${escapeHtml(tr('pwa.install'))}</button>` : ''}</section>
-        <section class="panel settings-boundary-panel"><div class="panel-head"><h2 class="panel-title">${escapeHtml(tr('settings.desktopOnly'))}</h2></div><p class="muted tiny">${escapeHtml(tr('settings.desktopOnlyHint'))}</p></section>
+        ${isCapable('desktopSettings')
+          ? `<div class="settings-desktop-stack" data-desktop-settings>${renderDesktopSettings(state.desktopSettings || {}, state.desktopCatalog || {}, state.desktopInfo || {})}</div>`
+          : `<section class="panel settings-boundary-panel"><div class="panel-head"><h2 class="panel-title">${escapeHtml(tr('settings.desktopOnly'))}</h2></div><p class="muted tiny">${escapeHtml(tr('settings.desktopOnlyHint'))}</p></section>`}
       </div>
     </div>`;
 }
@@ -3390,6 +3399,12 @@ function bindEvents() {
   });
 
   els.content.addEventListener('click', (event) => {
+    // Desktop-only settings actions (folder picker, export, update check).
+    const desktopAction = event.target.closest('[data-desktop-action]');
+    if (desktopAction) {
+      void runDesktopAction(desktopAction.dataset.desktopAction);
+      return;
+    }
     const usageTab = event.target.closest('[data-usage-tab]');
     if (usageTab) {
       state.prefs.usageTab = ['tools', 'models', 'projects', 'sessions'].includes(usageTab.dataset.usageTab)
@@ -3761,6 +3776,16 @@ function bindEvents() {
     }
   });
 
+  // Desktop settings persist on change: a form round-trip would be needed to
+  // batch them, but each control owns exactly one key.
+  els.content.addEventListener('change', (event) => {
+    const control = event.target.closest('[data-desktop-settings] [name]');
+    if (!control) return;
+    const form = control.closest('[data-desktop-settings]');
+    if (!form) return;
+    void saveDesktopSettings(readDesktopSettingsPatch(form));
+  });
+
   els.content.addEventListener('submit', (event) => {
     const webSettingsForm = event.target.closest('[data-web-settings-form]');
     if (webSettingsForm) {
@@ -3951,7 +3976,98 @@ function bindEvents() {
   });
 }
 
+// Desktop-only settings live in the main process: the collector cadence, the
+// tracked clients, the window surface and the update channel are all owned
+// there, and the shared UI only renders their current values.
+async function loadDesktopSettings() {
+  const desktop = getTransport().desktop;
+  if (!desktop) return;
+  try {
+    const [settings, catalog, info] = await Promise.all([
+      desktop.getSettings(),
+      desktop.getCatalog ? desktop.getCatalog() : Promise.resolve({}),
+      desktop.getAppInfo ? desktop.getAppInfo() : Promise.resolve({})
+    ]);
+    state.desktopSettings = settings || {};
+    state.desktopCatalog = catalog || {};
+    state.desktopInfo = info || {};
+  } catch (error) {
+    // A settings read failure must not blank the whole dashboard; the section
+    // simply renders with defaults until the next successful read.
+    state.desktopSettings = {};
+    state.desktopCatalog = {};
+    state.desktopInfo = {};
+    console.warn('Could not load desktop settings:', error?.message || error);
+  }
+}
+
+/** Persist a desktop settings patch and refresh the cached snapshot. */
+async function saveDesktopSettings(patch) {
+  const desktop = getTransport().desktop;
+  if (!desktop) return false;
+  try {
+    const next = await desktop.updateSettings(patch);
+    if (next) state.desktopSettings = next;
+    return true;
+  } catch (error) {
+    showToast(error?.message || tr('error.generic'));
+    return false;
+  }
+}
+
+/**
+ * Run a desktop-only settings action. These are the operations that need the
+ * main process — a native folder picker, a filesystem export, an update check —
+ * so each one is a named transport capability rather than a browser call the
+ * shared UI could attempt on its own.
+ */
+async function runDesktopAction(action, element) {
+  const desktop = getTransport().desktop;
+  if (!desktop) return;
+  try {
+    switch (action) {
+      case 'pick-export-dir': {
+        const result = await desktop.pickExportDir();
+        const dir = result?.path || result?.dir;
+        if (dir) await saveDesktopSettings({ exportDir: dir });
+        render();
+        break;
+      }
+      case 'export-now': {
+        const result = await desktop.exportNow();
+        showToast(result?.ok === false ? tr('error.generic') : tr('toast.saved'));
+        break;
+      }
+      case 'open-user-data':
+        await desktop.openUserData();
+        break;
+      case 'check-updates': {
+        element?.setAttribute('disabled', 'disabled');
+        const update = await desktop.checkAppUpdateNow();
+        showToast(update?.latest ? tr('desktop.settings.updateAvailable') : tr('desktop.settings.upToDate'));
+        element?.removeAttribute('disabled');
+        break;
+      }
+      case 'clear-session-archive': {
+        const confirmed = await confirmAction(tr('desktop.settings.sessionArchiveConfirm'), { danger: true });
+        if (!confirmed) return;
+        const result = await desktop.clearSessionUsageArchive();
+        showToast(result?.ok === false ? tr('error.generic') : tr('toast.saved'));
+        break;
+      }
+      default:
+        break;
+    }
+  } catch (error) {
+    showToast(error?.message || tr('error.generic'));
+  }
+}
+
 async function init() {
+  // Views read translations and escaping through this context; app.js stays the
+  // single owner of both while view modules remain importable and testable.
+  configureViewContext({ tr, escapeHtml, settingsOptionList });
+  if (isCapable('desktopSettings')) await loadDesktopSettings();
   renderStaticUiIcons();
   applyTheme();
   applyLocale();

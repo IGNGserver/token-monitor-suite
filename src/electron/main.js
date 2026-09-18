@@ -4489,6 +4489,18 @@ app.whenReady().then(() => {
       };
     }
   });
+  // Catalogs the desktop settings view needs. They come from the shared modules
+  // that already own these lists, so the UI cannot drift from the collector.
+  ipcMain.handle('desktop:catalog', () => ({
+    clients: KNOWN_CLIENTS.split(',').map((id) => id.trim()).filter(Boolean),
+    defaultClients: DEFAULT_CLIENTS.split(',').map((id) => id.trim()).filter(Boolean),
+    limitProviders: require('../shared/limitProviders').LIMIT_PROVIDER_IDS.slice(),
+    collectionModes: ['live', 'interval', 'smart'],
+    exportIntervals: [60 * 1000, 5 * 60 * 1000, 15 * 60 * 1000, 60 * 60 * 1000],
+    syncUploadIntervals: [0, 600000, 1200000, 1800000],
+    historyIntervals: [5 * 60 * 1000, 10 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000],
+    languageOptions: LANGUAGE_OPTIONS
+  }));
   ipcMain.handle('transport:capabilities', () => ({
     pwa: false,
     nativeDialogs: true,

@@ -262,7 +262,6 @@ const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends']
 const SHARED_UI_VIEW_IDS = new Set(['overview', 'usage', 'devices', 'limits', 'trends', 'accounts', 'management', 'settings']);
 
 let mainWindow = null;
-let dashboardWindow = null;
 let settingsPath = null;
 let settings = null;
 let persistedSettingsSnapshot = null;
@@ -1142,11 +1141,6 @@ function applyNativeMaterialToWindow(win, source = settings) {
 }
 
 function applyNativeMaterial(source = settings) {
-  if (process.platform === 'darwin') {
-    applyNativeMaterialToWindow(mainWindow, source);
-    applyNativeMaterialToWindow(dashboardWindow, source);
-    return;
-  }
   applyNativeMaterialToWindow(mainWindow, source);
 }
 
@@ -1539,12 +1533,10 @@ function flushPush() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('stats:push', payload); } catch (_) {}
   }
-  if (payload?.data?.stats) {
-    const nextHistoryRevision = statsHistoryRevision(payload.data.stats);
-    if (nextHistoryRevision !== previousHistoryRevision && dashboardWindow && !dashboardWindow.isDestroyed()) {
-      try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
-    }
-  }
+  // `previousHistoryRevision` is still consumed by the caller's diffing; a change
+  // no longer has a second window to notify, since the trends view now renders
+  // inside the main window from the same stats push.
+  void previousHistoryRevision;
 }
 
 // Deliver anything still queued, e.g. before quitting or before a synchronous
@@ -2013,9 +2005,6 @@ function pushSettingsToRenderer() {
   // instance; it must receive effective-rate updates too, otherwise an
   // already-open dashboard keeps showing the previous rate after an auto
   // refresh or manual override until it is reopened.
-  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-    try { dashboardWindow.webContents.send('settings:push', payload); } catch (_) {}
-  }
   // Currency, compact-unit, locale, and theme settings are part of the native
   // Widget snapshot even when the usage counters themselves did not change.
 }
@@ -2958,104 +2947,8 @@ function handleZoomShortcut(event, input) {
 }
 
 
-function discardFailedDashboardWindow(win, reason) {
-  if (!win || win !== dashboardWindow || win.isDestroyed()) return;
-  console.log(`[dashboard] ${reason}`);
-  win.destroy();
-}
 
-function createDashboardWindow() {
-  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-    // Reload so a reopened window always picks up the latest renderer + fresh history,
-    // instead of showing whatever was loaded when it first opened.
-    dashboardWindow.hide();
-    dashboardWindow.webContents.reload();
-    return dashboardWindow;
-  }
-  const glass = nativeBlurEnabled();
-  const macosGlassStyle = macosGlassStyleFor(settings);
-  const windowsSurface = windowsSurfaceProfile({
-    platform: process.platform,
-    osRelease: os.release(),
-    systemGlass: glass
-  });
-  const nativeWindowsBackdrop = windowsSurface.nativeBackdrop;
-  const win = new BrowserWindow({
-    width: 920,
-    height: 620,
-    minWidth: 560,
-    minHeight: 420,
-    frame: false,
-    transparent: !(process.platform === 'win32' && nativeWindowsBackdrop),
-    show: false,
-    backgroundColor: '#00000000',
-    icon: APP_ICON_PATH,
-    skipTaskbar: false,
-    ...(process.platform === 'darwin' && glass && macosGlassStyle === MACOS_GLASS_VIBRANCY
-      ? { vibrancy: 'hud', visualEffectState: 'active' }
-      : {}),
-    ...(process.platform === 'win32' && nativeWindowsBackdrop
-      ? { backgroundMaterial: windowsSurface.nativeMaterial }
-      : {}),
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  });
-  dashboardWindow = win;
-  applyMacosNativeWindowButtons(win);
-  applyWindowsChrome(win, { round: true });
-  if (windowsSurface.useLegacyAccent) applyWindowsAccentBlur(win);
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (isAllowedExternalUrl(url)) shell.openExternal(url);
-    return { action: 'deny' };
-  });
-  win.webContents.on('will-navigate', (event, url) => {
-    event.preventDefault();
-    if (isAllowedExternalUrl(url)) shell.openExternal(url);
-  });
-  // Only dashboard:ready may reveal a healthy window. Slow hub history must not
-  // race a wall-clock fallback and expose the unprepared heatmap. Actual load or
-  // renderer failures discard the hidden window so the next open starts cleanly.
-  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
-    if (!isMainFrame || errorCode === -3) return; // ERR_ABORTED is expected during reloads.
-    discardFailedDashboardWindow(win, `load failed: ${errorDescription}`);
-  });
-  win.webContents.on('render-process-gone', (_event, details) => {
-    discardFailedDashboardWindow(win, `renderer stopped: ${details.reason}`);
-  });
-  win.on('unresponsive', () => {
-    if (!win.isVisible()) discardFailedDashboardWindow(win, 'renderer became unresponsive while opening');
-  });
-  win.on('closed', () => { dashboardWindow = null; });
-  const dashboardQuery = process.platform === 'win32'
-    ? { windowsSurface: windowsSurface.kind }
-    : undefined;
-  win.loadFile(
-    path.join(__dirname, 'renderer', 'dashboard.html'),
-    dashboardQuery ? { query: dashboardQuery } : undefined
-  )
-    .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
-  return win;
-}
 
-function rebuildDashboardWindow() {
-  const old = dashboardWindow;
-  if (!old || old.isDestroyed()) return;
-  const bounds = old.getBounds();
-  const wasFocused = old.isFocused();
-  // Detach the old closed handler before destroying it so it cannot clear the
-  // reference to the replacement window created below.
-  old.removeAllListeners('closed');
-  dashboardWindow = null;
-  old.destroy();
-  const next = createDashboardWindow();
-  next.setBounds(bounds);
-  next.once('show', () => {
-    if (wasFocused && !next.isDestroyed()) next.focus();
-  });
-}
 
 async function getDashboardHistory() {
   if (settings?.historyEnabled === false) return aggregateHistory([]);
@@ -3612,7 +3505,6 @@ app.whenReady().then(() => {
       || previousWindowsSurface !== nextWindowsSurface
     )) {
       rebuildWindow();
-      rebuildDashboardWindow();
     } else {
       applyNativeMaterial();
     }
@@ -3824,17 +3716,7 @@ app.whenReady().then(() => {
   ipcMain.on('window:close', () => {
     mainWindow?.close();
   });
-  ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
-  ipcMain.handle('dashboard:getHistory', () => getDashboardHistory());
-  ipcMain.on('dashboard:ready', (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win || win !== dashboardWindow || win.isDestroyed()) return;
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
-  });
-  ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
-  ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
+  ipcMain.handle('history:get', () => getDashboardHistory());
   // Register the renderer/state surface before starting any collector. A fast
   // local tick or REST bootstrap must never race the initial IPC handlers.
   powerMonitor?.on?.('resume', () => {

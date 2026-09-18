@@ -119,9 +119,14 @@ test('stats pushes are coalesced instead of broadcast per tick', () => {
   // The tray refresh used to live here too; the desktop client is a normal app
   // with no tray, so only the window broadcast remains.
   assert.match(flushBody, /mainWindow\.webContents\.send\('stats:push'/, 'the flush performs the broadcast');
-  // The history revision must be compared across the whole coalesced window so the
-  // dashboard is notified exactly once, and only when it really moved.
-  assert.match(flushBody, /nextHistoryRevision !== previousHistoryRevision/);
+  // The history revision is still computed across the whole coalesced window. It
+  // used to gate a notification to the standalone trends window; that window is
+  // gone (the trends view renders in the main window from the same push), so the
+  // revision is retained for the read path rather than a second-window send.
+  // It is captured when the push is queued, so the revision reflects the window
+  // boundary rather than whichever tick happened to flush last.
+  assert.match(sendBody, /pendingPushHistoryRevision \?\?= statsHistoryRevision\(latestStats\)/);
+  assert.doesNotMatch(flushBody, /dashboardWindow/, 'the removed trends window must not linger here');
 
   // A queued push must still reach the consumers on the read path and on quit.
   assert.match(mainSource, /function flushPendingPush\(\)/);

@@ -78,18 +78,9 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   recoverNow: () => ipcRenderer.invoke('sync:recover'),
   getSyncHealth: () => ipcRenderer.invoke('sync:health'),
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
-  openDashboard: () => ipcRenderer.invoke('dashboard:open'),
-  getDashboardHistory: () => ipcRenderer.invoke('dashboard:getHistory'),
-  onDashboardHistoryChanged: (callback) => {
-    const listener = () => { try { callback(); } catch (_) {} };
-    ipcRenderer.on('dashboard:historyChanged', listener);
-    return () => ipcRenderer.removeListener('dashboard:historyChanged', listener);
-  },
-  dashboard: {
-    ready: () => ipcRenderer.send('dashboard:ready'),
-    minimize: () => ipcRenderer.send('dashboard:minimize'),
-    close: () => ipcRenderer.send('dashboard:close')
-  },
+  // The standalone trends window is gone; the trends view renders in the main
+  // window. History is fetched through the transport's /api/history route.
+  getHistory: () => ipcRenderer.invoke('history:get'),
   onStatsPush: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
     ipcRenderer.on('stats:push', listener);

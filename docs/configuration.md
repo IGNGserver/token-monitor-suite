@@ -11,25 +11,35 @@ The widget reads `.env` values as *first-run defaults*; once you change a settin
 
 ## Widget (GUI)
 
-Click the `⚙` button in the bottom-right corner of the widget to open the settings panel. Sections appear in this order:
+Open **Settings** from the sidebar or the app menu. The desktop app and the Hub
+web dashboard share one interface, so the shared preferences below are also
+available in a browser; the device-local groups only appear in the desktop app.
 
-| Section | What it controls |
+Shared preferences (both hosts):
+
+| Group | What it controls |
 |---|---|
-| **General** | Language, launch at login, app updates, Discord Rich Presence, About, and Advanced (open the raw `settings.json` for less-common options such as `allTimeSince`). |
-| **Main** | Which Home modules appear and their order, plus the display currency (USD, TWD, HKD, or CNY; daily auto rate or a manual override). |
-| **Window** | Window behavior (float above other apps / normal / desktop-pinned), tray mode (macOS menu bar or Windows system tray, and what shows next to the icon), the floating bubble, and the global show/hide shortcut. |
-| **Appearance** | Interface theme (presets such as Default and Obsidian, a porcelain light mode, or custom colors), per-vendor tool colors, and system glass opacity / blur. |
-| **Collection** | Tracked tools (and hide / pin / drag-reorder for the main list), collection cadence, **Keep usage from deleted sessions**, custom pricing, data export, and — on Windows — the built-in WSL scan toggle. |
-| **AI Tool Limits** | View quota windows received from the Hub. Accounts and credentials are added manually to the Hub; the device does not discover local developer-tool accounts or switch a local provider login. |
-| **Multi-device Sync** | **Local only** (no Hub) or **Connect to a Hub** (paste the Docker Compose Hub URL and this device's secret). |
+| Language & currency | Interface language and the display currency (USD, TWD, HKD, or CNY; daily auto rate or a manual override). |
+| Display | Theme (light / dark / system), which views appear and in what order, per-vendor tool colors. |
+| AI Tool Limits | How received quota windows are shown: source, masked account e-mails, remaining vs used bars. Accounts and credentials live on the Hub — the device does not discover local developer-tool accounts. |
+| Accounts / Management | Hub-owned quota accounts (including OAuth sign-in), subscriptions, and model pricing. |
 
-The `⇧` button in the title bar cycles the window behavior.
+Device-local groups (desktop app only):
+
+| Group | What it controls |
+|---|---|
+| Collection | Tracked tools (and hide / pin / drag-reorder for the main list), collection mode and interval, project metadata, trend history, **Keep usage from deleted sessions**, `allTimeSince`, and — on Windows — the built-in WSL scan toggle. |
+| Data export | Automatic export folder and interval, plus export-now. |
+| Window & appearance | Native window backdrop (and macOS glass style), motion, tool icons, live indicator, compact token total, zoom. |
+| Startup & updates | Start at login (with the Linux AppImage caveat), automatic update downloads, Discord Rich Presence, open the data folder. |
+| Device identity | The device ID this machine reports to the Hub. |
+| Hub connection | **Local only** (no Hub) or **Connect to a hub** (Docker Compose Hub URL, upload interval, and the trusted-LAN HTTP opt-in). |
 
 ### Central Hub accounts and quotas
 
-Quota accounts are a Hub-owned resource. Add an account from the widget's
-**AI Tool Limits** section while connected to the Docker Compose Hub, or call the Hub's
-`/api/accounts` admin API. The request contains a provider, display name, and
+Quota accounts are a Hub-owned resource. Add an account from the app's
+**Accounts** view (or the Hub dashboard) while connected to the Docker Compose
+Hub, or call the Hub's `/api/accounts` admin API. The request contains a provider, display name, and
 the credential supplied by the user. The Hub encrypts the credential at rest,
 refreshes the provider on its own schedule, and publishes only normalized quota
 snapshots to connected devices. Account listing and quota responses never

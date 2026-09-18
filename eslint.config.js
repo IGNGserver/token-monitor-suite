@@ -19,7 +19,10 @@ module.exports = [
     // windowShortcut) feature-detect them in their UMD export wrapper.
     languageOptions: {
       sourceType: 'commonjs',
-      globals: { ...globals.node, window: 'readonly', self: 'readonly' },
+      // The UMD modules (i18n, currency, trayText, …) feature-detect a browser
+      // environment, so the DOM globals they guard on must be declared or every
+      // `typeof document` check reads as an undefined variable.
+      globals: { ...globals.node, window: 'readonly', self: 'readonly', document: 'readonly' },
     },
   },
 

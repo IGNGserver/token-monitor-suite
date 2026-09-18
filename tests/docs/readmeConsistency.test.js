@@ -210,27 +210,34 @@ test('localized READMEs link to the configuration reference', () => {
   for (const file of localizedReadmes) assert.match(read(file), /docs\/configuration\.md/, file);
 });
 
-test('localized README settings lists keep provider credentials inside AI Tool Limits', () => {
-  const mergedSectionCopy = {
-    'README.md': 'AI Tool Limits (provider selection, limits, and credentials)',
-    'README.zh-TW.md': 'AI 工具額度（供應商選擇、額度與憑證）',
-    'README.zh-CN.md': 'AI 工具额度（提供方选择、额度与凭据）',
-    'README.ja.md': 'AI ツール制限（プロバイダー選択、制限、認証情報）',
-    'README.ko.md': 'AI 도구 한도(공급자 선택, 한도, 자격 증명)'
+test('localized READMEs point quota management at the Hub', () => {
+  // Provider credentials are Hub accounts now; the desktop client has no
+  // credentials section of its own, so every locale must say where they live.
+  const hubMentions = {
+    'README.md': /Quota accounts, subscriptions, and pricing are managed on the Hub/,
+    'README.zh-TW.md': /額度帳號、訂閱與定價由中樞管理/,
+    'README.zh-CN.md': /额度账号、订阅与定价由中枢管理/,
+    'README.ja.md': /クォータアカウント、サブスクリプション、価格設定はハブで管理/,
+    'README.ko.md': /할당량 계정, 구독, 가격은 허브에서 관리/
   };
 
-  for (const [file, copy] of Object.entries(mergedSectionCopy)) {
-    assert.match(read(file), new RegExp(copy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), file);
+  for (const [file, pattern] of Object.entries(hubMentions)) {
+    assert.match(read(file), pattern, file);
+  }
+  // The desktop settings list must no longer claim to hold credentials.
+  for (const file of Object.keys(hubMentions)) {
+    assert.doesNotMatch(read(file), /AI Tool Limits \(provider selection/, file);
   }
 });
 
-test('configuration reference keeps provider accounts inside AI Tool Limits', () => {
+test('configuration reference sends provider accounts to the Hub', () => {
   const configuration = read('docs/configuration.md');
-  assert.match(
-    configuration,
-    /\| \*\*AI Tool Limits\*\* \|[^|]*(?:credentials|sign-in options|multiple accounts)[^|]*\|/
-  );
-  assert.doesNotMatch(configuration, /\| \*\*Accounts\*\* \|/);
+  // Quota credentials are Hub accounts; the doc must say so and must not present
+  // a device-local credentials section.
+  assert.match(configuration, /Accounts\s*\/\s*Management/, 'the accounts row should exist');
+  assert.match(configuration, /Hub-owned quota accounts[^.]*OAuth/, 'accounts and their sign-in are Hub-owned');
+  assert.match(configuration, /does not discover local developer-tool accounts/, 'the device must not claim to hold credentials');
+  assert.doesNotMatch(configuration, /\*\*Window\*\* \|[^|]*tray mode/, 'the removed widget window settings must not be documented');
 });
 
 test('localized README WSL claims disclose the SQLite agent boundary', () => {

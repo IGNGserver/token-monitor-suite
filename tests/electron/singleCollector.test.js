@@ -13,8 +13,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { pathToFileURL } = require('node:url');
 
 const rootDir = path.join(__dirname, '..', '..');
+const LOCALES = ['en', 'zh-CN', 'zh-TW', 'ja', 'ko'];
 const mainSource = fs.readFileSync(path.join(rootDir, 'src', 'electron', 'main.js'), 'utf8');
 
 function functionBody(source, name) {
@@ -60,28 +62,30 @@ test('the sync collector refuses to start while an external agent is active', ()
   assert.match(gateBody, /publishSyncHealth\(\)/, 'the relay state should still be published to the renderer');
 });
 
-test('the relay state is a known sync-health state in every locale', () => {
-  const rendererDir = path.join(rootDir, 'src', 'electron', 'renderer');
-  const appSource = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
-  const i18n = require(path.join(rendererDir, 'i18n.js'));
+test('the relay state is a known sync-health state in every locale', async () => {
+  // The mapping moved into the shared UI, which both hosts render, so the guard
+  // points there now. It stays a named map because a state the main process can
+  // publish must never render as a raw slug.
+  const mappingPath = path.join(rootDir, 'src', 'shared-ui', 'core', 'syncHealth.js');
+  const { SYNC_HEALTH_STATE_KEYS, KNOWN_SYNC_HEALTH_STATES } = await import(pathToFileURL(mappingPath));
+  assert.ok(SYNC_HEALTH_STATE_KEYS.relay, "the shared UI must map the 'relay' state to a translation key");
+  assert.ok(KNOWN_SYNC_HEALTH_STATES.includes('relay'));
 
-  const mapping = appSource.match(/const SYNC_HEALTH_STATE_KEYS = \{([\s\S]*?)\n\};/);
-  assert.ok(mapping, 'SYNC_HEALTH_STATE_KEYS should exist');
-  const relayKey = mapping[1].match(/relay:\s*'([^']+)'/);
-  assert.ok(relayKey, "the renderer must map the 'relay' state to a translation key");
-
-  const missing = [];
-  for (const locale of Object.keys(i18n.MESSAGES)) {
-    if (i18n.MESSAGES[locale]?.[relayKey[1]] === undefined) missing.push(locale);
-  }
-  assert.deepEqual(missing, [], `locales missing ${relayKey[1]}: ${missing.join(', ')}`);
+  // The dictionaries are module-private, so assert the key literal appears once
+  // per locale block rather than re-implementing the parser here.
+  const relayKey = SYNC_HEALTH_STATE_KEYS.relay;
+  const source = fs.readFileSync(path.join(rootDir, 'src', 'shared-ui', 'core', 'i18n.js'), 'utf8');
+  const occurrences = (source.match(new RegExp(`'${relayKey.replace(/\./g, '\\.')}'`, 'g')) || []).length;
+  assert.ok(
+    occurrences >= LOCALES.length,
+    `every locale needs ${relayKey} (found ${occurrences}, need >= ${LOCALES.length})`
+  );
 });
 
 test('every sync-health state the main process can set is renderable', () => {
-  const rendererDir = path.join(rootDir, 'src', 'electron', 'renderer');
-  const appSource = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
-  const mapping = appSource.match(/const SYNC_HEALTH_STATE_KEYS = \{([\s\S]*?)\n\};/)[1];
-  const known = new Set([...mapping.matchAll(/^\s*'?([a-z-]+)'?:/gm)].map((match) => match[1]));
+  const mappingSource = fs.readFileSync(path.join(rootDir, 'src', 'shared-ui', 'core', 'syncHealth.js'), 'utf8');
+  const mapping = mappingSource.match(/SYNC_HEALTH_STATE_KEYS = Object\.freeze\(\{([\s\S]*?)\n\}\);/)[1];
+  const known = new Set([...mapping.matchAll(/^\s*'?([a-z_-]+)'?:/gm)].map((match) => match[1]));
 
   // Collect the state literals assigned through updateSyncHealth({ state: ... })
   // plus the initial syncHealth literal, so a new state cannot silently render
@@ -95,9 +99,8 @@ test('every sync-health state the main process can set is renderable', () => {
 });
 
 test('stats pushes are coalesced instead of broadcast per tick', () => {
-  // Each push rebuilt the tray menu, re-rasterized the generated tray icon, cloned
-  // the record three times and serialized a ~1.3 MB IPC message, and the producer
-  // runs on every collector tick (watch ticks re-arm every 1.5s).
+  // Each push cloned the record three times and serialized a ~1.3 MB IPC message,
+  // and the producer runs on every collector tick (watch ticks re-arm every 1.5s).
   const sendBody = functionBody(mainSource, 'sendPush');
   assert.match(sendBody, /PUSH_COALESCE_MS/, 'the push must go through the coalescing window');
   assert.match(sendBody, /pendingPush = payload;/, 'only the newest payload should be kept');
@@ -113,7 +116,8 @@ test('stats pushes are coalesced instead of broadcast per tick', () => {
   );
 
   const flushBody = functionBody(mainSource, 'flushPush');
-  assert.match(flushBody, /updateTrayDisplay\(\)/, 'the tray refresh belongs to the flush');
+  // The tray refresh used to live here too; the desktop client is a normal app
+  // with no tray, so only the window broadcast remains.
   assert.match(flushBody, /mainWindow\.webContents\.send\('stats:push'/, 'the flush performs the broadcast');
   // The history revision must be compared across the whole coalesced window so the
   // dashboard is notified exactly once, and only when it really moved.
@@ -130,5 +134,11 @@ test('stats pushes are coalesced instead of broadcast per tick', () => {
     /flushPendingPush\(\)/,
     'fetchStats should not report a stale snapshot'
   );
-  assert.match(mainSource, /flushPendingPush\(\);\n {2}macWidgetPublisher\?\.stop\(\);/);
+  // The quit path flushes before tearing down, so a queued snapshot is not lost.
+  // The macOS Widget publisher that used to be stopped alongside it is gone with
+  // the widget, so only the flush is pinned here.
+  const quitStart = mainSource.indexOf("app.on('before-quit'");
+  assert.notEqual(quitStart, -1, 'the before-quit handler should exist');
+  const quitBody = mainSource.slice(quitStart, quitStart + 400);
+  assert.match(quitBody, /flushPendingPush\(\)/, 'quit must flush a queued snapshot');
 });

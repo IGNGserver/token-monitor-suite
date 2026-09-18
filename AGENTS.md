@@ -5,16 +5,16 @@ This is the single source of project guidance, shared by every coding agent (Cla
 ## Commands
 
 ```bash
-npm start          # launch the Electron widget (= npm run widget / npm run dev)
+npm start          # launch the desktop app (= npm run widget / npm run dev)
 npm run agent      # start the headless collector→hub agent
 npm run agent:once # one-shot collect+post, then exit (useful for cron/launchd)
 npm test           # run the node:test suite (node --test "tests/**/*.test.js")
 npm run lint       # ESLint flat config (eslint.config.js)
 npm run verify:product-scope # enforce the approved two-mode / Compose-only product boundary
-npm run verify     # product-scope guard + lint + test (single local entry point)
+npm run verify     # product-scope + shared-UI boundary + css-var guards, lint, test
 ```
 
-Automated verification is `npm run verify` (= `npm run verify:product-scope && npm run lint && npm test`); CI (`.github/workflows/ci.yml`) runs lint + test on push/PR across Node 22 & 24. The toolchain (ESLint 10 + the node:test glob) needs Node 22.13+, which is why `engines.node` is `>=22.13.0` (Node 18 & 20 are both EOL as of 2026-06).
+Automated verification is `npm run verify` (= `npm run verify:product-scope && npm run verify:shared-ui && npm run verify:css-vars && npm run lint && npm test`); CI (`.github/workflows/ci.yml`) runs lint + test on push/PR across Node 22 & 24. The toolchain (ESLint 10 + the node:test glob) needs Node 22.13+, which is why `engines.node` is `>=22.13.0` (Node 18 & 20 are both EOL as of 2026-06).
 
 ### Version and release policy
 
@@ -27,15 +27,17 @@ To dry-run the agent without posting: `node src/agent/agent.js --once --dry-run`
 
 ## Architecture
 
-The Electron widget, Docker Compose Hub, and headless agent share a single `src/shared/` library:
+The desktop app, Docker Compose Hub, and headless agent share `src/shared/`, and the desktop app and the Hub dashboard additionally share `src/shared-ui/`:
 
-- **`src/electron/main.js`** — widget process. Owns the BrowserWindow, IPC, and exposes exactly two sync choices: *local* and *client*.
-- **`src/hub/server.js`** — Node/MySQL HTTP Hub, used only by the root `docker-compose.yml`. It exposes `/api/ingest`, `/api/stats`, `/api/stats/stream` (SSE), and serves the same-port web dashboard / PWA from `src/hub/web/` via `src/hub/static.js`. The Hub source is intentionally excluded from Electron packages.
-- **`src/agent/agent.js`** — headless collector for machines without a widget. It is a sync client and posts to the Docker Compose Hub.
+- **`src/shared-ui/`** — the one UI both hosts render. Views, i18n, formatting, pure data transforms, client icons and styles live here. Every host-specific call goes through `src/shared-ui/transport/`: `httpTransport` for the Hub (fetch + SSE, same-origin) and `ipcTransport` for Electron (IPC to the main process, which owns the secret and the stream lifecycle). `scripts/verify-shared-ui-boundary.js` enforces that no view reaches for `fetch`, storage, `history`, dialogs or `window.tokenMonitor` directly — that is what keeps one implementation viable in both.
+- **`src/electron/main.js`** — desktop process. Owns the BrowserWindow, app menu, IPC, and exactly two sync choices: *local* and *client*. It serves the shared UI's `/api/*` vocabulary from local data or a Hub proxy via `src/electron/desktopRequestRouter.js`.
+- **`src/electron/renderer/`** — a shell (`index.html`, `desktop.css`) plus `boot.js`, which installs the IPC transport before importing the shared UI.
+- **`src/hub/server.js`** — Node/MySQL HTTP Hub, used only by the root `docker-compose.yml`. It exposes `/api/ingest`, `/api/stats`, `/api/stats/stream` (SSE), and serves the same-port web dashboard / PWA from `src/hub/web/` via `src/hub/static.js`; the shared UI is served under `/ui/`. The Hub source is intentionally excluded from Electron packages.
+- **`src/agent/agent.js`** — headless collector for machines without the desktop app. It is a sync client and posts to the Docker Compose Hub.
 
 The product boundary is recorded in `product-scope.json`: no embedded widget Hub, no standalone `npm run hub` entry point, and no secondary Worker deployment. Run `npm run verify:product-scope` before changing any deployment or sync code.
 
-### Collector pipeline (shared by widget and agent)
+### Collector pipeline (shared by the desktop app and the agent)
 
 `src/shared/collector.js` is the only place that invokes `tokscale`. It:
 1. resolves the platform binary from `@tokscale/cli-<platform>-<arch>` and falls back to the JS shim under Electron via `ELECTRON_RUN_AS_NODE=1`;
@@ -50,18 +52,18 @@ Usage and limits have independent lifecycles under `src/shared/deviceRuntime.js`
 
 `DeviceState` composes both outputs into the unchanged device wire record, buffering limits until usage exists and cold-start previews until a complete usage baseline exists; limits-only updates preserve the usage `updatedAt`. Provider dispatch starts in `src/shared/limitCollector.js`, with provider-specific implementations split between that file and `src/shared/*Limits.js`; shared normalization remains in `src/shared/limits.js`. The Docker Compose Hub receives the composed record and never needs provider credentials.
 
-### Widget mode switching
+### Local / client mode switching
 
-`main.js` chooses between `local` and `client` from `settings.hubMode` in the GUI's Multi-device Sync section. In `client` mode (a `hubUrl` is set) it stops the local-only collector, opens an SSE stream to `/api/stats/stream`, and also runs a sync collector to post this device's own usage. In `local` mode it runs only the local collector and emits stats over IPC to the renderer. A legacy `host` value is migrated to `local` and its embedded-Hub settings are discarded; it is not a supported runtime mode.
+`main.js` chooses between `local` and `client` from `settings.hubMode`, set in the settings view's Hub connection group. In `client` mode (a `hubUrl` is set) it stops the local-only collector, opens an SSE stream to `/api/stats/stream`, and also runs a sync collector to post this device's own usage. In `local` mode it runs only the local collector and emits stats over IPC, which the shared UI reads through its transport. A legacy `host` value is migrated to `local` and its embedded-Hub settings are discarded; it is not a supported runtime mode.
 
-The only supported Hub deployment is the root Docker Compose stack. `src/hub/` remains part of the Docker image and release Compose archive, but never part of the Electron package. When both a widget and the headless agent run on the same machine, the widget's sync collector backs off — it checks `data/agent.pid` (`pidFilePath()`) and skips posting if that PID is alive.
+The only supported Hub deployment is the root Docker Compose stack. `src/hub/` remains part of the Docker image and release Compose archive, but never part of the Electron package. When both the desktop app and the headless agent run on the same machine, the app's sync collector backs off — it checks `data/agent.pid` (`pidFilePath()`) and skips posting if that PID is alive.
 
-### Settings and credentials: env first, GUI overrides for widget
+### Settings and credentials: env first, GUI overrides for the desktop app
 
-Configuration has two sources, and the widget splits its persisted GUI state by sensitivity:
+Configuration has two sources, and the desktop app splits its persisted GUI state by sensitivity:
 
 1. **`.env` at project root** — read by `loadDotEnv()` in `src/shared/config.js` at the top of every entry file. Only assigns keys that aren't already in `process.env`, so real env vars (systemd / launchd / Docker) still win. `.env.example` documents the operator-facing settings intended for direct configuration, including connection/device settings, feature toggles, and provider credentials. Lower-level runtime knobs may still be accepted without being listed there; treat additions or removals from the documented env surface as compatibility changes and keep `.env.example` aligned with the code.
-2. **Widget GUI** — Electron `userData/settings.json` stores preferences and account metadata; plaintext `userData/credentials.json` stores GUI-managed raw credentials with restrictive filesystem permissions (POSIX `0600`; Windows relies on the containing `userData` ACL). `readSettings()` merges both over `defaultSettings()` (which is seeded from env), while the main process sends a default-deny redacted view to the renderer. The single Hub secret is the only raw credential exposed by the sync UI. The headless agent and Docker Compose Hub never read `credentials.json`; their credential flow remains CLI/env-based.
+2. **Desktop GUI** — Electron `userData/settings.json` stores preferences and account metadata; plaintext `userData/credentials.json` stores GUI-managed raw credentials with restrictive filesystem permissions (POSIX `0600`; Windows relies on the containing `userData` ACL). `readSettings()` merges both over `defaultSettings()` (which is seeded from env), while the main process sends a default-deny redacted view to the renderer, and the desktop settings surface is asserted by `tests/electron/settingsMigration.test.js`. The single Hub secret is the only raw credential exposed to the renderer, and `ipcTransport` never forwards its value — the UI only learns whether a Hub is configured. The headless agent and Docker Compose Hub never read `credentials.json`; their credential flow remains CLI/env-based.
 
 `CREDENTIAL_SETTING_PATHS` in `src/shared/credentialStore.js` maps fixed GUI credential settings. Add new fixed credentials there instead of creating provider-specific stores; dynamic account credentials such as MiMo cookies belong under a dedicated nested path in the same unified store and must remain metadata-only in the renderer. The single Hub secret is the only raw credential exposed by the sync UI. Expose any other raw credential to the renderer only through an explicit allowlist. Legacy migration must write and verify the new store before stripping/deleting the old source; corrupt, unknown-version, or symlinked stores must never be replaced with an empty document. This store is deliberately local plaintext protected by filesystem permissions, not OS-backed encryption: it avoids Keychain/credential-manager prompts but does not protect against processes already running as the same OS user.
 
@@ -76,21 +78,21 @@ The default client CSV lives in **one** place: `DEFAULT_CLIENTS` in `src/shared/
 | Default client list | `DEFAULT_CLIENTS` in `src/shared/clientTracking.js` |
 | Watch paths | the `add(...)` call in `clientWatchCandidates()` (`src/shared/collector.js`) |
 | Name normalization | the `normalizeClientName()` branch in `src/shared/usage.js` |
-| Renderer maps | `clientLabels` / `clientsWithIcon` / `KNOWN_CLIENTS` in `src/electron/renderer/app.js`; `VENDOR_ORDER` / `VENDOR_LABELS` in `themePresets.js`; `clientColors` in `usageCharts.js` |
+| UI labels / colours | `CLIENT_LABELS` / `CLIENT_COLORS` in `src/shared-ui/core/data.js`, plus the `ICON_ALIASES` entry if the file name differs from the id |
 | Discord RPC | `KNOWN_CLIENT_ASSETS` / `CLIENT_LABELS` in `src/electron/discordRpc.js` |
-| Row icon CSS | the `.row-icon-<id>` rule in `src/electron/renderer/styles.css` |
-| Icon assets | `assets/icons/<id>.svg` + `.github/assets/tools-icon/<id>.png` |
+| Icon assets | `src/shared-ui/icons/clients/<id>.svg` (the one tree both hosts serve) + `.github/assets/tools-icon/<id>.png` |
 | WSL discovery | marker(s) in `WSL_DATA_MARKERS` **and** the marker→id mapping in `MARKER_CLIENTS` (`src/shared/wslUsage.js`) — use the exact roots tokscale reads, including alternate roots. A marker without a `MARKER_CLIENTS` entry attributes to nothing, so a WSL home holding only that client's data would be skipped |
 | Docs & env examples | the supported-tools table in `README.md` and its translations (`README.*.md`) + the client CSV in `.env.example`. Every locale's prose tool/provider counts must match its own table — `tests/docs/readmeConsistency.test.js` fails on a stale count or a table that drifts between locales |
 | Guard tests | the expected-client lists in `tests/shared/clientTracking.test.js` |
 
-One caveat on top of the table:
+Two caveats on top of the table:
 
 - Self-synced clients (cursor/antigravity) additionally go in `SELF_SYNCED_CLIENTS`; parse-local clients must NOT.
+- A tracked id is not necessarily the id tokscale spells. `tokscale --client` is a clap value-enum: an id outside it is a hard usage error (exit 2, empty stdout), so one unknown id fails the whole scan — every other client in the same call included. `TOKSCALE_CLIENT_RENAMES` / `TOKSCALE_CLIENT_ALIASES` in `collector.js` are therefore load-bearing: rename an id tokscale rejects (`deepseek-harness` → `dsh`), and alias an id whose usage tokscale splits across two (`pi` → `pi,omp`, since 4.14 moved Oh My Pi's `~/.omp` root to its own `omp` client). Every downstream consumer must fold those upstream ids back — `normalizeClientName` for usage rows, and `normalizeGraphClientIds` for the history graph, which tokscale keys by its own ids. `tests/shared/clientTracking.test.js` asserts every default client maps to an id the bundled tokscale actually accepts.
 
 ### Data flow contract
 
-The Docker Compose Hub stores normalized device records (`normalizeDeviceRecord` in `usage.js`) and aggregates on read (`aggregateDevices`). The wire shape between agent/widget and Hub is whatever `collectUsageOnce()` returns — that function is the source of truth, and `docs/API.md` documents the full contract. The core is `{deviceId, hostname, platform, updatedAt, agentVersion, today, month, allTime}` (each period has `{totalTokens, costUsd, clients, clientCosts, models, modelCosts}`), plus attribution fields (`trackedClients`, `clientStatus`, `wslStatus`, `periodWindows`, `projectsEnabled`) and optional `osName` / `osVersion` / `agentRuntime` / `history` / `limits`.
+The Docker Compose Hub stores normalized device records (`normalizeDeviceRecord` in `usage.js`) and aggregates on read (`aggregateDevices`). The wire shape between device and Hub is whatever `collectUsageOnce()` returns — that function is the source of truth, and `docs/API.md` documents the full contract. The core is `{deviceId, hostname, platform, updatedAt, agentVersion, today, month, allTime}` (each period has `{totalTokens, costUsd, clients, clientCosts, models, modelCosts}`), plus attribution fields (`trackedClients`, `clientStatus`, `wslStatus`, `periodWindows`, `projectsEnabled`) and optional `osName` / `osVersion` / `agentRuntime` / `history` / `limits`.
 
 ### Product boundary and architecture governance
 

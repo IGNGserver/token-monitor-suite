@@ -54,17 +54,15 @@ test('native traffic-light helper is inert off macOS', () => {
   assert.deepEqual(calls, []);
 });
 
-test('main and dashboard windows use native controls only on macOS', () => {
+test('the main window uses native controls with an inset title bar on macOS', () => {
   const main = read('src', 'electron', 'main.js');
-  const renderer = read('src', 'electron', 'renderer', 'app.js');
-  const dashboard = read('src', 'electron', 'renderer', 'dashboard.js');
-  const styles = read('src', 'electron', 'renderer', 'styles.css');
-  const dashboardStyles = read('src', 'electron', 'renderer', 'dashboard.css');
-
-  assert.match(main, /applyMacosNativeWindowButtons\(win, \{ visible: !collapsedFloatingBubble \}\)/);
-  assert.match(main, /dashboardWindow = win;[\s\S]*?applyMacosNativeWindowButtons\(win\)/);
-  assert.match(renderer, /classList\.toggle\('is-macos', isMac\)/);
-  assert.match(dashboard, /classList\.toggle\('is-macos', isMac\)/);
-  assert.match(styles, /body\.is-macos \.window-actions,[\s\S]*?body\.is-macos \.actions-hotspot/);
-  assert.match(dashboardStyles, /body\.is-macos \.dash-header-actions #minBtn,[\s\S]*?body\.is-macos \.dash-header-actions #closeBtn/);
+  // A normal window keeps its frame; on macOS the title bar is inset so the
+  // traffic lights sit on the app's own toolbar above the sidebar.
+  assert.match(main, /applyMacosNativeWindowButtons\(win\)/);
+  assert.match(main, /titleBarStyle: 'hiddenInset'/, 'macOS uses an inset title bar');
+  // The desktop shell clears the traffic lights and makes the topbar draggable.
+  const desktopCss = read('src', 'electron', 'renderer', 'desktop.css');
+  assert.match(desktopCss, /body\.is-mac \.topbar/, 'the topbar must clear the traffic lights');
+  assert.match(desktopCss, /-webkit-app-region: drag/, 'the topbar is a drag region on macOS');
+  assert.match(desktopCss, /-webkit-app-region: no-drag/, 'interactive children must opt out of dragging');
 });

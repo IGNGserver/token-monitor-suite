@@ -26,7 +26,7 @@
 
 ## What is Token Monitor?
 
-A desktop widget that shows live token usage and AI Tool Limits across 31+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project.
+A desktop app that shows live token usage and AI Tool Limits across 31+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project.
 
 ## Supported Tools
 
@@ -56,7 +56,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code extension logs | ✅ | — | — |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/` (default `~/.dsh/sessions/`; `session.jsonl.zstd`) | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/` (default `~/.dsh/sessions/`; `session.jsonl[.zstd]` and versioned `session.v<N>.jsonl[.zstd]`) | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db` (CN only); Qoder dashboard cookie (big-model credits via Qoder usage API) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek | DeepSeek API key (balance via DeepSeek API) | — | ✅ | — |
@@ -73,7 +73,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 
 - Paths above are the defaults. Token Monitor follows the same environment overrides Tokscale does — `$XDG_DATA_HOME` for the `~/.local/share/` roots, and per-tool variables such as `$CODEX_HOME`, `$GROK_HOME`, `$HERMES_HOME`, `$KIMI_CODE_HOME`, `$REASONIX_STATE_HOME`, `$REASONIX_HOME` and the `$CLINE_*` family.
 
-- Command Code transcripts do not contain actual token counts or per-message model metadata. Token usage is estimated from transcript text, while model attribution and derived cost may reflect the currently configured model rather than the model historically used for each request.
+- Command Code v3 transcripts persist per-request `usage` (input / output / cache-read / cache-write tokens, plus the provider-reported `costUsd`), so those sessions are exact rather than estimated. Only legacy transcripts written before the `usage` block existed fall back to a text-based estimate, and their model attribution may reflect the currently configured model rather than the model historically used for each request.
 
 - Custom maps numeric JSON fields from one GET balance endpoint; OpenAI or Anthropic compatibility alone is not enough.
 
@@ -83,7 +83,7 @@ Set Qoder CN's own `QODERCN_CONFIG_DIR` when its profile is relocated; Token Mon
 
 Qoder CN token usage is read from the app's local SQLite database, not an API — enable it in Settings → tools (opt-in, off by default). The legacy database is auto-detected per platform: macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`, Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`, Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — overridable with `TOKEN_MONITOR_QODER_CN_DB_PATH`. Qoder CN 0.1.x also stores conversation messages in `com.qoder.app.stable/main.sqlite` under the platform application-support directory; override it with `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH` when needed. It may additionally write `~/.qoder-cn/projects/**/*.jsonl`; that transcript root is watched for live updates and can be changed with `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`.
 
-This is an advanced local integration: reading needs a `sqlite3` CLI on PATH or a Node runtime with unflagged `node:sqlite` (Node ≥ 23.4; the Electron widget may need the CLI). Read failures are logged, and an existing complete snapshot is retained instead of being replaced with zero usage. Main-database and transcript rows use a blended estimate of CJK characters / 1.5 and other characters / 4; request input is the cumulative session context and output is that request's stored content. Provider billing fields, system prompts, and tool schemas are not available in these local records, so those totals and costs are marked `estimated` and are not exact provider token billing. Costs are estimated from the models.dev catalog for each mapped model; the adapter may break if Qoder changes its database schema.
+This is an advanced local integration: reading needs a `sqlite3` CLI on PATH or a Node runtime with unflagged `node:sqlite` (Node ≥ 23.4; the Electron app may need the CLI). Read failures are logged, and an existing complete snapshot is retained instead of being replaced with zero usage. Main-database and transcript rows use a blended estimate of CJK characters / 1.5 and other characters / 4; request input is the cumulative session context and output is that request's stored content. Provider billing fields, system prompts, and tool schemas are not available in these local records, so those totals and costs are marked `estimated` and are not exact provider token billing. Costs are estimated from the models.dev catalog for each mapped model; the adapter may break if Qoder changes its database schema.
 
 #### Qoder account limits
 
@@ -114,7 +114,7 @@ This is an advanced local integration: reading needs a `sqlite3` CLI on PATH or 
 
 ## Why Token Monitor?
 
-Most usage monitors are useful on the machine they run on. Token Monitor is built for multi-device work: each device watches its own local logs, sends summary updates to your hub, and every connected widget sees token changes almost immediately.
+Most usage monitors are useful on the machine they run on. Token Monitor is built for multi-device work: each device watches its own local logs, sends summary updates to your hub, and every connected client sees token changes almost immediately.
 
 ## Features
 
@@ -147,13 +147,10 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 ### Interface & surfaces
 
 - **Breakdown views** — grouped by tool, device, model, session, project, or account limits
-- **Menu bar (macOS) and system tray (Windows) popover** — live cost, tokens, or the closest-to-empty provider limit % next to the icon
-- **Floating Bubble mode** — collapses the widget into a draggable mini-window with click or hover preview and tray-style content
-- **Menu bar layout composer** — the menu bar and the floating bubble can use a built-in preset or a layout you build yourself: pick "Custom…" to add AI tool icons, quota bars, percentages, reset times, cost, or custom text, drag to reorder against a live preview, and give each item its own AI tool, account, quota window, and typeface
-- **Appearance controls** — interface theme switching (incl. a light mode), per-tool vendor colours, glass opacity, blur, and transparent window mode
-- **Experimental native macOS Widget** — macOS 14+ support in Small, Medium, and Large sizes, with Overview, Quota, Models, Activity, and Trend pages. This source-only preview is not yet promised in published releases.
+- **One interface, two hosts** — the desktop app and the Hub's web dashboard render the same UI, so a machine without the app can still open the full dashboard in a browser
+- **Appearance controls** — interface theme switching (incl. a light mode), per-tool vendor colours, and native window backdrop
 - **Customizable tool list** — hide, pin, and reorder tools in the main dashboard without changing what gets tracked
-- **Recordable global shortcut** — show or hide the window from anywhere
+- **Desktop settings** — tracked tools, collection cadence, session archiving, data export, custom model pricing, start at login, and Discord Rich Presence
 - **Discord Rich Presence** — broadcast today's tokens, cost, and top client (opt-in)
 
 ## Installation
@@ -174,7 +171,7 @@ Local mode is the default: launch the app and it starts tracking this device. No
 
 ## Multi-device sync
 
-When you want multi-device sync, connect all devices (and any headless agents) to the same Docker Compose Hub. On each device, open the widget and choose **Connect to a hub** under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget. For a no-GUI install, use the [headless agent guide](docs/headless-agent.md) and the `Token-Monitor-Headless-<version>.tar.gz` release asset.
+When you want multi-device sync, connect all devices (and any headless agents) to the same Docker Compose Hub. On each device, open the app and choose **Connect to a hub** under Settings → Hub connection. The app contributes this device's usage automatically; run `npm run agent` only on machines without the app. For a no-GUI install, use the [headless agent guide](docs/headless-agent.md) and the `Token-Monitor-Headless-<version>.tar.gz` release asset.
 
 For this single-user project, `TOKEN_MONITOR_SECRET` is the one Hub key used by every device and it covers read, ingest, and administrative operations, including manually managed quota accounts. Older split admin/viewer/device credentials remain available only as a compatibility mode. Remote connections require HTTPS by default; desktop/agent HTTP needs an explicit trusted-LAN opt-in, while Android release builds always require HTTPS.
 
@@ -182,7 +179,7 @@ An older profile that points to a non-loopback `http://` Hub is not silently wea
 
 #### Option A — Local only (default)
 
-Use the widget's local mode for a single device. It reads this machine's local data directly and does not require a Hub or an agent.
+Use the app's local mode for a single device. It reads this machine's local data directly and does not require a Hub or an agent.
 
 #### Option B — Connect to a Docker Compose Hub
 
@@ -194,7 +191,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-In every widget, choose **Connect to a hub** under Settings → Multi-device Sync, then enter the Hub URL and the same Hub key. On machines without a widget, configure the same URL and key and run `npm run agent`.
+In every app, choose **Connect to a hub** under Settings → Hub connection, then enter the Hub URL and the same Hub key. On machines without the app, configure the same URL and key and run `npm run agent`.
 
 The root Docker Compose stack is the only supported Hub deployment. It provides the HTTP API, dashboard, PWA, device ingest, and SSE stream for every connected client.
 
@@ -227,15 +224,15 @@ Output lands in `dist/`. Windows and Linux use the matching `dist:*` script abov
 
 ```text
 Mode A — Local (default, no setup)
-    widget (Electron) ──▶ tokscale ──▶ ~/.claude, ~/.codex, $HERMES_HOME
+    desktop app (Electron) ──▶ tokscale ──▶ ~/.claude, ~/.codex, $HERMES_HOME
 
 Mode B — Sync (opt-in, multi-device)
     device A agent ──▶
-    device B agent ──▶  hub  ──▶  widget on any device
+    device B agent ──▶  hub  ──▶  desktop app or browser on any device
     device C agent ──▶
 ```
 
-The widget chooses local vs sync mode based on Settings → Multi-device Sync. The Docker Compose Hub receives each device's normalized summary and pushes aggregated stats to connected clients over Server-Sent Events, so updates on one device appear on the others within a few seconds.
+The desktop app chooses local vs sync mode based on Settings → Hub connection. The Docker Compose Hub receives each device's normalized summary and pushes aggregated stats to connected clients over Server-Sent Events, so updates on one device appear on the others within a few seconds.
 
 ## Session data retention
 
@@ -264,7 +261,7 @@ This archive only covers days Token Monitor has already observed; data deleted b
 
 There are two places to configure Token Monitor; day-to-day use only needs the first:
 
-- **Widget (GUI)** — click the `⚙` button in the bottom-right corner. Sections, in order: General (language, launch at login, updates), Main (Home modules and display currency), Window (window behavior, menu bar and floating-bubble layout, tray mode, shortcut), Appearance (theme and vendor colours), Collection (tracked tools, collection cadence, Preserve deleted session usage, data export), AI Tool Limits (provider selection, limits, and credentials), Subscriptions (what you pay per account), and Multi-device Sync. The `⇧` button in the title bar cycles the window behavior.
+- **Desktop app (GUI)** — open Settings from the sidebar or the app menu. It covers language, currency, tracked tools, collection cadence, session archiving, data export, custom model pricing, window and appearance, start at login, updates, Discord Rich Presence, and the Hub connection. Quota accounts, subscriptions, and pricing are managed on the Hub (see the Accounts and Management views).
 - **Headless agent & hub** — no UI; configured with a `.env` file at the project root (copy from `.env.example`), precedence CLI flag → env var → built-in default.
 
 See the [configuration reference](docs/configuration.md) for every setting and all environment variables.

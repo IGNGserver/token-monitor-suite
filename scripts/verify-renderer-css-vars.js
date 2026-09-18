@@ -12,10 +12,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
+// The shared UI stylesheet is the only one both hosts render. The desktop shell
+// adds src/electron/renderer/desktop.css, and the Hub's old dashboard stylesheets
+// were folded into the shared package.
 const STYLESHEETS = [
-  'src/electron/renderer/styles.css',
-  'src/electron/renderer/dashboard.css',
-  'src/hub/web/css/app.css'
+  'src/shared-ui/styles/app.css',
+  'src/electron/renderer/desktop.css'
 ];
 
 // Tokens the runtime sets from JS (themePresets.js / the web theme script) or on
@@ -30,13 +32,31 @@ function stripComments(text) {
   return text.replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
+// A layered sheet legitimately consumes tokens its base defines. desktop.css is
+// an additive layer over the shared stylesheet, so its references are resolved
+// against the union of both rather than against itself alone.
+const LAYER_BASE = Object.freeze({
+  'src/electron/renderer/desktop.css': ['src/shared-ui/styles/app.css']
+});
+
+function collectDefinitions(css, seed = new Set()) {
+  const defined = new Set(seed);
+  for (const match of css.matchAll(/(--[a-zA-Z0-9_-]+)\s*:/g)) defined.add(match[1]);
+  return defined;
+}
+
 function validateStylesheet(relativePath) {
   const filePath = path.join(ROOT, relativePath);
   if (!fs.existsSync(filePath)) return { relativePath, skipped: true };
   const css = stripComments(fs.readFileSync(filePath, 'utf8'));
 
-  const defined = new Set(RUNTIME_DEFINED);
-  for (const match of css.matchAll(/(--[a-zA-Z0-9_-]+)\s*:/g)) defined.add(match[1]);
+  let defined = collectDefinitions(css, new Set(RUNTIME_DEFINED));
+  for (const base of LAYER_BASE[relativePath] || []) {
+    const basePath = path.join(ROOT, base);
+    if (fs.existsSync(basePath)) {
+      defined = collectDefinitions(stripComments(fs.readFileSync(basePath, 'utf8')), defined);
+    }
+  }
 
   const missing = new Set();
   for (const match of css.matchAll(/var\(\s*(--[a-zA-Z0-9_-]+)\s*([,)])/g)) {

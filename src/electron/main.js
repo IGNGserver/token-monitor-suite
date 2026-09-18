@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, Notification, powerMonitor, screen, session, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, net, powerMonitor, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, loadDotEnv, parseBoolean, pidFilePath, sharedDataDir, normalizeHubUrl } = require('../shared/config');
 const {
@@ -17,9 +17,7 @@ const {
 } = require('../shared/credentialStore');
 const { installSafeStdout } = require('../shared/safeStdio');
 const { appVersion } = require('../shared/appVersion');
-const { macWidgetRuntimeSupport } = require('../shared/macSystemRequirements');
 const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/exporter');
-const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const motionPreferenceApi = require('./motionPreference');
 
 // Install EPIPE suppression before anything that might log. Without this,
@@ -36,6 +34,10 @@ const {
 const { collectCustomRangeOnce, lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { createRequestRouter } = require('./desktopRequestRouter');
+const {
+  normalizeInitialRendererViewState,
+  initialRendererViewStateQuery
+} = require('./viewState');
 const { createAppMenu } = require('./appMenu');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
@@ -47,18 +49,18 @@ const {
   normalizeClientDisplayOrder,
   normalizeHiddenClients,
   normalizePinnedClients
-} = require('./renderer/clientDisplayPreferences');
-const { LANGUAGE_OPTIONS, resolveLocale, translate } = require('./renderer/i18n');
+} = require('./preferences/clientDisplayPreferences');
+const { LANGUAGE_OPTIONS, resolveLocale, translate } = require('./i18n');
 const {
   defaultViewDisplayPreferences,
   normalizeHiddenViews,
   normalizeViewDisplayOrder
-} = require('./renderer/viewDisplayPreferences');
+} = require('./preferences/viewDisplayPreferences');
 const {
   defaultHomeModulePreferences,
   normalizeHiddenHomeModules,
   normalizeHomeModuleOrder
-} = require('./renderer/homeModulePreferences');
+} = require('./preferences/homeModulePreferences');
 const {
   checkNpmForNewer,
   cleanupStaleStaging,
@@ -108,11 +110,6 @@ const { createSyncSummaryTransformer } = require('../shared/syncSummary');
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const { historyPreview, historyRevision } = require('../shared/history');
 const { readSessionDetail } = require('../shared/sessionDetail');
-const {
-  createMacWidgetPublisher,
-  resolveMacWidgetConfiguration
-} = require('./macWidgetPublisher');
-const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
 // Loaded lazily: discordRpc.js requires @xhayper/discord-rpc at module scope,
 // which costs ~240 ms warm / ~520 ms cold and 170 modules on every launch, for a
 // feature that is off by default (settings.discordRpcEnabled === false). The
@@ -126,22 +123,6 @@ function startDiscordRpc(...args) { return loadDiscordRpc().startDiscordRpc(...a
 function stopDiscordRpc(...args) { return loadDiscordRpc().stopDiscordRpc(...args); }
 function updateDiscordRpc(...args) { return loadDiscordRpc().updateDiscordRpc(...args); }
 const linuxAutostart = require('./linuxAutostart');
-const {
-  buildTrayIcon,
-  createTray,
-  formatTrayText,
-  isBarsTrayIconMode,
-  pickUsageTrayIconId,
-  popoverBounds,
-  refreshTrayMenu,
-  shouldUseTemplateTrayIcon
-} = require('./tray');
-const {
-  macActivationPolicyMode,
-  normalizeTrayModeSettings,
-  shouldCreateTray,
-  trayToggleAction
-} = require('./trayModeSettings');
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
 const { classifyStreamFailure } = require('./syncConnection');
 const { composeLocalSyncStats, reattachLocalNativeView } = require('./syncDisplayStats');
@@ -153,32 +134,9 @@ const {
   usageConfigFromSettings
 } = require('./runtimeConfig');
 const { runManualDeviceRefresh } = require('./deviceRuntimeCoordinator');
-const { describeWindowBehavior, normalizeWindowBehaviorSettings } = require('./windowBehavior');
-const {
-  normalizeWindowToggleShortcut,
-  windowToggleShortcutAction,
-  windowToggleShortcutStatus
-} = require('./windowShortcut');
-const {
-  FLOATING_BUBBLE_HANDLE_HEIGHT,
-  FLOATING_BUBBLE_HANDLE_WIDTH,
-  canUseFloatingBubble,
-  collapsedFloatingBubbleBounds,
-  dragFloatingBubbleBounds,
-  expandedFloatingBubbleBounds,
-  floatingBubbleCollapsedArea,
-  floatingBubbleCollapsedMargin,
-  floatingBubbleCollapsePlan,
-  floatingBubbleInitialRendererQuery,
-  floatingBubbleNativeGlassEnabled,
-  floatingBubbleSide,
-  normalizeInitialRendererViewState,
-  moveFloatingBubbleBounds
-} = require('./floatingBubble');
 const { applyWindowsChrome } = require('./windowsChrome');
 const { applyWindowsAccentBlur } = require('./windowsBackdrop');
 const { applyMacosNativeWindowButtons } = require('./macosWindowChrome');
-const { setMoveToActiveSpace } = require('./macosSpaceBehavior');
 const {
   normalizeWindowsBackdropMode,
   windowsSurfaceProfile
@@ -232,7 +190,6 @@ const CSP_HEADER = [
   "form-action 'none'",
   "frame-ancestors 'none'"
 ].join('; ');
-const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
 const DEFAULT_COLLECTION_INTERVAL_MS = SHARED_DEFAULT_COLLECTION_INTERVAL_MS;
@@ -245,11 +202,63 @@ const SSE_RETRY_MAX_MS = 30 * 1000;
 const SYNC_REST_POLL_MS = 60 * 1000;
 const SYNC_RECOVERY_TIMEOUT_MS = 20 * 1000;
 const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
+// The shared UI exposes eight views. The widget had nine breakdown-oriented ids,
+// so an upgraded profile's saved order/hidden set is translated rather than
+// dropped: tool/model/project/session are now tabs of `usage`, and status is the
+// health tab of `limits`.
+const LEGACY_TO_SHARED_VIEW = Object.freeze({
+  home: 'overview',
+  tool: 'usage',
+  model: 'usage',
+  project: 'usage',
+  session: 'usage',
+  status: 'limits',
+  device: 'devices',
+  limits: 'limits',
+  trends: 'trends',
+  overview: 'overview',
+  usage: 'usage',
+  devices: 'devices',
+  accounts: 'accounts',
+  management: 'management',
+  settings: 'settings'
+});
+const SHARED_VIEW_LIST = ['overview', 'usage', 'devices', 'limits', 'trends', 'accounts', 'management', 'settings'].map((id) => ({ id }));
+// Kept for the display-preference normalizers, which only need ids.
 const DEFAULT_VIEW_LIST = ['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'].map((id) => ({ id }));
+
+/** Translate a legacy view id (or list) onto the shared UI's view set. */
+function toSharedViewId(value) {
+  const id = String(value || '').trim().toLowerCase();
+  return LEGACY_TO_SHARED_VIEW[id] || '';
+}
+
+const SHARED_VIEW_IDS = new Set(SHARED_VIEW_LIST.map((view) => view.id));
+
+function migrateViewOrderToShared(value) {
+  const seen = new Set();
+  const order = [];
+  for (const item of String(value || '').split(',')) {
+    const mapped = toSharedViewId(item);
+    // Only ids the shared UI can actually render survive the migration, so a
+    // stale value cannot produce an order entry the navigation cannot show.
+    if (!mapped || seen.has(mapped) || !SHARED_VIEW_IDS.has(mapped)) continue;
+    seen.add(mapped);
+    order.push(mapped);
+  }
+  return order.join(',');
+}
+
+function migrateHiddenViewsToShared(value) {
+  const hidden = new Set();
+  for (const item of String(value || '').split(',')) {
+    const mapped = toSharedViewId(item);
+    if (mapped && SHARED_VIEW_IDS.has(mapped)) hidden.add(mapped);
+  }
+  return [...hidden].join(',');
+}
 const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends'].map((id) => ({ id }));
-const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
-// View ids the shared UI knows. The app menu navigates by these; the widget's
-// own ids above are kept only for the tray submenu until the tray is removed.
+// View ids the shared UI knows; the app menu navigates by these.
 const SHARED_UI_VIEW_IDS = new Set(['overview', 'usage', 'devices', 'limits', 'trends', 'accounts', 'management', 'settings']);
 
 let mainWindow = null;
@@ -270,17 +279,6 @@ if (process.platform === 'win32') app.setAppUserModelId('com.igng.tokenmonitor')
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.exit(0);
-
-let pendingMacWidgetOpen = null;
-app.on('open-url', (event, url) => {
-  if (process.platform !== 'darwin') return;
-  const scheme = String(process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME || 'token-monitor').trim();
-  const destination = parseMacWidgetDeepLink(url, scheme);
-  if (!destination) return;
-  event.preventDefault();
-  pendingMacWidgetOpen = destination;
-  if (app.isReady()) setImmediate(openMainWindowFromWidget);
-});
 
 const HOME_LIMIT_ACCOUNT_COUNT_DEFAULT = 3;
 const HOME_LIMIT_ACCOUNT_COUNT_MAX = 12;
@@ -329,15 +327,12 @@ function normalizeHomeLimitAccountCount(value) {
 
 function defaultSettings() {
   const envHubUrl = normalizeHubUrl(process.env.TOKEN_MONITOR_HUB_URL || '');
-  const windowBehavior = process.env.TOKEN_MONITOR_ALWAYS_ON_TOP === '0' ? 'normal' : 'floating';
   const collectionMode = normalizeCollectionMode(process.env.TOKEN_MONITOR_COLLECTION_MODE);
   return {
     hubMode: envHubUrl ? 'client' : 'local',
     hubUrl: envHubUrl,
     secret: process.env.TOKEN_MONITOR_SECRET || '',
     allowInsecureHubHttp: parseBoolean(process.env.TOKEN_MONITOR_ALLOW_INSECURE_HTTP, false),
-    windowBehavior,
-    alwaysOnTop: windowBehavior === 'floating',
     refreshMs: Number(process.env.TOKEN_MONITOR_WIDGET_REFRESH_MS || 15000),
     glassOpacity: 68,
     glassBlur: 32,
@@ -355,11 +350,6 @@ function defaultSettings() {
     homeActiveDaysWindow: 'all',
     themeColors: {},
     vendorColors: {},
-    floatingBubbleEnabled: false,
-    floatingBubbleTrigger: 'click',
-    floatingBubbleContent: 'icon',
-    floatingBubbleCustomLayout: createDefaultTrayLayout(),
-    floatingBubbleBounds: null,
     lastViewState: { period: 'today', breakdown: 'tool' },
     discordRpcEnabled: false,
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
@@ -397,8 +387,6 @@ function defaultSettings() {
     archivedClientUsage: { version: 1, clients: {} },
     allTimeSince: process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01',
     customModelPricing: [],
-    limitsEnabled: parseBoolean(process.env.TOKEN_MONITOR_LIMITS_ENABLED, true),
-    limitProviders: parseLimitProviders(process.env.TOKEN_MONITOR_LIMIT_PROVIDERS).join(','),
     limitProviderOrder: defaultLimitProviderOrder(),
     homeLimitProviderOrder: '',
     hiddenHomeLimitProviders: '',
@@ -408,14 +396,6 @@ function defaultSettings() {
     showLimitUsed: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_USED, false),
     windowBounds: null,
     zoomFactor: 1,
-    showTrayIcon: true,
-    trayMode: false,
-    closeToTray: false,
-    startInTray: false,
-    trayContent: 'tokens',
-    trayCustomLayout: createDefaultTrayLayout(),
-    showTrayProviderBadge: false,
-    windowToggleShortcut: '',
     currency: normalizeCurrency(process.env.TOKEN_MONITOR_CURRENCY || 'USD'),
     currencyRates: {},
     startAtLogin: false,
@@ -543,10 +523,6 @@ function migrateViewDisplayOrder(value) {
   return hasKnownView ? normalizeViewDisplayOrder(value, DEFAULT_VIEW_LIST).join(',') : '';
 }
 
-function normalizeTrayContent(value, fallback = 'tokens') {
-  const v = String(value || '').trim();
-  return TRAY_CONTENT_VALUES.has(v) ? v : fallback;
-}
 
 function normalizeHubMode(value, fallback = 'local') {
   const next = String(value || '').trim();
@@ -594,22 +570,12 @@ function restoredBounds() {
 }
 
 let persistBoundsTimer = null;
-let floatingBubbleAutoCollapseTimer = null;
-const floatingBubbleState = { collapsed: false, side: null, collapsedBounds: null, expandedBounds: null, suppressNextCollapse: false, contentSize: null };
-let mainWindowChrome = { collapsedFloatingBubble: false };
 
 function stopPersistBoundsTimer() {
   if (persistBoundsTimer) clearTimeout(persistBoundsTimer);
   persistBoundsTimer = null;
 }
 
-function floatingBubblePayload() {
-  return {
-    enabled: canUseFloatingBubble(settings),
-    collapsed: floatingBubbleState.collapsed,
-    side: floatingBubbleState.side
-  };
-}
 
 // Load settings once and, on that first load, seed the in-memory view state
 // from the persisted snapshot so a cold start reopens the last-used view.
@@ -664,181 +630,18 @@ function updateRendererViewState(patch) {
   return rendererViewState;
 }
 
-function sendFloatingBubbleState() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.webContents.send('floatingBubble:state', floatingBubblePayload()); } catch (_) {}
-}
 
-function stopFloatingBubbleAutoCollapseTimer() {
-  if (floatingBubbleAutoCollapseTimer) clearTimeout(floatingBubbleAutoCollapseTimer);
-  floatingBubbleAutoCollapseTimer = null;
-}
 
-function restoreWindowSizeLimits() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (typeof mainWindow.setMinimumSize === 'function') {
-    mainWindow.setMinimumSize(WINDOW_LIMITS.minWidth, WINDOW_LIMITS.minHeight);
-  }
-  if (typeof mainWindow.setMaximumSize === 'function') {
-    mainWindow.setMaximumSize(WINDOW_LIMITS.maxWidth, WINDOW_LIMITS.maxHeight);
-  }
-}
 
-function applyCollapsedFloatingBubbleLimits(bounds) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (typeof mainWindow.setMinimumSize === 'function') {
-    mainWindow.setMinimumSize(bounds?.width || FLOATING_BUBBLE_HANDLE_WIDTH, bounds?.height || FLOATING_BUBBLE_HANDLE_HEIGHT);
-  }
-  if (typeof mainWindow.setMaximumSize === 'function') {
-    mainWindow.setMaximumSize(bounds?.width || FLOATING_BUBBLE_HANDLE_WIDTH, bounds?.height || FLOATING_BUBBLE_HANDLE_HEIGHT);
-  }
-  if (typeof mainWindow.setResizable === 'function') mainWindow.setResizable(false);
-  mainWindow.setAlwaysOnTop(true, process.platform === 'win32' ? 'screen-saver' : 'floating');
-  if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(true);
-}
 
-function displayForBounds(bounds) {
-  if (!bounds || typeof bounds.x !== 'number' || typeof bounds.y !== 'number') return null;
-  try {
-    return screen.getDisplayMatching({
-      x: bounds.x,
-      y: bounds.y,
-      width: bounds.width || 1,
-      height: bounds.height || 1
-    });
-  } catch (_) {
-    return null;
-  }
-}
 
-function displayForPoint(point) {
-  if (!point || !Number.isFinite(Number(point.x)) || !Number.isFinite(Number(point.y))) return null;
-  try {
-    return screen.getDisplayNearestPoint({ x: Number(point.x), y: Number(point.y) });
-  } catch (_) {
-    return null;
-  }
-}
 
-function collapsedAreaForDisplay(display) {
-  return floatingBubbleCollapsedArea(display, process.platform) || display?.workArea || display?.bounds || null;
-}
 
-function collapsedMargin() {
-  return floatingBubbleCollapsedMargin(process.platform);
-}
 
-function persistWindowBounds(next) {
-  const prev = settings.windowBounds || {};
-  if (prev.x === next.x && prev.y === next.y && prev.width === next.width && prev.height === next.height) return false;
-  settings.windowBounds = next;
-  saveSettings();
-  return true;
-}
 
-function collapseFloatingBubble(plan) {
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
-  stopFloatingBubbleAutoCollapseTimer();
-  const { side, expandedBounds, collapsedBounds } = plan || {};
-  if (!expandedBounds || !collapsedBounds) return false;
-  floatingBubbleState.collapsed = true;
-  floatingBubbleState.side = side;
-  floatingBubbleState.collapsedBounds = collapsedBounds;
-  floatingBubbleState.expandedBounds = expandedBounds;
-  settings.floatingBubbleBounds = collapsedBounds;
-  applyNativeMaterial();
-  if (process.platform === 'win32') {
-    persistWindowBounds(expandedBounds);
-    replaceMainWindow(collapsedBounds, {
-      collapsedFloatingBubble: true,
-      focus: false,
-      waitForContent: settings.floatingBubbleContent !== 'icon'
-    });
-    sendFloatingBubbleState();
-    return true;
-  }
-  applyCollapsedFloatingBubbleLimits(collapsedBounds);
-  mainWindow.setBounds(collapsedBounds);
-  persistWindowBounds(expandedBounds);
-  sendFloatingBubbleState();
-  return true;
-}
 
-function maybeCollapseFloatingBubble(bounds) {
-  const display = displayForBounds(bounds);
-  if (!display) return false;
-  const collapsedArea = collapsedAreaForDisplay(display);
-  const plan = floatingBubbleCollapsePlan(bounds, display.workArea, settings, {
-    collapsed: floatingBubbleState.collapsed,
-    suppressNextCollapse: floatingBubbleState.suppressNextCollapse,
-    collapsedArea,
-    collapsedMargin: collapsedMargin(),
-    collapsedBounds: settings?.floatingBubbleBounds || floatingBubbleState.collapsedBounds,
-    handleWidth: floatingBubbleState.contentSize?.width,
-    handleHeight: floatingBubbleState.contentSize?.height
-  });
-  floatingBubbleState.suppressNextCollapse = false;
-  if (!plan) return false;
-  return collapseFloatingBubble(plan);
-}
 
-function expandFloatingBubble(options = {}) {
-  if (!mainWindow || mainWindow.isDestroyed() || !floatingBubbleState.collapsed) return false;
-  stopFloatingBubbleAutoCollapseTimer();
-  const current = mainWindow.getBounds();
-  const display = displayForBounds(floatingBubbleState.expandedBounds || current) || displayForBounds(current);
-  const target = display
-    ? expandedFloatingBubbleBounds(current, display.workArea, floatingBubbleState.expandedBounds)
-    : floatingBubbleState.expandedBounds;
-  floatingBubbleState.collapsed = false;
-  floatingBubbleState.side = null;
-  floatingBubbleState.collapsedBounds = current;
-  floatingBubbleState.expandedBounds = target;
-  applyNativeMaterial();
-  if (target) {
-    floatingBubbleState.suppressNextCollapse = true;
-    if (process.platform === 'win32' && mainWindowChrome.collapsedFloatingBubble) {
-      persistWindowBounds(target);
-      replaceMainWindow(target, {
-        collapsedFloatingBubble: false,
-        focus: options.focus !== false,
-        suppressInitialNumberAnimation: true,
-        waitForContent: true,
-        inactive: options.focus === false
-      });
-      setTimeout(() => { floatingBubbleState.suppressNextCollapse = false; }, 300);
-      sendFloatingBubbleState();
-      return true;
-    }
-    restoreWindowSizeLimits();
-    mainWindow.setBounds(target);
-    persistWindowBounds(target);
-    setTimeout(() => { floatingBubbleState.suppressNextCollapse = false; }, 300);
-  }
-  applyWindowSettings();
-  sendFloatingBubbleState();
-  if (options.focus !== false) {
-    mainWindow.show();
-  }
-  return true;
-}
 
-function syncFloatingBubbleAvailability() {
-  if (!canUseFloatingBubble(settings)) {
-    if (floatingBubbleState.collapsed) expandFloatingBubble({ focus: false });
-    else {
-      floatingBubbleState.side = null;
-      floatingBubbleState.collapsedBounds = null;
-      floatingBubbleState.expandedBounds = null;
-      floatingBubbleState.suppressNextCollapse = false;
-      stopFloatingBubbleAutoCollapseTimer();
-      restoreWindowSizeLimits();
-    }
-    sendFloatingBubbleState();
-    return;
-  }
-  sendFloatingBubbleState();
-}
 
 function persistBoundsSoon() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -849,30 +652,15 @@ function persistBoundsSoon() {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     const next = mainWindow.getBounds();
     const prev = settings.windowBounds || {};
-    if (settings?.trayMode) {
-      // Popover x/y is anchored to the tray icon each open; only the size carries over.
-      if (prev.width === next.width && prev.height === next.height) return;
-      settings.windowBounds = { ...prev, width: next.width, height: next.height };
-    } else if (floatingBubbleState.collapsed && floatingBubbleState.expandedBounds) {
-      floatingBubbleState.collapsedBounds = next;
-      const display = displayForBounds(next);
-      const nextSide = display ? floatingBubbleSide(next, collapsedAreaForDisplay(display)) : floatingBubbleState.side;
-      if (nextSide !== floatingBubbleState.side) {
-        floatingBubbleState.side = nextSide;
-        sendFloatingBubbleState();
-      }
-      const previousBubble = settings.floatingBubbleBounds || {};
-      if (previousBubble.x === next.x &&
-        previousBubble.y === next.y &&
-        previousBubble.width === next.width &&
-        previousBubble.height === next.height) return;
-      settings.floatingBubbleBounds = next;
-    } else {
-      if (prev.x === next.x && prev.y === next.y && prev.width === next.width && prev.height === next.height) return;
-      settings.windowBounds = next;
+    // A normal window keeps its position and size across restarts.
+    if (prev.x === next.x && prev.y === next.y && prev.width === next.width && prev.height === next.height) return;
+    settings.windowBounds = { x: next.x, y: next.y, width: next.width, height: next.height };
+    try {
+      saveSettings();
+    } catch (error) {
+      console.log(`[window] could not persist bounds: ${error.message}`);
     }
-    saveSettings();
-  }, 400);
+  }, 300);
 }
 
 function applyZoomFactor(target = mainWindow) {
@@ -1035,7 +823,10 @@ function readSettings() {
       merged.viewDisplayOrder = migrateViewDisplayOrder(saved.viewDisplayOrder);
     }
     if (saved.hiddenViews !== undefined) {
-      merged.hiddenViews = normalizeHiddenViews(saved.hiddenViews, DEFAULT_VIEW_LIST);
+      merged.hiddenViews = migrateHiddenViewsToShared(
+        normalizeHiddenViews(saved.hiddenViews, DEFAULT_VIEW_LIST)
+      );
+      merged.viewDisplayOrder = migrateViewOrderToShared(saved.viewDisplayOrder);
     }
     if (saved.homeModuleOrder !== undefined) {
       merged.homeModuleOrder = normalizeHomeModuleOrder(saved.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',');
@@ -1088,9 +879,6 @@ function readSettings() {
     if (saved.serviceStatusRefreshMs !== undefined) {
       merged.serviceStatusRefreshMs = normalizeServiceStatusRefreshMs(saved.serviceStatusRefreshMs);
     }
-    if (saved.windowBehavior === undefined && saved.alwaysOnTop !== undefined) {
-      merged.windowBehavior = saved.alwaysOnTop ? 'floating' : 'normal';
-    }
     if (saved.lastViewState !== undefined) {
       merged.lastViewState = normalizeInitialRendererViewState(saved.lastViewState);
     }
@@ -1100,23 +888,24 @@ function readSettings() {
     merged.currencyRates = normalizeCurrencyOverrides(merged.currencyRates);
     delete merged.hubAdminSecret;
     merged.allowInsecureHubHttp = parseBoolean(merged.allowInsecureHubHttp, false);
-    merged.floatingBubbleEnabled = parseBoolean(merged.floatingBubbleEnabled ?? merged.edgeDrawerEnabled, false);
     merged.archivedClientUsage = normalizeArchivedClientUsage(merged.archivedClientUsage);
     delete merged.edgeDrawerEnabled;
-    merged.floatingBubbleTrigger = merged.floatingBubbleTrigger === 'hover' ? 'hover' : 'click';
-    merged.floatingBubbleContent = normalizeTrayContent(merged.floatingBubbleContent, 'icon');
-    merged.floatingBubbleCustomLayout = normalizeTrayLayout(merged.floatingBubbleCustomLayout);
-    merged.trayCustomLayout = normalizeTrayLayout(merged.trayCustomLayout);
-    merged.showTrayProviderBadge = parseBoolean(merged.showTrayProviderBadge, false);
-    merged.windowToggleShortcut = normalizeWindowToggleShortcut(merged.windowToggleShortcut);
+    // Widget-era keys are dropped rather than migrated: nothing reads them now,
+    // and leaving them in settings.json would imply they still do something.
+    for (const key of ['windowBehavior', 'alwaysOnTop', 'floatingBubbleEnabled', 'floatingBubbleTrigger',
+      'floatingBubbleContent', 'floatingBubbleCustomLayout', 'floatingBubbleBounds', 'showTrayIcon',
+      'trayMode', 'closeToTray', 'startInTray', 'trayContent', 'trayCustomLayout',
+      'showTrayProviderBadge', 'windowToggleShortcut',
+      // Device-side quota probing is gone; the Hub owns accounts and publishes
+      // the normalized limits, so neither of these selects anything.
+      'limitsEnabled', 'limitProviders']) {
+      delete merged[key];
+    }
     invalidateLegacyLocalLimitData();
-    Object.assign(merged, normalizeTrayModeSettings(merged));
-    return normalizeWindowBehaviorSettings(merged);
+    return merged;
   }
   catch (_error) {
-    const defaults = defaultSettings();
-    Object.assign(defaults, normalizeTrayModeSettings(defaults));
-    return normalizeWindowBehaviorSettings(defaults);
+    return defaultSettings();
   }
 }
 
@@ -1286,68 +1075,19 @@ function summaryWithArchivedClientUsage(summary, reason, meta) {
   return syncSummaryTransformer.transform(summary, reason, meta);
 }
 
-function applyMacActivationPolicy(state = {}) {
-  if (process.platform !== 'darwin') return;
-  const mainWindowVisible = state.mainWindowVisible !== undefined
-    ? state.mainWindowVisible
-    : mainWindow && !mainWindow.isDestroyed()
-      ? mainWindow.isVisible()
-      : true;
-  const mode = macActivationPolicyMode(settings, { mainWindowVisible });
-  if (typeof app.setActivationPolicy === 'function') {
-    try { app.setActivationPolicy(mode); } catch (_) {}
-  }
-  if (!app.dock) return;
-  if (mode === 'accessory') app.dock.hide();
-  else app.dock.show();
-}
 
-function applyMacSpaceBehavior(trayMode = Boolean(settings?.trayMode)) {
-  if (process.platform !== 'darwin' || !mainWindow || mainWindow.isDestroyed()) return;
-  if (trayMode) {
-    setMoveToActiveSpace(mainWindow, false);
-    if (typeof mainWindow.setVisibleOnAllWorkspaces === 'function') {
-      mainWindow.setVisibleOnAllWorkspaces(true, {
-        visibleOnFullScreen: true,
-        skipTransformProcessType: true
-      });
-    }
-    if (typeof mainWindow.setHiddenInMissionControl === 'function') {
-      mainWindow.setHiddenInMissionControl(true);
-    }
-  } else {
-    if (typeof mainWindow.setVisibleOnAllWorkspaces === 'function') {
-      mainWindow.setVisibleOnAllWorkspaces(false);
-    }
-    if (typeof mainWindow.setHiddenInMissionControl === 'function') {
-      mainWindow.setHiddenInMissionControl(false);
-    }
-    // Apply this last because Electron's workspace/Mission Control setters also
-    // update NSWindow.collectionBehavior.
-    setMoveToActiveSpace(mainWindow, true);
-  }
-}
 
 function applyWindowSettings() {
   if (!mainWindow) return;
-  if (floatingBubbleState.collapsed) {
-    applyCollapsedFloatingBubbleLimits(mainWindow.getBounds());
-    return;
-  }
-  const behavior = describeWindowBehavior(settings);
-  mainWindow.setAlwaysOnTop(behavior.alwaysOnTop, 'floating');
-  if (typeof mainWindow.setMovable === 'function') mainWindow.setMovable(behavior.draggable);
-  if (typeof mainWindow.setResizable === 'function') mainWindow.setResizable(behavior.resizable);
-  if (typeof mainWindow.setIgnoreMouseEvents === 'function') {
-    mainWindow.setIgnoreMouseEvents(behavior.mousePassthrough);
-  }
-  if (typeof mainWindow.setFocusable === 'function') mainWindow.setFocusable(behavior.focusable);
-  if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(Boolean(settings?.trayMode));
-  if (!behavior.focusable && typeof mainWindow.blur === 'function') mainWindow.blur();
+  // A normal window has no per-setting chrome to apply: it is never always-on-top,
+  // never click-through, and always focusable. Zoom is applied separately by
+  // applyZoomFactor(). Kept as a named function because several settings paths
+  // call it and one of them may grow a real window preference again.
+  if (typeof mainWindow.setResizable === 'function') mainWindow.setResizable(true);
 }
 
 function nativeBlurEnabled(source = settings) {
-  return floatingBubbleNativeGlassEnabled(source);
+  return source?.systemGlass !== false;
 }
 
 function macosGlassStyleFor(source = settings) {
@@ -1448,11 +1188,7 @@ const syncHealth = {
 };
 let lastCollectedDevice = null;
 let latestHubStats = null;
-let tray = null;
 let latestStats = null;
-let macWidgetPublisher = null;
-let cachedMacWidgetConfiguration;
-let trayRefreshInFlight = false;
 const DEFAULT_EXPORT_INTERVAL_MS = 60 * 1000;
 let lastExportAt = 0;
 let lastAutoExport = { dir: null, signature: null };
@@ -1462,16 +1198,8 @@ function exportIntervalMs() {
   const v = Number(settings.exportIntervalMs);
   return Number.isFinite(v) && v >= 1000 ? v : DEFAULT_EXPORT_INTERVAL_MS;
 }
-const providerTrayIcons = {};
-let registeredWindowToggleShortcut = '';
-let windowToggleShortcutRegistered = false;
-let defaultTrayIcon = null;
 let tokScaleNpmMetadata = null;
 let tokScaleUpdaterBusy = false;
-function getDefaultTrayIcon() {
-  if (!defaultTrayIcon) defaultTrayIcon = buildTrayIcon();
-  return defaultTrayIcon;
-}
 const AGENT_PID_PATH = pidFilePath();
 let modeQueue = Promise.resolve();
 let modeGeneration = 0;
@@ -1765,67 +1493,10 @@ function injectLocalDeviceStatus(stats) {
   return stats;
 }
 
-function macWidgetRuntimeSupported(
-  platform = process.platform,
-  osRelease = platform === 'darwin' ? os.release() : ''
-) {
-  return macWidgetRuntimeSupport({ platform, osRelease }).supported;
-}
 
-function macWidgetConfiguration() {
-  if (!macWidgetRuntimeSupported()) return null;
-  if (cachedMacWidgetConfiguration !== undefined) return cachedMacWidgetConfiguration;
-  cachedMacWidgetConfiguration = resolveMacWidgetConfiguration({
-    appGroup: process.env.TOKEN_MONITOR_APP_GROUP,
-    configCandidates: [
-      path.join(process.resourcesPath, 'token-monitor-widget.json'),
-      path.resolve(__dirname, '..', '..', 'build', 'macos-widget', 'widget-config.json')
-    ],
-    home: app.getPath('home'),
-    platform: process.platform,
-    runtimeSupported: true,
-    urlScheme: process.env.TOKEN_MONITOR_WIDGET_URL_SCHEME,
-    widgetKind: process.env.TOKEN_MONITOR_WIDGET_KIND
-  });
-  return cachedMacWidgetConfiguration;
-}
 
-function macWidgetPresentation() {
-  return {
-    currencyCode: settings?.currency,
-    currencyRate: effectiveRates?.[normalizeCurrency(settings?.currency)] || 1,
-    compactNumbers: settings?.showCompactTotalTokens !== false,
-    compactTokenUnits: settings?.compactTokenUnits,
-    showCost: true,
-    locale: settings?.language,
-    theme: Object.keys(settings?.themeColors || {}).length ? 'custom' : 'system'
-  };
-}
 
-function ensureMacWidgetPublisher() {
-  if (macWidgetPublisher) return macWidgetPublisher;
-  const widget = macWidgetConfiguration();
-  if (!widget) return null;
-  macWidgetPublisher = createMacWidgetPublisher({
-    platform: process.platform,
-    snapshotPath: widget.snapshotPath,
-    widgetKind: widget.widgetKind,
-    getHistory: getDashboardHistory,
-    getPresentation: macWidgetPresentation,
-    reloaderCandidates: [
-      path.join(process.resourcesPath, 'TokenMonitorWidgetReloader'),
-      path.resolve(__dirname, '..', '..', 'build', 'macos-widget', 'TokenMonitorWidgetReloader')
-    ],
-    logger: (message) => console.warn(message)
-  });
-  macWidgetPublisher.start();
-  return macWidgetPublisher;
-}
 
-function scheduleMacWidgetSnapshot(stats = latestStats) {
-  if (!stats || !macWidgetRuntimeSupported()) return false;
-  return ensureMacWidgetPublisher()?.publish(stats) || false;
-}
 
 // Coalesce stats pushes.
 //
@@ -1859,8 +1530,6 @@ function flushPush() {
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
-    scheduleMacWidgetSnapshot(latestStats);
-    updateTrayDisplay();
     if (settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
       lastExportAt = Date.now();
       writeExportTo(settings.exportDir, payload.data.stats.periods, { skipUnchanged: true })
@@ -1929,42 +1598,10 @@ async function refreshExchangeRates({ force = false } = {}) {
     } catch (_) { /* silent: keep last cache / built-in defaults */ }
   }
   applyEffectiveRates();
-  updateTrayDisplay();
   if (settings?.discordRpcEnabled && latestStats) updateDiscordRpc(latestStats, settings.currency);
   pushSettingsToRenderer();
 }
 
-function updateTrayDisplay() {
-  if (!tray || tray.isDestroyed()) return;
-  const mode = settings?.trayContent || 'tokens';
-  const currency = normalizeCurrency(settings?.currency);
-  const limitText = formatTrayText(latestStats, mode, currency, {
-    limitProviderOrder: settings?.limitProviderOrder,
-    limitProviders: settings?.limitProviders,
-    showLimitUsed: settings?.showLimitUsed
-  });
-  const barsImageMode = isBarsTrayIconMode(mode) && !limitText && providerTrayIcons[mode];
-  // A renderer-generated icon is cached in the main process. Only reuse it
-  // while the current stats still have quota text; otherwise it can outlive
-  // the provider data that generated it.
-  const trayImageMode = mode === 'limitsAllSessions' && Boolean(limitText) && providerTrayIcons[mode];
-  const customImageMode = mode === 'custom' && providerTrayIcons.custom;
-  const text = trayImageMode || customImageMode ? '' : limitText;
-  if (process.platform === 'darwin') tray.setTitle(text);
-  // Tooltip always shows a useful summary, even in icon-only mode where setTitle is blank.
-  const tip = formatTrayText(latestStats, 'both', currency);
-  tray.setToolTip(`Token Monitor - ${tip}`);
-  // Icon: rendered bars image in bar modes, otherwise the app icon.
-  let icon = null;
-  if (barsImageMode || trayImageMode || customImageMode) {
-    icon = providerTrayIcons[mode];
-  } else {
-    const usageIconId = pickUsageTrayIconId(latestStats, mode, Object.keys(providerTrayIcons));
-    if (usageIconId) icon = providerTrayIcons[usageIconId];
-  }
-  tray.setImage(icon || getDefaultTrayIcon());
-  refreshTrayMenu(tray);
-}
 
 function sendStatus(connected, extra) {
   streamConnected = Boolean(connected);
@@ -2330,61 +1967,19 @@ async function startStatsStream(options = {}) {
   }
 }
 
-function showPopover() {
-  if (!mainWindow || mainWindow.isDestroyed() || !tray) return;
-  applyMacActivationPolicy();
-  applyMacSpaceBehavior(true);
-  applyWindowSettings();
-  const current = mainWindow.getBounds();
-  const target = popoverBounds(tray, current.width, current.height);
-  mainWindow.setBounds(target);
-  mainWindow.show();
-}
 
-function openMainWindowFromWidget() {
-  if (!app.isReady()) return;
-  const destination = pendingMacWidgetOpen || { page: 'overview', view: 'home', settings: false };
-  pendingMacWidgetOpen = null;
-  updateRendererViewState({ breakdown: destination.view });
-  focusExistingWindow();
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  sendMainWindowEvent(
-    destination.settings ? 'settings:open' : 'view:open',
-    destination.settings ? undefined : destination.view
-  );
-}
 
-function hidePopover() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isVisible()) mainWindow.hide();
-}
 
-function togglePopover() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isVisible() && mainWindow.isFocused()) hidePopover();
-  else showPopover();
-}
 
 function focusExistingWindow() {
-  applyMacActivationPolicy({ mainWindowVisible: true });
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow();
     return;
   }
   if (mainWindow.isMinimized()) mainWindow.restore();
-  if (settings?.trayMode) showPopover();
-  else {
-    applyMacSpaceBehavior(false);
-    if (floatingBubbleState.collapsed) expandFloatingBubble();
-    else mainWindow.show();
-  }
+  mainWindow.show();
 }
 
-function currentWindowToggleShortcutStatus() {
-  const shortcut = normalizeWindowToggleShortcut(settings?.windowToggleShortcut);
-  const registered = windowToggleShortcutRegistered && registeredWindowToggleShortcut === shortcut;
-  return windowToggleShortcutStatus(shortcut, registered);
-}
 
 function settingsForRenderer() {
   const safeSettings = stripLegacyLocalLimitSettings(settings);
@@ -2406,7 +2001,6 @@ function settingsForRenderer() {
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
     macosGlassEffectiveStyle: macosGlassStyleFor(settings),
     macosGlassLiquidAvailable: macosLiquidGlassIsAvailable(),
-    windowToggleShortcutStatus: currentWindowToggleShortcutStatus()
   };
 }
 
@@ -2424,43 +2018,11 @@ function pushSettingsToRenderer() {
   }
   // Currency, compact-unit, locale, and theme settings are part of the native
   // Widget snapshot even when the usage counters themselves did not change.
-  scheduleMacWidgetSnapshot(latestStats);
 }
 
-function unregisterWindowToggleShortcut() {
-  if (registeredWindowToggleShortcut) {
-    try { globalShortcut.unregister(registeredWindowToggleShortcut); } catch (_) {}
-  }
-  registeredWindowToggleShortcut = '';
-  windowToggleShortcutRegistered = false;
-}
 
-function handleWindowToggleShortcut() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const action = windowToggleShortcutAction({
-    trayMode: Boolean(settings?.trayMode),
-    floatingBubbleCollapsed: Boolean(floatingBubbleState.collapsed),
-    visible: mainWindow.isVisible(),
-    minimized: typeof mainWindow.isMinimized === 'function' ? mainWindow.isMinimized() : false
-  });
-  if (action === 'togglePopover') togglePopover();
-  else if (action === 'expandFloatingBubble') expandFloatingBubble();
-  else if (action === 'hideWindow') mainWindow.hide();
-  else focusExistingWindow();
-}
 
-function handleTrayToggle() {
-  const action = trayToggleAction(settings);
-  if (action === 'togglePopover') togglePopover();
-  else if (action === 'focusWindow') focusExistingWindow();
-}
 
-function trayMenuLocale() {
-  const preferredLanguages = typeof app.getPreferredSystemLanguages === 'function'
-    ? app.getPreferredSystemLanguages()
-    : [app.getLocale()];
-  return resolveLocale(settings?.language || 'auto', preferredLanguages);
-}
 
 function sendMainWindowEvent(channel, payload) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -2472,72 +2034,10 @@ function sendMainWindowEvent(channel, payload) {
   else send();
 }
 
-async function refreshFromTray() {
-  if (trayRefreshInFlight) return;
-  trayRefreshInFlight = true;
-  updateTrayDisplay();
-  try {
-    const stats = await fetchStats({ force: true });
-    // Collector ticks normally publish their own final snapshot. Only bridge the
-    // result when fetchStats returned a different object (for example, a remote hub
-    // fetch while an external headless agent owns collection).
-    if (stats && stats !== latestStats) {
-      sendPush({ event: 'stats', data: { stats, mode, reason: 'manual' } });
-    }
-  } catch (error) {
-    console.warn(`[tray] refresh failed: ${error.message}`);
-    showTrayRefreshError(error?.message || error);
-  } finally {
-    trayRefreshInFlight = false;
-    updateTrayDisplay();
-  }
-}
 
-function setTrayContentFromMenu(value) {
-  const next = normalizeTrayContent(value, settings?.trayContent || 'tokens');
-  if (next === settings?.trayContent) return;
-  settings.trayContent = next;
-  saveSettings();
-  updateTrayDisplay();
-  pushSettingsToRenderer();
-}
 
-function setWindowPresentationFromMenu(value) {
-  if (value === 'tray') {
-    if (settings.trayMode) return;
-    settings.trayMode = true;
-    saveSettings();
-    syncFloatingBubbleAvailability();
-    enterTrayMode();
-    pushSettingsToRenderer();
-    return;
-  }
 
-  const previousTrayMode = settings.trayMode;
-  settings = normalizeWindowBehaviorSettings(settings, {
-    trayMode: false,
-    windowBehavior: value
-  });
-  saveSettings();
-  if (previousTrayMode) exitTrayMode();
-  else {
-    applyWindowSettings();
-    focusExistingWindow();
-  }
-  pushSettingsToRenderer();
-}
 
-function openSettingsFromTray() {
-  focusExistingWindow();
-  sendMainWindowEvent('settings:open');
-}
-
-function openViewFromTray(viewId) {
-  const normalized = String(viewId || '').trim().toLowerCase();
-  if (!TRAY_OPEN_VIEW_IDS.has(normalized)) return;
-  focusExistingWindow();
-  sendMainWindowEvent('view:open', normalized);
-}
 
 // Navigation entry point for the application menu. The shared UI owns its own
 // route list, so this only validates against that set and hands the id over.
@@ -2548,106 +2048,11 @@ function openSharedUiView(viewId) {
   sendMainWindowEvent('view:open', normalized);
 }
 
-function showTrayRefreshError(error) {
-  const locale = trayMenuLocale();
-  const title = translate(locale, 'trayMenu.refreshFailedTitle');
-  const body = translate(locale, 'trayMenu.refreshFailedBody', { error: String(error || '') });
-  if (Notification.isSupported()) {
-    new Notification({ title, body }).show();
-  } else {
-    dialog.showErrorBox(title, body);
-  }
-}
 
-function configureWindowToggleShortcut() {
-  unregisterWindowToggleShortcut();
-  const shortcut = normalizeWindowToggleShortcut(settings?.windowToggleShortcut);
-  settings.windowToggleShortcut = shortcut;
-  if (!shortcut || !app.isReady()) return false;
-  try {
-    windowToggleShortcutRegistered = globalShortcut.register(shortcut, handleWindowToggleShortcut);
-    if (windowToggleShortcutRegistered) {
-      registeredWindowToggleShortcut = shortcut;
-      return true;
-    }
-  } catch (error) {
-    console.log(`[shortcut] failed to register ${shortcut}: ${error.message}`);
-    return false;
-  }
-  console.log(`[shortcut] failed to register ${shortcut}`);
-  return false;
-}
 
-function ensureTray() {
-  if (!shouldCreateTray(settings)) return false;
-  if (tray && !tray.isDestroyed()) return;
-  tray = createTray({
-    getMenuState: () => {
-      return {
-        appVersion: appVersion(),
-        refreshing: trayRefreshInFlight,
-        trayContent: settings?.trayContent || 'tokens',
-        trayMode: Boolean(settings?.trayMode),
-        windowBehavior: settings?.windowBehavior || 'floating',
-        maskAccountEmails: Boolean(settings?.maskLimitAccountEmails),
-        viewEnabled: {
-          home: true,
-          project: settings?.projectsEnabled !== false,
-          session: true,
-          limits: settings?.limitsEnabled !== false && parseLimitProviders(settings?.limitProviders).length > 0,
-          trends: settings?.historyEnabled !== false,
-          status: true
-        }
-      };
-    },
-    onToggle: handleTrayToggle,
-    onOpenView: openViewFromTray,
-    onRefresh: () => { void refreshFromTray(); },
-    onSetTrayContent: setTrayContentFromMenu,
-    onSetWindowPresentation: setWindowPresentationFromMenu,
-    onOpenSettings: openSettingsFromTray,
-    onQuit: requestAppQuit,
-    translateMenu: (key, params) => translate(trayMenuLocale(), key, params)
-  });
-  updateTrayDisplay();
-  return true;
-}
 
-function destroyTray() {
-  if (tray && !tray.isDestroyed()) tray.destroy();
-  tray = null;
-}
 
-function enterTrayMode() {
-  applyMacActivationPolicy();
-  ensureTray();
-  updateTrayDisplay();
-  applyWindowSettings();
-  applyMacActivationPolicy();
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(true);
-    applyMacSpaceBehavior(true);
-    mainWindow.hide();
-  }
-}
 
-function exitTrayMode() {
-  applyMacActivationPolicy({ mainWindowVisible: true });
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(false);
-    applyMacSpaceBehavior(false);
-    const restore = restoredBounds() || DEFAULT_WINDOW;
-    mainWindow.setBounds({
-      width: restore.width,
-      height: restore.height,
-      ...(typeof restore.x === 'number' ? { x: restore.x, y: restore.y } : {})
-    });
-    applyWindowSettings();
-    mainWindow.show();
-  }
-  if (!shouldCreateTray(settings)) destroyTray();
-  else ensureTray();
-}
 
 function startMode() {
   // Tear down collectors synchronously so they can't double-run while the
@@ -2709,8 +2114,6 @@ function stopAll() {
   stopRestBootstrap();
   stopSyncCollector({ skipCloseWatchers: true });
   stopDiscordRpc();
-  if (tray && !tray.isDestroyed()) tray.destroy();
-  tray = null;
 }
 
 let quitRequested = false;
@@ -3412,7 +2815,7 @@ function isAllowedExternalUrl(value) {
 
 function revealWindow(target = mainWindow, options = {}) {
   if (!target || target.isDestroyed() || target.isVisible()) return;
-  const inactive = options.inactive === true || (target === mainWindow && floatingBubbleState.collapsed);
+  const inactive = options.inactive === true;
   if (inactive && typeof target.showInactive === 'function') {
     target.showInactive();
     return;
@@ -3466,7 +2869,6 @@ function loadWindowFile(target, options = {}) {
 
 function createWindow(boundsOverride, options = {}) {
   ensureSettingsLoaded();
-  const collapsedFloatingBubble = options.collapsedFloatingBubble === true;
   const glass = nativeBlurEnabled();
   const macosGlassStyle = macosGlassStyleFor(settings);
   const windowsSurface = windowsSurfaceProfile({
@@ -3505,9 +2907,7 @@ function createWindow(boundsOverride, options = {}) {
     }
   });
   mainWindow = win;
-  mainWindowChrome = { collapsedFloatingBubble };
-  applyMacosNativeWindowButtons(win, { visible: !collapsedFloatingBubble });
-  applyMacSpaceBehavior();
+  applyMacosNativeWindowButtons(win);
   applyWindowsChrome(win, { round: true });
   if (windowsSurface.useLegacyAccent) applyWindowsAccentBlur(win);
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -3537,16 +2937,11 @@ function createWindow(boundsOverride, options = {}) {
     void event;
   });
   win.webContents.on('before-input-event', handleZoomShortcut);
-  win.webContents.once('did-finish-load', sendFloatingBubbleState);
   loadWindowFile(win, {
     waitForContent: options.waitForContent === true,
     inactive: options.inactive === true,
     query: {
-      ...floatingBubbleInitialRendererQuery(floatingBubbleState, {
-        collapsedWindow: collapsedFloatingBubble,
-        suppressInitialNumberAnimation: options.suppressInitialNumberAnimation === true,
-        viewState: rendererViewState
-      }),
+      ...initialRendererViewStateQuery(rendererViewState),
       ...(settings?.systemGlass === false ? { systemGlassDisabled: '1' } : {}),
       ...(process.platform === 'win32' ? { windowsSurface: windowsSurface.kind } : {})
     }
@@ -3556,37 +2951,12 @@ function createWindow(boundsOverride, options = {}) {
 function handleZoomShortcut(event, input) {
   if (input.type !== 'keyDown') return;
   const key = input.key;
-  if (key === 'Escape' && !input.control && !input.meta && !input.alt && !input.shift && canUseFloatingBubble(settings)) {
-    event.preventDefault();
-    maybeCollapseFloatingBubble(mainWindow.getBounds());
-    return;
-  }
   if (!(input.control || input.meta)) return;
   if (key === '=' || key === '+') { event.preventDefault(); adjustZoom(ZOOM_LIMITS.step); }
   else if (key === '-' || key === '_') { event.preventDefault(); adjustZoom(-ZOOM_LIMITS.step); }
   else if (key === '0') { event.preventDefault(); setZoomFactor(1); }
 }
 
-function replaceMainWindow(bounds, options = {}) {
-  const old = mainWindow;
-  const wasFocused = old && !old.isDestroyed() ? old.isFocused() : false;
-  if (old && !old.isDestroyed()) old.removeAllListeners('close');
-  // Build the new window first so total window count never drops to 0
-  // (otherwise window-all-closed fires and quits the app on Windows).
-  createWindow(bounds, {
-    collapsedFloatingBubble: options.collapsedFloatingBubble === true,
-    suppressInitialNumberAnimation: options.suppressInitialNumberAnimation === true,
-    waitForContent: options.waitForContent === true,
-    inactive: options.inactive === true
-  });
-  const next = mainWindow;
-  next.once('show', () => {
-    if (old && !old.isDestroyed()) old.destroy();
-    if ((options.focus === true || (options.focus !== false && wasFocused)) && !next.isDestroyed()) {
-      next.focus();
-    }
-  });
-}
 
 function discardFailedDashboardWindow(win, reason) {
   if (!win || win !== dashboardWindow || win.isDestroyed()) return;
@@ -3825,17 +3195,9 @@ const desktopRouter = createRequestRouter({
 
 function rebuildWindow() {
   if (!mainWindow) return;
-  const bounds = floatingBubbleState.collapsed && floatingBubbleState.expandedBounds
-    ? floatingBubbleState.expandedBounds
-    : mainWindow.getBounds();
+  const bounds = mainWindow.getBounds();
   const wasFocused = mainWindow.isFocused();
   const old = mainWindow;
-  floatingBubbleState.collapsed = false;
-  floatingBubbleState.side = null;
-  floatingBubbleState.collapsedBounds = null;
-  floatingBubbleState.expandedBounds = null;
-  floatingBubbleState.suppressNextCollapse = false;
-  stopFloatingBubbleAutoCollapseTimer();
   old.removeAllListeners('close');
   // Build the new window first so total window count never drops to 0
   // (otherwise window-all-closed fires and quits the app on Windows).
@@ -4053,7 +3415,6 @@ app.whenReady().then(() => {
       }
     });
   });
-  applyMacActivationPolicy();
   // Login-item launches can start directly in the tray when requested. Linux
   // carries an explicit marker in the XDG desktop entry because Electron's
   // login-item API is only available on macOS and Windows.
@@ -4068,10 +3429,7 @@ app.whenReady().then(() => {
   }
   createWindow();
   syncLoginItemSettingFromOs();
-  configureWindowToggleShortcut();
   cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
-  ensureTray();
-  if (settings.trayMode) enterTrayMode();
   // A normal application has a menu bar. It also gives the shared UI a
   // keyboard-reachable entry point to Settings and each view.
   createAppMenu({
@@ -4083,7 +3441,6 @@ app.whenReady().then(() => {
     appVersion: appVersion()
   });
   regenerateTokscalePricing();
-  ensureMacWidgetPublisher();
   if (settings.discordRpcEnabled) startDiscordRpc();
   rateCache = readRateCache();
   applyEffectiveRates();                 // use cache/defaults immediately, avoid first-paint gap
@@ -4123,12 +3480,6 @@ app.whenReady().then(() => {
     }).kind;
     const previousClients = settings.clients;
     const previousDiscordRpcEnabled = settings.discordRpcEnabled;
-    const previousShowTrayIcon = settings.showTrayIcon;
-    const previousTrayMode = settings.trayMode;
-    const previousTrayContent = settings.trayContent;
-    const previousTrayCustomLayout = JSON.stringify(settings.trayCustomLayout || {});
-    const previousFloatingBubbleCustomLayout = JSON.stringify(settings.floatingBubbleCustomLayout || {});
-    const previousShowTrayProviderBadge = settings.showTrayProviderBadge;
     const previousCurrency = settings.currency;
     const previousStartAtLogin = settings.startAtLogin;
     const previousStartInTray = settings.startInTray;
@@ -4162,7 +3513,7 @@ app.whenReady().then(() => {
     if (patch.watchDebounceMs !== undefined) normalizedPatch.watchDebounceMs = normalizeSharedWatchDebounceMs(patch.watchDebounceMs, settings.watchDebounceMs);
     if (patch.heatmapMetric !== undefined) normalizedPatch.heatmapMetric = normalizeHeatmapMetric(patch.heatmapMetric, settings.heatmapMetric);
     if (patch.homeActiveDaysWindow !== undefined) normalizedPatch.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(patch.homeActiveDaysWindow, settings.homeActiveDaysWindow);
-    settings = normalizeWindowBehaviorSettings({
+    settings = {
       ...settings,
       ...normalizedPatch,
       hubMode: patch.hubMode !== undefined ? normalizeHubMode(patch.hubMode, settings.hubMode) : settings.hubMode,
@@ -4181,13 +3532,11 @@ app.whenReady().then(() => {
       showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, false),
       floatingBubbleEnabled: parseBoolean(patch.floatingBubbleEnabled ?? settings.floatingBubbleEnabled, false),
       discordRpcEnabled: patch.discordRpcEnabled ?? settings.discordRpcEnabled ?? false,
-      limitsEnabled: parseBoolean(patch.limitsEnabled ?? settings.limitsEnabled, true),
-      limitProviders: patch.limitProviders !== undefined ? parseLimitProviders(patch.limitProviders).join(',') : settings.limitProviders,
       limitProviderOrder: patch.limitProviderOrder !== undefined ? migrateLimitProviderOrder(patch.limitProviderOrder) : settings.limitProviderOrder,
       clientDisplayOrder: patch.clientDisplayOrder !== undefined ? migrateClientDisplayOrder(patch.clientDisplayOrder) : (settings.clientDisplayOrder || ''),
       hiddenClients: patch.hiddenClients !== undefined ? normalizeHiddenClients(patch.hiddenClients, KNOWN_CLIENT_LIST) : normalizeHiddenClients(settings.hiddenClients, KNOWN_CLIENT_LIST),
       pinnedClients: patch.pinnedClients !== undefined ? normalizePinnedClients(patch.pinnedClients, KNOWN_CLIENT_LIST) : normalizePinnedClients(settings.pinnedClients, KNOWN_CLIENT_LIST),
-      viewDisplayOrder: patch.viewDisplayOrder !== undefined ? migrateViewDisplayOrder(patch.viewDisplayOrder) : (settings.viewDisplayOrder || ''),
+      viewDisplayOrder: patch.viewDisplayOrder !== undefined ? migrateViewOrderToShared(patch.viewDisplayOrder) : (settings.viewDisplayOrder || ''),
       hiddenViews: patch.hiddenViews !== undefined ? normalizeHiddenViews(patch.hiddenViews, DEFAULT_VIEW_LIST) : normalizeHiddenViews(settings.hiddenViews, DEFAULT_VIEW_LIST),
       homeModuleOrder: patch.homeModuleOrder !== undefined ? normalizeHomeModuleOrder(patch.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',') : normalizeHomeModuleOrder(settings.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(','),
       hiddenHomeModules: patch.hiddenHomeModules !== undefined ? normalizeHiddenHomeModules(patch.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST) : normalizeHiddenHomeModules(settings.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST),
@@ -4213,18 +3562,6 @@ app.whenReady().then(() => {
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
       zoomFactor: clampZoom(patch.zoomFactor ?? settings.zoomFactor),
-      ...normalizeTrayModeSettings({
-        showTrayIcon: patch.showTrayIcon ?? settings.showTrayIcon,
-        trayMode: patch.trayMode ?? settings.trayMode
-      }),
-      closeToTray: parseBoolean(patch.closeToTray ?? settings.closeToTray, false),
-      startInTray: parseBoolean(patch.startInTray ?? settings.startInTray, false),
-      trayContent: normalizeTrayContent(patch.trayContent ?? settings.trayContent),
-      trayCustomLayout: normalizeTrayLayout(patch.trayCustomLayout ?? settings.trayCustomLayout),
-      showTrayProviderBadge: parseBoolean(patch.showTrayProviderBadge ?? settings.showTrayProviderBadge, false),
-      floatingBubbleContent: normalizeTrayContent(patch.floatingBubbleContent ?? settings.floatingBubbleContent, 'icon'),
-      floatingBubbleCustomLayout: normalizeTrayLayout(patch.floatingBubbleCustomLayout ?? settings.floatingBubbleCustomLayout),
-      windowToggleShortcut: normalizeWindowToggleShortcut(patch.windowToggleShortcut ?? settings.windowToggleShortcut),
       currency: normalizedCurrency,
       currencyRates: patch.currencyRates !== undefined ? normalizeCurrencyOverrides(patch.currencyRates) : normalizeCurrencyOverrides(settings.currencyRates),
       language: patch.language !== undefined ? normalizeLanguageSetting(patch.language, settings.language) : normalizeLanguageSetting(settings.language),
@@ -4233,7 +3570,7 @@ app.whenReady().then(() => {
       customModelPricing: patch.customModelPricing !== undefined
         ? normalizeCustomPricingSetting(patch.customModelPricing)
         : normalizeCustomPricingSetting(settings.customModelPricing)
-    }, normalizedPatch);
+    };
     settings.archivedClientUsage = normalizeArchivedClientUsage(settings.archivedClientUsage);
     if (settings.clients !== previousClients) updateArchivedClientUsage(previousClients, settings.clients);
     delete settings.edgeDrawerEnabled;
@@ -4247,7 +3584,6 @@ app.whenReady().then(() => {
       regenerateTokscalePricing();
       refreshAfterPricingChange();
     }
-    configureWindowToggleShortcut();
     const loginItemConfigurationChanged = settings.startAtLogin !== previousStartAtLogin
       || (process.platform === 'linux' && settings.startAtLogin && settings.startInTray !== previousStartInTray);
     if (loginItemConfigurationChanged) {
@@ -4265,7 +3601,6 @@ app.whenReady().then(() => {
     else if (!settings.discordRpcEnabled && previousDiscordRpcEnabled) stopDiscordRpc();
     else if (settings.discordRpcEnabled && settings.currency !== previousCurrency && latestStats) updateDiscordRpc(latestStats, settings.currency);
     applyWindowSettings();
-    syncFloatingBubbleAvailability();
     const nextNativeMaterial = nativeBlurEnabled();
     const nextWindowsSurface = windowsSurfaceProfile({
       platform: process.platform,
@@ -4287,25 +3622,8 @@ app.whenReady().then(() => {
     } else if (runtimeChange.usageStructural || runtimeChange.sinkStructural) {
       restartDeviceRuntimeForMode();
     }
-    if (settings.showTrayIcon !== previousShowTrayIcon) {
-      if (settings.showTrayIcon) ensureTray();
-      else destroyTray();
-    }
-    if (settings.trayMode !== previousTrayMode) {
-      if (settings.trayMode) enterTrayMode();
-      else exitTrayMode();
-    } else if (
-      settings.trayContent !== previousTrayContent ||
-      JSON.stringify(settings.trayCustomLayout || {}) !== previousTrayCustomLayout ||
-      JSON.stringify(settings.floatingBubbleCustomLayout || {}) !== previousFloatingBubbleCustomLayout ||
-      settings.showTrayProviderBadge !== previousShowTrayProviderBadge ||
-      settings.currency !== previousCurrency
-    ) {
-      updateTrayDisplay();
-    }
     if (patch.currency !== undefined || patch.currencyRates !== undefined) {
       applyEffectiveRates();               // sync: settingsForRenderer() below sees fresh effective map
-      updateTrayDisplay();
       if (settings.discordRpcEnabled && latestStats) updateDiscordRpc(latestStats, settings.currency);
       refreshExchangeRates();              // async: fetch if stale, then re-push
     }
@@ -4321,102 +3639,6 @@ app.whenReady().then(() => {
   });
   ipcMain.on('window:viewState', (_event, patch) => {
     updateRendererViewState(patch);
-  });
-  ipcMain.handle('floatingBubble:expand', () => expandFloatingBubble());
-  ipcMain.handle('floatingBubble:peek', () => expandFloatingBubble({ focus: false }));
-  ipcMain.handle('floatingBubble:collapseIfIdle', () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return false;
-    if (floatingBubbleState.collapsed || !canUseFloatingBubble(settings)) return false;
-    if (mainWindow.isFocused()) return false; // promoted to a focused window; let blur handle collapse
-    const bounds = mainWindow.getBounds();
-    if (typeof screen.getCursorScreenPoint === 'function') {
-      const pt = screen.getCursorScreenPoint();
-      const inside = pt.x >= bounds.x && pt.x < bounds.x + bounds.width &&
-        pt.y >= bounds.y && pt.y < bounds.y + bounds.height;
-      if (inside) return false; // cursor returned during the grace window
-    }
-    // A hover peek never receives focus and never blurs, so a stale suppress flag
-    // must not be allowed to wedge it open.
-    floatingBubbleState.suppressNextCollapse = false;
-    return maybeCollapseFloatingBubble(bounds);
-  });
-  ipcMain.handle('floatingBubble:setCollapsedSize', (_event, size) => {
-    if (!size || !canUseFloatingBubble(settings)) return false;
-    const width = Math.round(Number(size.width));
-    const height = Math.round(Number(size.height));
-    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return false;
-    floatingBubbleState.contentSize = { width, height }; // used by the next collapse
-    if (!floatingBubbleState.collapsed || !mainWindow || mainWindow.isDestroyed()) return true;
-    const current = mainWindow.getBounds();
-    if (current.width === width && current.height === height) return true;
-    const display = displayForBounds(current);
-    if (!display) return true;
-    const collapsedArea = collapsedAreaForDisplay(display);
-    // Keep the docked edge fixed while resizing: collapsedFloatingBubbleBounds re-clamps the
-    // current x/y against the new size (right-docked snaps flush to the edge).
-    const target = collapsedFloatingBubbleBounds(current, collapsedArea, {
-      margin: collapsedMargin(),
-      collapsedBounds: current,
-      handleWidth: width,
-      handleHeight: height
-    });
-    if (!target) return true;
-    applyCollapsedFloatingBubbleLimits(target);
-    mainWindow.setBounds(target);
-    floatingBubbleState.collapsedBounds = target;
-    settings.floatingBubbleBounds = target;
-    saveSettings();
-    return true;
-  });
-  ipcMain.handle('floatingBubble:move', (_event, delta) => {
-    if (!mainWindow || mainWindow.isDestroyed() || !floatingBubbleState.collapsed) return false;
-    const current = mainWindow.getBounds();
-    const hasDragOffset = delta && (
-      Object.hasOwn(delta, 'offsetX') ||
-      Object.hasOwn(delta, 'offsetY') ||
-      Object.hasOwn(delta, 'offsetRatioX') ||
-      Object.hasOwn(delta, 'offsetRatioY')
-    );
-    const cursor = hasDragOffset && typeof screen.getCursorScreenPoint === 'function'
-      ? screen.getCursorScreenPoint()
-      : null;
-    const display = (cursor && displayForPoint(cursor)) || displayForBounds(current);
-    if (!display) return false;
-    const collapsedArea = collapsedAreaForDisplay(display);
-    const margin = collapsedMargin();
-    const target = cursor
-      ? dragFloatingBubbleBounds(current, collapsedArea, cursor, delta, margin)
-      : moveFloatingBubbleBounds(current, collapsedArea, delta, margin);
-    if (!target) return false;
-    floatingBubbleState.collapsedBounds = target;
-    floatingBubbleState.side = floatingBubbleSide(target, collapsedArea);
-    if (target.width === current.width && target.height === current.height && typeof mainWindow.setPosition === 'function') {
-      mainWindow.setPosition(target.x, target.y, false);
-    } else {
-      mainWindow.setBounds(target);
-    }
-    persistBoundsSoon();
-    sendFloatingBubbleState();
-    return true;
-  });
-  ipcMain.handle('tray:setIcons', (_event, icons) => {
-    if (!icons || typeof icons !== 'object') return false;
-    for (const [id, dataUrl] of Object.entries(icons)) {
-      if (dataUrl === null) {
-        delete providerTrayIcons[id];
-        continue;
-      }
-      if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png')) continue;
-      const img = nativeImage.createFromDataURL(dataUrl);
-      if (img.isEmpty()) continue;
-      // Resize by height only; aspect ratio is preserved, so wide bar-style
-      // icons keep their width while square provider icons stay 20x20.
-      const sized = img.resize({ height: 20, quality: 'best' });
-      if (shouldUseTemplateTrayIcon(id, process.platform, settings?.showTrayProviderBadge)) sized.setTemplateImage(true);
-      providerTrayIcons[id] = sized;
-    }
-    updateTrayDisplay();
-    return true;
   });
   ipcMain.handle('stats:get', (_event, options) => fetchStats(options));
   ipcMain.handle('stats:getCustomRange', (_event, rangeInput) => fetchCustomRangeStats(rangeInput));
@@ -4591,12 +3813,10 @@ app.whenReady().then(() => {
   ipcMain.handle('appUpdate:install', () => installDownloadedAppUpdate());
   ipcMain.handle('appUpdate:dismiss', (_event, version) => dismissAppUpdateVersion(version));
   ipcMain.on('window:minimize', () => {
-    if (settings?.trayMode) hidePopover();
-    else mainWindow?.minimize();
+    mainWindow?.minimize();
   });
   ipcMain.on('window:close', () => {
-    if (settings?.trayMode) hidePopover();
-    else mainWindow?.close();
+    mainWindow?.close();
   });
   ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
   ipcMain.handle('dashboard:getHistory', () => getDashboardHistory());
@@ -4624,7 +3844,6 @@ app.whenReady().then(() => {
   startMode();
   startSyncNetworkMonitor();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
-  if (pendingMacWidgetOpen) setImmediate(openMainWindowFromWidget);
   maybeRunBackgroundUpdateCheck();
   startAppUpdateBackgroundChecks();
 });
@@ -4636,11 +3855,9 @@ app.on('before-quit', () => {
   // Deliver a queued push before tearing down so the final numbers reach the
   // renderer/tray instead of being dropped with the timer.
   flushPendingPush();
-  macWidgetPublisher?.stop();
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
   stopSyncNetworkMonitor();
-  unregisterWindowToggleShortcut();
   // During a native update the updater owns the restart. Calling app.exit here
   // can pre-empt its hand-off; the watchdog releases this flag if the hand-off
   // never arrives so a later normal quit still works.

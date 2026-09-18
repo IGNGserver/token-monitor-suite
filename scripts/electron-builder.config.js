@@ -1,7 +1,6 @@
 'use strict';
 
 const packageJson = require('../package.json');
-const { createBuilderConfig } = require('./macos-packaging');
 const { resolveElectronVersionOverride } = require('./electron-builder-version');
 const { prepareLinuxPackageMetadata } = require('./prepare-linux-package-metadata');
 
@@ -10,12 +9,13 @@ const { prepareLinuxPackageMetadata } = require('./prepare-linux-package-metadat
 // and Windows continue to use the package.json Electron version.
 const electronVersion = resolveElectronVersionOverride();
 
-const config = createBuilderConfig({
-  baseConfig: {
-    ...packageJson.build,
-    ...(electronVersion ? { electronVersion } : {})
-  }
-});
+// The macOS Widget extension used to wrap this config through createBuilderConfig
+// in scripts/macos-packaging.js. The desktop client is a normal app now, so the
+// package.json build block is used directly.
+const config = {
+  ...packageJson.build,
+  ...(electronVersion ? { electronVersion } : {})
+};
 
 const metainfoPath = prepareLinuxPackageMetadata({ version: packageJson.version });
 

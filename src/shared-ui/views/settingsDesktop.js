@@ -129,7 +129,14 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
   // --- Startup, updates, integrations -------------------------------------
   const generalRows = [];
   if (info.loginItemSupported) {
-    generalRows.push(checkbox('startAtLogin', 'desktop.settings.startAtLogin', settings.startAtLogin === true));
+    generalRows.push(checkbox('startAtLogin', 'desktop.settings.startAtLogin', settings.startAtLogin === true, {
+      // Linux autostart points at the AppImage's current path, so moving or
+      // renaming the file silently breaks it. Saying so up front is cheaper than
+      // debugging "it stopped starting" later.
+      description: info.platform === 'linux' ? tr('desktop.settings.startAtLoginNote') : ''
+    }));
+  } else {
+    generalRows.push(`<p class="row-sub">${escapeHtml(tr('desktop.settings.startAtLoginUnavailable'))}</p>`);
   }
   generalRows.push(checkbox('automaticAppUpdates', 'desktop.settings.automaticAppUpdates', settings.automaticAppUpdates === true));
   generalRows.push(checkbox('discordRpcEnabled', 'desktop.settings.discordRpc', settings.discordRpcEnabled === true));

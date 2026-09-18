@@ -14,7 +14,7 @@
 
 | 计划阶段 | 状态 | 落地位置 |
 |---|---|---|
-| 阶段 1 共享 UI 包 + Transport 抽象 | ✅ | `src/shared-ui/`；`app.js` 从 `src/hub/web/js/` 平移；`transport/{index,httpTransport}.js`；图标合并为单一权威树 |
+| 阶段 1 共享 UI 包 + Transport 抽象 | ✅ | `src/shared-ui/`；`app.js` 从 `src/hub/web/js/` 平移；八个视图拆分至 `views/`（app.js 4,115→2,840 行）；`transport/{index,httpTransport}.js`；图标合并为单一权威树 |
 | 阶段 2 桌面端 IPC Transport | ✅ | `transport/ipcTransport.js`、`src/electron/desktopRequestRouter.js`、`preload.js`、`renderer/boot.js` |
 | 阶段 3 桌面端保留设置移植 | ✅ | `src/shared-ui/views/settingsDesktop.js`（全部 68 个保留 key 均有控件；2 个 legacy key 按计划废弃） |
 | 阶段 4 正常应用化 | ✅ | 有边框窗口 + 最小尺寸 900×600、`src/electron/appMenu.js`、CSP `style-src` 放宽、移除 `LSUIElement` |
@@ -22,7 +22,7 @@
 | 阶段 6 无损迁移 + 文档 | ✅ | `src/electron/viewState.js`（9→8 视图映射）、widget key 清理、`tests/electron/settingsMigration.test.js`、AGENTS/README×5/configuration 更新 |
 | 附加：CI/打包清理 | ✅ | 移除 7 个 widget CI 步骤、6 个 npm 脚本、widget 打包分支与 provisioning 步骤 |
 
-**唯一未执行项**：`src/shared-ui/app.js`（4,115 行）的**按视图模块化拆分**。它是纯粹的内部重组、无行为变化，而当前单文件形态已通过全部测试与两端启动验证。考虑到它是本计划中风险收益比最低的一项（不改变任何外部契约），且拆分本身不影响交付能力，故保留现状并在后续增量进行。计划中其余所有条目（含 `data.js`/`format.js`/`i18n.js`/`syncHealth`/`viewContext` 的模块化）均已完成。
+**视图拆分已完成**：`src/shared-ui/app.js` 从 4,115 行降至 2,840 行，八个视图全部拆到 `src/shared-ui/views/`（overview/usage/devices/limits/trends/accounts/settings，外加共享的 rows 与桌面专属的 settingsDesktop）。拆分逐视图提交、每一步都验证两端可启动，且移动的代码与原位置逐字节一致（仅 `state.x` 改为 `appState().x`，app 自有 helper 经 view context 注入），因此不改变任何外部契约。
 
 ---
 

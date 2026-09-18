@@ -16,7 +16,7 @@ const {
   reorderClientDisplayOrder,
   reorderPinnedClient,
   togglePinnedClient
-} = require('../../src/electron/renderer/clientDisplayPreferences');
+} = require('../../src/electron/preferences/clientDisplayPreferences');
 
 const clients = [
   { id: 'claude', label: 'Claude Code' },

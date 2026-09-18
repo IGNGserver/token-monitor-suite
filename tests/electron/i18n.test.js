@@ -10,7 +10,7 @@ const {
   normalizeLanguage,
   resolveLocale,
   translate
-} = require('../../src/electron/renderer/i18n');
+} = require('../../src/electron/i18n');
 
 function fakeElement(dataset = {}) {
   const attributes = {};

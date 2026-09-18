@@ -11,7 +11,7 @@ const {
   normalizeHomeModuleOrder,
   orderedHomeModules,
   reorderHomeModuleOrder
-} = require('../../src/electron/renderer/homeModulePreferences');
+} = require('../../src/electron/preferences/homeModulePreferences');
 
 const modules = [
   { id: 'limits', label: 'Limits' },

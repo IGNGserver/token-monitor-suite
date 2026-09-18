@@ -20,7 +20,7 @@ test('every CSS custom property reference resolves', () => {
 
 test('the checker rejects an undefined property', () => {
   // Prove the checker can actually fail, so a green result means something.
-  const stylesPath = path.join(rootDir, 'src', 'electron', 'renderer', 'styles.css');
+  const stylesPath = path.join(rootDir, 'src', 'shared-ui', 'styles', 'app.css');
   const original = fs.readFileSync(stylesPath, 'utf8');
   try {
     fs.writeFileSync(stylesPath, `${original}\n.__css_var_probe { color: var(--definitely-undefined-token); }\n`);
@@ -31,7 +31,7 @@ test('the checker rejects an undefined property', () => {
 });
 
 test('a var() with a fallback is tolerated', () => {
-  const stylesPath = path.join(rootDir, 'src', 'electron', 'renderer', 'styles.css');
+  const stylesPath = path.join(rootDir, 'src', 'shared-ui', 'styles', 'app.css');
   const original = fs.readFileSync(stylesPath, 'utf8');
   try {
     fs.writeFileSync(stylesPath, `${original}\n.__css_var_probe { color: var(--nope, #fff); }\n`);

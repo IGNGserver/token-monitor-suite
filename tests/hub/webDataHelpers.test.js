@@ -530,9 +530,12 @@ test('the dashboard rate table is configurable and falls back to shared defaults
   assert.equal(format.formatCost(2, 'USD'), '$2.00');
 });
 
-test('the dashboard fetches its rates from the Hub during boot', () => {
+test('the dashboard fetches its rates through the transport during boot', () => {
+  // Both hosts serve /api/rates, so the shared UI asks for it by path like every
+  // other data call. A direct fetch() would break the desktop host, which has no
+  // origin to resolve against; the boundary guard enforces that separately.
   const appSource = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
-  assert.match(appSource, /fetch\('\/api\/rates'/, 'the dashboard should read the Hub rate feed');
+  assert.match(appSource, /fetchJson\('\/api\/rates'\)/, 'the dashboard should read the rate feed through the transport');
   assert.match(appSource, /configureRates\(payload\.rates/, 'the fetched rates should be applied');
 });
 

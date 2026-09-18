@@ -1,0 +1,90 @@
+/* Desktop client shell adjustments.
+ *
+ * The shared stylesheet (src/shared-ui/styles/app.css) is written for the Hub
+ * dashboard, which is a normal scrollable web page. A desktop application adds
+ * three things it does not have: window chrome to clear, a scroll container that
+ * owns the viewport height, and a minimum width instead of a phone breakpoint.
+ *
+ * Everything here is additive. Overriding the shared rules with duplicated
+ * declarations would make the two hosts drift, which is the problem the shared
+ * package exists to avoid.
+ */
+
+html,
+body {
+  /* The window itself is the scroll container; the page must never bounce. */
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  /* Native window chrome sits above the content. */
+  margin: 0;
+}
+
+.app {
+  /* Fill the window rather than the viewport of a scrolling document. */
+  height: 100%;
+  min-height: 0;
+}
+
+/* The topbar clears the macOS traffic lights when the inset title bar is used. */
+body.is-mac .topbar {
+  padding-left: 78px;
+  -webkit-app-region: drag;
+}
+
+/* Interactive children must opt out of the drag region or they cannot be clicked. */
+body.is-mac .topbar button,
+body.is-mac .topbar select,
+body.is-mac .topbar input,
+body.is-mac .topbar a,
+body.is-mac .period-tabs {
+  -webkit-app-region: no-drag;
+}
+
+/* The sidebar is always present in a window this wide; the shared stylesheet
+   collapses it to a bottom bar under 860px, which the window floor prevents. */
+@media (max-width: 860px) {
+  .app {
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  }
+}
+
+/* Desktop-only settings groups, rendered inside the shared settings page. */
+.desktop-settings-group {
+  margin-top: 14px;
+}
+
+.desktop-settings-body {
+  display: grid;
+  gap: 12px;
+  padding: 4px 0 2px;
+}
+
+.desktop-setting-block {
+  display: grid;
+  gap: 6px;
+}
+
+.desktop-token-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 4px 10px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px 2px;
+}
+
+.desktop-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.settings-desktop-stack {
+  display: grid;
+  gap: 14px;
+}

@@ -154,20 +154,15 @@ jobs:
             echo "$APPLE_API_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/apple_api_key.p8"
             echo "APPLE_API_KEY=$RUNNER_TEMP/apple_api_key.p8" >> "$GITHUB_ENV"
           fi
-      - name: Decode macOS Widget provisioning profiles
+      - name: Decode macOS provisioning profile
         if: matrix.target == 'mac'
         env:
           TOKEN_MONITOR_APP_PROVISIONING_PROFILE_BASE64: ${{ secrets.TOKEN_MONITOR_APP_PROVISIONING_PROFILE_BASE64 }}
-          TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE_BASE64: ${{ secrets.TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE_BASE64 }}
         run: |
           set -euo pipefail
           if [ -n "$TOKEN_MONITOR_APP_PROVISIONING_PROFILE_BASE64" ]; then
             echo "$TOKEN_MONITOR_APP_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/token-monitor-app.provisionprofile"
             echo "TOKEN_MONITOR_APP_PROVISIONING_PROFILE=$RUNNER_TEMP/token-monitor-app.provisionprofile" >> "$GITHUB_ENV"
-          fi
-          if [ -n "$TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE_BASE64" ]; then
-            echo "$TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/token-monitor-widget.provisionprofile"
-            echo "TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE=$RUNNER_TEMP/token-monitor-widget.provisionprofile" >> "$GITHUB_ENV"
           fi
       - name: Verify release version
         shell: bash
@@ -182,7 +177,6 @@ jobs:
         shell: bash
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
-          TOKEN_MONITOR_WIDGET_ENABLED: '0'
           MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}

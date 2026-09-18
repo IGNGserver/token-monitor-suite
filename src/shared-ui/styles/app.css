@@ -1385,14 +1385,12 @@ html[data-theme="dark"] .heat.heat-cost.lvl-4 { fill: rgba(251, 191, 36, 0.92); 
   line-height: 1.4;
 }
 .notice.warn {
-  background: color-mix(in srgb, #f0a202 14%, transparent);
-  border-color: color-mix(in srgb, #f0a202 35%, transparent);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 35%, transparent);
 }
 .limit-card-compact .limit-windows { gap: 8px; }
-.badge.warn {
-  background: color-mix(in srgb, #f0a202 18%, transparent);
-  color: #b7791f;
-}
+/* .badge.warn is defined once above with theme tokens; a later literal override
+   here used to win and made the badge unreadable in dark theme. */
 
 
 .home-sparkline-head {

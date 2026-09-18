@@ -35,6 +35,7 @@ const {
 } = require('../shared/clientTracking');
 const { collectCustomRangeOnce, lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
+const { createRequestRouter } = require('./desktopRequestRouter');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { requireSafeHubTransport } = require('../shared/hubTransport');
@@ -1974,7 +1975,13 @@ function sendStatus(connected, extra) {
     failureCode: !streamApplicable || streamConnected ? null : (extra?.reason || syncHealth.stream.failureCode),
     status: extra?.status ?? syncHealth.stream.status
   };
-  sendPush({ event: 'status', data: { connected: streamConnected, mode, health: syncHealthSnapshot(), ...(extra || {}) } });
+  const statusPayload = { connected: streamConnected, mode, health: syncHealthSnapshot(), ...(extra || {}) };
+  sendPush({ event: 'status', data: statusPayload });
+  // A dedicated channel so the shared UI can subscribe to connection state
+  // without parsing the coalesced stats push stream.
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try { mainWindow.webContents.send('stream:status', statusPayload); } catch (_) {}
+  }
 }
 
 function stopLocalCollector(options = {}) {
@@ -3736,6 +3743,93 @@ async function getDashboardHistory() {
   }
 }
 
+function fetchSessionDetail(args) {
+  const { client, sessionId, period, sessionCost } = args || {};
+  return readSessionDetail({ client, sessionId, period, sessionCost, home: os.homedir() });
+}
+
+// What this device can serve. The shared UI reads these the same way it reads a
+// Hub's /api/capabilities, so a view can hide a surface it cannot populate
+// instead of rendering an empty state that looks like real data.
+function localCapabilitiesForRenderer() {
+  const hubCaps = latestHubStats?.capabilities || {};
+  const clientMode = settings?.hubMode === 'client';
+  return {
+    role: clientMode ? 'client' : 'local',
+    scopes: ['read', 'admin'],
+    capabilities: {
+      stats: true,
+      history: settings?.historyEnabled !== false,
+      statsStream: clientMode,
+      subscriptions: clientMode && hubCaps.subscriptions !== false,
+      usageRange: !clientMode || hubCaps.usageRange !== false,
+      pricing: clientMode && hubCaps.pricing !== false,
+      deviceDelete: clientMode && hubCaps.deviceDelete !== false,
+      deviceRename: clientMode && hubCaps.deviceRename !== false,
+      hubAccounts: clientMode && hubCaps.hubAccounts !== false,
+      centralLimits: true,
+      limitsAuthority: 'hub',
+      // Desktop-only surfaces, gated so the shared UI can render them
+      // consistently without branching on platform.
+      serviceStatus: true,
+      themeEditor: true,
+      desktopSettings: true
+    }
+  };
+}
+
+// Proxies a Hub-owned route through this process, which owns the secret. Used
+// for accounts/subscriptions/pricing and the device rename/delete actions; the
+// shared UI reaches them by the same path it uses in the browser.
+async function requestHubRoute(path, options = {}) {
+  const config = effectiveHubConfig();
+  if (!config.url) throw Object.assign(new Error('Hub is not configured'), { code: 'hub_not_configured' });
+  const method = String(options.method || 'GET').toUpperCase();
+  const needsSecret = method !== 'GET' || path.startsWith('/accounts') || path.startsWith('/subscriptions') || path.startsWith('/pricing');
+  if (needsSecret && !config.secret) {
+    throw Object.assign(new Error('Hub secret is not configured'), { code: 'hub_secret_not_configured' });
+  }
+  const headers = {};
+  if (config.secret) headers.authorization = `Bearer ${config.secret}`;
+  if (options.body !== undefined) headers['content-type'] = 'application/json';
+  const response = await fetchBufferedWithTimeout(fetch, `${config.url.replace(/\/$/, '')}${path}`, {
+    method,
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    ...(options.signal ? { signal: options.signal } : {})
+  }, HUB_REQUEST_TIMEOUT_MS);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(body.error || body.message || `Hub request failed (${response.status})`);
+    Object.assign(error, {
+      code: body.code || 'hub_request_failed',
+      status: response.status,
+      payload: body
+    });
+    throw error;
+  }
+  return body;
+}
+
+// Serves the shared UI's `/api/*` calls from this device. Local data comes from
+// the running collector/runtime; Hub-owned resources are proxied with the
+// process-held secret so the renderer never sees a credential.
+const desktopRouter = createRequestRouter({
+  getSettings: () => settingsForRenderer(),
+  getStats: (options) => fetchStats(options),
+  getHistory: () => getDashboardHistory(),
+  getCustomRange: (options) => fetchCustomRangeStats(options?.body || options),
+  getSessionDetail: (args) => fetchSessionDetail(args),
+  getCapabilities: () => localCapabilitiesForRenderer(),
+  getRates: () => ({
+    rates: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
+    source: rateCache?.source || null,
+    date: rateCache?.date || null,
+    fetchedAt: rateCache?.fetchedAt || null
+  }),
+  hubRequest: (path, options) => requestHubRoute(path, options)
+});
+
 function rebuildWindow() {
   if (!mainWindow) return;
   const bounds = floatingBubbleState.collapsed && floatingBubbleState.expandedBounds
@@ -3757,6 +3851,202 @@ function rebuildWindow() {
     if (!old.isDestroyed()) old.destroy();
     if (wasFocused && !mainWindow.isDestroyed()) mainWindow.focus();
   });
+}
+
+async function fetchCustomRangeStats(rangeInput) {
+    if (settings.hubMode === 'client' && latestHubStats?.capabilities?.usageRange === false) {
+      return {
+        ok: false,
+        error: 'hub-capability-unsupported',
+        message: 'The connected Hub does not support custom usage ranges.'
+      };
+    }
+    const { normalizeCustomRange } = require('../shared/customRange');
+    const range = normalizeCustomRange(rangeInput || {});
+    if (!range.ok) {
+      return { ok: false, error: range.error || 'invalid-range', message: range.error || 'invalid-range' };
+    }
+
+    const rangeMeta = {
+      startDate: range.startDate,
+      endDate: range.endDate,
+      startHour: range.startHour,
+      endHour: range.endHour,
+      startMs: range.startMs,
+      endMs: range.endMs,
+      since: range.since,
+      until: range.until,
+      isSameDay: range.isSameDay,
+      coversFullDays: range.coversFullDays
+    };
+
+    const collectLocalCustomRange = async () => {
+      const clients = clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS);
+      const commandTimeoutMs = Number(process.env.TOKEN_MONITOR_COMMAND_TIMEOUT_MS) || 120000;
+      const result = await collectCustomRangeOnce({
+        clients,
+        range,
+        commandTimeoutMs,
+        projectsEnabled: settings.projectsEnabled !== false,
+        homeDir: os.homedir()
+      });
+      return { ok: true, ...result };
+    };
+
+    const isEmptyCustomRangePeriod = (period) => {
+      if (!period || typeof period !== 'object') return true;
+      if (Math.round(Number(period.totalTokens) || 0) > 0) return false;
+      if (Object.keys(period.clients || {}).some((key) => Number(period.clients[key]) > 0)) return false;
+      if (Object.keys(period.models || {}).some((key) => Number(period.models[key]) > 0)) return false;
+      return true;
+    };
+
+    const mergeCustomRangeDetails = (aggregatePeriod, localPeriod) => {
+      const aggregate = aggregatePeriod && typeof aggregatePeriod === 'object' ? aggregatePeriod : {};
+      const local = localPeriod && typeof localPeriod === 'object' ? localPeriod : {};
+      return {
+        ...aggregate,
+        // /api/usage/range currently returns aggregate totals but deliberately
+        // omits unbounded session/project detail. The desktop process already
+        // has the authoritative local detail, so keep Hub totals and restore
+        // the detail needed by the desktop breakdown views.
+        projects: local.projects && typeof local.projects === 'object' ? local.projects : aggregate.projects || {},
+        sessions: local.sessions && typeof local.sessions === 'object' ? local.sessions : aggregate.sessions || {}
+      };
+    };
+
+    // Hub modes prefer /api/usage/range so multi-device totals match mobile/web.
+    // When hub history/events are empty (common before graph history is warm) or
+    // the hub call fails, fall back to a local tokscale scan so the desktop
+    // widget still shows the same data as the Day tab.
+    if (mode !== 'local') {
+      let hubError = null;
+      try {
+        const config = safeEffectiveHubConfig();
+        if (!config.ok) {
+          const error = new Error('Hub usage-range transport is unavailable');
+          error.code = config.error?.code || 'hub_range_transport_unavailable';
+          throw error;
+        }
+        const { url: hubUrl, secret } = config;
+        if (!hubUrl) {
+          const error = new Error('Hub usage-range is not configured');
+          error.code = 'hub_not_configured';
+          throw error;
+        }
+        const params = new URLSearchParams({
+          startDate: range.startDate,
+          endDate: range.endDate,
+          startHour: String(range.startHour),
+          endHour: String(range.endHour)
+        });
+        const url = `${hubUrl.replace(/\/$/, '')}/api/usage/range?${params}`;
+        const response = await fetchBufferedWithTimeout(fetch, url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} }, HUB_REQUEST_TIMEOUT_MS);
+        if (!response.ok) {
+          const error = new Error('Hub usage-range request failed');
+          error.status = response.status;
+          error.code = stableSyncFailureCode(error, 'hub_range_failed');
+          throw error;
+        }
+        const body = await response.json();
+        updateSyncHealth('rest', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null, status: null });
+        const hubPeriod = {
+          totalTokens: Math.round(Number(body.totalTokens) || 0),
+          costUsd: Number(body.costUsd) || 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          outputTokens: 0,
+          clients: body.clients || {},
+          clientCosts: body.clientCosts || {},
+          clientCacheReads: {},
+          clientCacheWrites: {},
+          clientOutputs: {},
+          models: body.models || {},
+          modelCosts: body.modelCosts || {},
+          modelCacheReads: {},
+          modelCacheWrites: {},
+          modelOutputs: {},
+          clientModels: body.clientModels || {},
+          clientModelCosts: body.clientModelCosts || {},
+          projects: Object.create(null),
+          sessions: {}
+        };
+        let local = null;
+        try {
+          local = await collectLocalCustomRange();
+        } catch (localError) {
+          if (isEmptyCustomRangePeriod(hubPeriod)) throw localError;
+        }
+        if (!isEmptyCustomRangePeriod(hubPeriod)) {
+          const localPeriod = local?.period || {};
+          return {
+            ok: true,
+            range: rangeMeta,
+            period: mergeCustomRangeDetails(hubPeriod, localPeriod),
+            devices: localPeriod && !isEmptyCustomRangePeriod(localPeriod)
+              ? [{
+                deviceId: settings.deviceId || defaultDeviceId(),
+                periods: { custom: localPeriod },
+                updatedAt: new Date().toISOString()
+              }]
+              : [],
+            source: local && !isEmptyCustomRangePeriod(localPeriod)
+              ? `${body.source || 'history_daily'}+local-details`
+              : (body.source || 'history_daily'),
+            updatedAt: new Date().toISOString()
+          };
+        }
+      } catch (error) {
+        hubError = error;
+        updateSyncHealth('rest', {
+          state: 'error',
+          lastFailureAt: new Date().toISOString(),
+          failureCode: stableSyncFailureCode(error, 'hub_range_failed'),
+          status: Number.isInteger(Number(error?.status)) ? Number(error.status) : null
+        });
+      }
+
+      try {
+        const local = await collectLocalCustomRange();
+        if (!isEmptyCustomRangePeriod(local.period) || !hubError) {
+          return {
+            ...local,
+            source: local.source || (hubError ? 'local_fallback_after_hub_error' : 'local_fallback_empty_hub')
+          };
+        }
+      } catch (localError) {
+        if (hubError) {
+          return {
+            ok: false,
+            error: hubError?.code || 'hub-range-failed',
+            message: hubError?.message || String(hubError)
+          };
+        }
+        return {
+          ok: false,
+          error: localError?.code || 'collect-failed',
+          message: localError?.message || String(localError)
+        };
+      }
+
+      if (hubError) {
+        return {
+          ok: false,
+          error: hubError?.code || 'hub-range-failed',
+          message: hubError?.message || String(hubError)
+        };
+      }
+    }
+
+    try {
+      return await collectLocalCustomRange();
+    } catch (error) {
+      return {
+        ok: false,
+        error: error?.code || 'collect-failed',
+        message: error?.message || String(error)
+      };
+    }
 }
 
 app.whenReady().then(() => {
@@ -4126,201 +4416,7 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('stats:get', (_event, options) => fetchStats(options));
-  ipcMain.handle('stats:getCustomRange', async (_event, rangeInput) => {
-    if (settings.hubMode === 'client' && latestHubStats?.capabilities?.usageRange === false) {
-      return {
-        ok: false,
-        error: 'hub-capability-unsupported',
-        message: 'The connected Hub does not support custom usage ranges.'
-      };
-    }
-    const { normalizeCustomRange } = require('../shared/customRange');
-    const range = normalizeCustomRange(rangeInput || {});
-    if (!range.ok) {
-      return { ok: false, error: range.error || 'invalid-range', message: range.error || 'invalid-range' };
-    }
-
-    const rangeMeta = {
-      startDate: range.startDate,
-      endDate: range.endDate,
-      startHour: range.startHour,
-      endHour: range.endHour,
-      startMs: range.startMs,
-      endMs: range.endMs,
-      since: range.since,
-      until: range.until,
-      isSameDay: range.isSameDay,
-      coversFullDays: range.coversFullDays
-    };
-
-    const collectLocalCustomRange = async () => {
-      const clients = clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS);
-      const commandTimeoutMs = Number(process.env.TOKEN_MONITOR_COMMAND_TIMEOUT_MS) || 120000;
-      const result = await collectCustomRangeOnce({
-        clients,
-        range,
-        commandTimeoutMs,
-        projectsEnabled: settings.projectsEnabled !== false,
-        homeDir: os.homedir()
-      });
-      return { ok: true, ...result };
-    };
-
-    const isEmptyCustomRangePeriod = (period) => {
-      if (!period || typeof period !== 'object') return true;
-      if (Math.round(Number(period.totalTokens) || 0) > 0) return false;
-      if (Object.keys(period.clients || {}).some((key) => Number(period.clients[key]) > 0)) return false;
-      if (Object.keys(period.models || {}).some((key) => Number(period.models[key]) > 0)) return false;
-      return true;
-    };
-
-    const mergeCustomRangeDetails = (aggregatePeriod, localPeriod) => {
-      const aggregate = aggregatePeriod && typeof aggregatePeriod === 'object' ? aggregatePeriod : {};
-      const local = localPeriod && typeof localPeriod === 'object' ? localPeriod : {};
-      return {
-        ...aggregate,
-        // /api/usage/range currently returns aggregate totals but deliberately
-        // omits unbounded session/project detail. The desktop process already
-        // has the authoritative local detail, so keep Hub totals and restore
-        // the detail needed by the desktop breakdown views.
-        projects: local.projects && typeof local.projects === 'object' ? local.projects : aggregate.projects || {},
-        sessions: local.sessions && typeof local.sessions === 'object' ? local.sessions : aggregate.sessions || {}
-      };
-    };
-
-    // Hub modes prefer /api/usage/range so multi-device totals match mobile/web.
-    // When hub history/events are empty (common before graph history is warm) or
-    // the hub call fails, fall back to a local tokscale scan so the desktop
-    // widget still shows the same data as the Day tab.
-    if (mode !== 'local') {
-      let hubError = null;
-      try {
-        const config = safeEffectiveHubConfig();
-        if (!config.ok) {
-          const error = new Error('Hub usage-range transport is unavailable');
-          error.code = config.error?.code || 'hub_range_transport_unavailable';
-          throw error;
-        }
-        const { url: hubUrl, secret } = config;
-        if (!hubUrl) {
-          const error = new Error('Hub usage-range is not configured');
-          error.code = 'hub_not_configured';
-          throw error;
-        }
-        const params = new URLSearchParams({
-          startDate: range.startDate,
-          endDate: range.endDate,
-          startHour: String(range.startHour),
-          endHour: String(range.endHour)
-        });
-        const url = `${hubUrl.replace(/\/$/, '')}/api/usage/range?${params}`;
-        const response = await fetchBufferedWithTimeout(fetch, url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} }, HUB_REQUEST_TIMEOUT_MS);
-        if (!response.ok) {
-          const error = new Error('Hub usage-range request failed');
-          error.status = response.status;
-          error.code = stableSyncFailureCode(error, 'hub_range_failed');
-          throw error;
-        }
-        const body = await response.json();
-        updateSyncHealth('rest', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null, status: null });
-        const hubPeriod = {
-          totalTokens: Math.round(Number(body.totalTokens) || 0),
-          costUsd: Number(body.costUsd) || 0,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          outputTokens: 0,
-          clients: body.clients || {},
-          clientCosts: body.clientCosts || {},
-          clientCacheReads: {},
-          clientCacheWrites: {},
-          clientOutputs: {},
-          models: body.models || {},
-          modelCosts: body.modelCosts || {},
-          modelCacheReads: {},
-          modelCacheWrites: {},
-          modelOutputs: {},
-          clientModels: body.clientModels || {},
-          clientModelCosts: body.clientModelCosts || {},
-          projects: Object.create(null),
-          sessions: {}
-        };
-        let local = null;
-        try {
-          local = await collectLocalCustomRange();
-        } catch (localError) {
-          if (isEmptyCustomRangePeriod(hubPeriod)) throw localError;
-        }
-        if (!isEmptyCustomRangePeriod(hubPeriod)) {
-          const localPeriod = local?.period || {};
-          return {
-            ok: true,
-            range: rangeMeta,
-            period: mergeCustomRangeDetails(hubPeriod, localPeriod),
-            devices: localPeriod && !isEmptyCustomRangePeriod(localPeriod)
-              ? [{
-                deviceId: settings.deviceId || defaultDeviceId(),
-                periods: { custom: localPeriod },
-                updatedAt: new Date().toISOString()
-              }]
-              : [],
-            source: local && !isEmptyCustomRangePeriod(localPeriod)
-              ? `${body.source || 'history_daily'}+local-details`
-              : (body.source || 'history_daily'),
-            updatedAt: new Date().toISOString()
-          };
-        }
-      } catch (error) {
-        hubError = error;
-        updateSyncHealth('rest', {
-          state: 'error',
-          lastFailureAt: new Date().toISOString(),
-          failureCode: stableSyncFailureCode(error, 'hub_range_failed'),
-          status: Number.isInteger(Number(error?.status)) ? Number(error.status) : null
-        });
-      }
-
-      try {
-        const local = await collectLocalCustomRange();
-        if (!isEmptyCustomRangePeriod(local.period) || !hubError) {
-          return {
-            ...local,
-            source: local.source || (hubError ? 'local_fallback_after_hub_error' : 'local_fallback_empty_hub')
-          };
-        }
-      } catch (localError) {
-        if (hubError) {
-          return {
-            ok: false,
-            error: hubError?.code || 'hub-range-failed',
-            message: hubError?.message || String(hubError)
-          };
-        }
-        return {
-          ok: false,
-          error: localError?.code || 'collect-failed',
-          message: localError?.message || String(localError)
-        };
-      }
-
-      if (hubError) {
-        return {
-          ok: false,
-          error: hubError?.code || 'hub-range-failed',
-          message: hubError?.message || String(hubError)
-        };
-      }
-    }
-
-    try {
-      return await collectLocalCustomRange();
-    } catch (error) {
-      return {
-        ok: false,
-        error: error?.code || 'collect-failed',
-        message: error?.message || String(error)
-      };
-    }
-  });
+  ipcMain.handle('stats:getCustomRange', (_event, rangeInput) => fetchCustomRangeStats(rangeInput));
 
   ipcMain.handle('export:now', async () => {
     const result = await dialog.showOpenDialog({
@@ -4341,10 +4437,7 @@ app.whenReady().then(() => {
     if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
     return { ok: true, dir: result.filePaths[0] };
   });
-  ipcMain.handle('session:getDetail', (_event, args) => {
-    const { client, sessionId, period, sessionCost } = args || {};
-    return readSessionDetail({ client, sessionId, period, sessionCost, home: os.homedir() });
-  });
+  ipcMain.handle('session:getDetail', (_event, args) => fetchSessionDetail(args));
   ipcMain.handle('sync:recover', () => recoverNow());
   ipcMain.handle('sync:health', () => syncHealthSnapshot());
   ipcMain.handle('stream:status', () => ({ connected: streamConnected, mode, health: syncHealthSnapshot(), ...(streamFailure || {}) }));
@@ -4374,6 +4467,70 @@ app.whenReady().then(() => {
       .catch((error) => ({ ok: false, error: error.message }));
   });
   ipcMain.handle('app:openUserData', () => shell.openPath(app.getPath('userData')));
+
+  // --- Shared-UI transport surface -----------------------------------------
+  // The shared UI never touches the Hub directly: this process owns the secret
+  // and the transport policy, and the same view code runs against local data or
+  // a remote Hub without knowing which. Errors are flattened to a plain object
+  // because Error instances do not survive structured clone intact.
+  ipcMain.handle('transport:request', async (_event, path, options = {}) => {
+    try {
+      const data = await desktopRouter.route(path, options);
+      return { ok: true, data };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          message: error?.message || String(error),
+          code: error?.code || null,
+          status: Number.isInteger(Number(error?.status)) ? Number(error.status) : null,
+          payload: error?.payload ?? null
+        }
+      };
+    }
+  });
+  ipcMain.handle('transport:capabilities', () => ({
+    pwa: false,
+    nativeDialogs: true,
+    externalOpen: 'shell',
+    clipboard: 'ipc',
+    routing: 'hash',
+    localCollector: true,
+    updater: true,
+    desktopSettings: true,
+    serviceStatus: true,
+    themeEditor: true,
+    accounts: true,
+    subscriptions: true,
+    pricing: true
+  }));
+  ipcMain.handle('transport:flag:read', (_event, key) => {
+    const value = settings?.[String(key)];
+    return value === undefined ? null : value;
+  });
+  ipcMain.handle('transport:flag:write', (_event, key, value) => {
+    if (!key) return false;
+    settings[String(key)] = value;
+    saveSettings();
+    return true;
+  });
+  ipcMain.handle('ui:confirm', async (event, message, options = {}) => {
+    const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    const { response } = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+      type: options.danger ? 'warning' : 'question',
+      buttons: [options.confirmLabel || 'OK', options.cancelLabel || 'Cancel'],
+      defaultId: options.danger ? 1 : 0,
+      cancelId: 1,
+      message: String(message || '')
+    });
+    return response === 0;
+  });
+  ipcMain.handle('ui:prompt', async (event, message, defaultValue = '') => {
+    // Electron has no native text prompt; a modal message box cannot collect
+    // input. The renderer keeps a small inline form for this one case, so the
+    // main process reports "unsupported" and the shared UI falls back to it.
+    return { unsupported: true, message: String(message || ''), value: String(defaultValue || '') };
+  });
   ipcMain.handle('hubAccounts:list', () => requestHubAccount('/api/accounts'));
   ipcMain.handle('hubAccounts:add', (_event, request = {}) => requestHubAccount('/api/accounts', {
     method: 'POST',

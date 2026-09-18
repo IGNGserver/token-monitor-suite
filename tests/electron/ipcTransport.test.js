@@ -1,0 +1,125 @@
+'use strict';
+
+// The IPC transport is the desktop half of the shared UI's host seam. Its job is
+// to look exactly like the Hub's HTTP transport from the view layer's point of
+// view, so these tests focus on the places where that could silently diverge:
+// error shape, credential redaction, and the prefs key mapping that keeps an
+// existing settings.json working.
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const { createIpcTransport } = require('../../src/shared-ui/transport/ipcTransport.js');
+
+function bridge(overrides = {}) {
+  const calls = [];
+  return {
+    calls,
+    request: async (path, options) => {
+      calls.push({ path, options });
+      return { ok: true, data: { path } };
+    },
+    getSettings: async () => ({}),
+    updateSettings: async (patch) => {
+      calls.push({ update: patch });
+      return patch;
+    },
+    hasSecret: () => false,
+    readFlag: () => null,
+    writeFlag: () => true,
+    openExternal: async () => ({ ok: true }),
+    copyText: async () => true,
+    confirm: async () => true,
+    prompt: async () => ({ unsupported: true }),
+    onStatsPush: () => () => {},
+    ...overrides
+  };
+}
+
+test('a successful request resolves to the data, not the envelope', async () => {
+  const transport = createIpcTransport(bridge());
+  assert.deepEqual(await transport.request('/api/stats'), { path: '/api/stats' });
+});
+
+test('a failed request rejects with status and payload preserved', async () => {
+  const transport = createIpcTransport(bridge({
+    request: async () => ({
+      ok: false,
+      error: { message: 'stale_write', code: 'stale_write', status: 409, payload: { current: {} } }
+    })
+  }));
+  await assert.rejects(
+    () => transport.request('/api/subscriptions', { method: 'PUT' }),
+    (error) => {
+      // The shared UI branches on these exact fields for 401 re-auth and the 409
+      // subscription conflict banner.
+      assert.equal(error.status, 409);
+      assert.equal(error.code, 'stale_write');
+      assert.deepEqual(error.payload, { current: {} });
+      return true;
+    }
+  );
+});
+
+test('the secret is never exposed to the renderer', async () => {
+  const configured = createIpcTransport(bridge({ hasSecret: () => true }));
+  const sentinel = configured.secret.load();
+  assert.equal(sentinel, '__configured__');
+  assert.equal(configured.secret.isRemembered(), true);
+
+  const empty = createIpcTransport(bridge({ hasSecret: () => false }));
+  assert.equal(empty.secret.load(), '');
+  assert.equal(empty.secret.isRemembered(), false);
+});
+
+test('saving a secret writes through settings rather than a browser store', async () => {
+  const b = bridge();
+  const transport = createIpcTransport(b);
+  await transport.secret.save('s3cret', true);
+  const write = b.calls.find((c) => c.update);
+  assert.deepEqual(write.update, { secret: 's3cret' });
+});
+
+test('health degrades to a harmless shape when the probe fails', async () => {
+  const transport = createIpcTransport(bridge({
+    request: async () => ({ ok: false, error: { message: 'no hub' } })
+  }));
+  // A failed health probe must never block boot.
+  assert.deepEqual(await transport.health(), { ok: false, secretRequired: false, capabilities: {} });
+});
+
+test('the stream bridge forwards stats frames and reports live status', async () => {
+  let push = null;
+  const transport = createIpcTransport(bridge({
+    onStatsPush: (callback) => { push = callback; return () => {}; }
+  }));
+  const seen = [];
+  const statuses = [];
+  const dispose = transport.openStream({
+    onStats: (stats, type) => seen.push({ stats, type }),
+    onStatus: (status) => statuses.push(status)
+  });
+  push({ event: 'stats', data: { type: 'stats', stats: { devices: [] }, at: 'now' } });
+  // Non-stats events (status pushes) must not be mistaken for data frames.
+  push({ event: 'status', data: { connected: true } });
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].stats, { devices: [] });
+  assert.equal(statuses[0], 'live');
+  dispose();
+});
+
+test('routing is hash-based because file:// has no SPA fallback', () => {
+  const transport = createIpcTransport(bridge());
+  assert.equal(transport.capabilities.routing, 'hash');
+  assert.equal(transport.capabilities.pwa, false);
+  assert.equal(transport.buildRouteUrl('usage', { tab: 'models' }), '#/usage?tab=models');
+  assert.equal(transport.buildRouteUrl('overview', {}), '#/');
+});
+
+test('an unsupported native prompt rejects so the UI can use its own field', async () => {
+  const transport = createIpcTransport(bridge());
+  await assert.rejects(
+    () => transport.prompt('Rename device', 'old'),
+    (error) => error.code === 'prompt_unsupported'
+  );
+});

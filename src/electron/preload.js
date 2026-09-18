@@ -2,7 +2,69 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+// The shared UI reads its split preferences out of the settings document, and
+// the web dashboard uses these exact keys. Keeping the mapping here means the
+// shared view code persists the same shape in both hosts and an existing
+// desktop settings.json keeps working unchanged.
+const PREFS_KEYS = Object.freeze([
+  'language',
+  'theme',
+  'currency',
+  'period',
+  'trendsRange',
+  'trendsStack',
+  'trendsMetric',
+  'heatmapMetric',
+  'activeDaysWindow',
+  'homeLimitAccountCount',
+  'deviceFilter',
+  'selectedDeviceId',
+  'selectedToolId',
+  'deviceDetailPeriod',
+  'view',
+  'usageTab',
+  'managementTab',
+  'limitTab'
+]);
+
+// These live in settings.json under a different name than the UI pref they back.
+const PREFS_SETTINGS_ALIASES = Object.freeze({
+  activeDaysWindow: 'homeActiveDaysWindow'
+});
+
+function prefsFromSettings(settings = {}) {
+  const out = {};
+  for (const key of PREFS_KEYS) {
+    const source = PREFS_SETTINGS_ALIASES[key] || key;
+    if (settings[source] !== undefined) out[key] = settings[source];
+  }
+  return out;
+}
+
+function prefsToSettingsPatch(patch = {}) {
+  const out = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (!PREFS_KEYS.includes(key)) continue;
+    out[PREFS_SETTINGS_ALIASES[key] || key] = value;
+  }
+  return out;
+}
+
 contextBridge.exposeInMainWorld('tokenMonitor', {
+  // --- Shared-UI transport surface -----------------------------------------
+  request: (path, options) => ipcRenderer.invoke('transport:request', path, options),
+  getCapabilities: () => ipcRenderer.invoke('transport:capabilities'),
+  readFlag: (key) => ipcRenderer.invoke('transport:flag:read', key),
+  writeFlag: (key, value) => ipcRenderer.invoke('transport:flag:write', key, value),
+  confirm: (message, options) => ipcRenderer.invoke('ui:confirm', message, options),
+  prompt: (message, defaultValue) => ipcRenderer.invoke('ui:prompt', message, defaultValue),
+  hasSecret: async () => {
+    const settings = await ipcRenderer.invoke('settings:get');
+    return Boolean(settings && settings.hubAdminConfigured);
+  },
+  prefsFromSettings,
+  prefsToSettingsPatch,
+
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
   clearSessionUsageArchive: () => ipcRenderer.invoke('sessionUsageArchive:clear'),
@@ -31,6 +93,13 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
     ipcRenderer.on('stats:push', listener);
     return () => ipcRenderer.removeListener('stats:push', listener);
+  },
+  // The main process already classifies connection state (SSE health, backoff
+  // countdown, failure codes); the shared UI only needs to render it.
+  onStreamStatus: (callback) => {
+    const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
+    ipcRenderer.on('stream:status', listener);
+    return () => ipcRenderer.removeListener('stream:status', listener);
   },
   onSettingsPush: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };

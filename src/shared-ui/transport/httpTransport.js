@@ -315,6 +315,34 @@ export function createHttpTransport(options = {}) {
         : '';
       return `/${view === 'overview' ? '' : view}${query}`;
     },
+    writeRoute(view, { targetPath = '/', query = '', replace = false } = {}) {
+      if (typeof window === 'undefined' || !window.history) return;
+      const url = `${targetPath}${query ? `?${query}` : ''}`;
+      const currentPath = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
+      const samePath = currentPath === targetPath
+        && window.location.search === (query ? `?${query}` : '')
+        && !window.location.hash;
+      // Pushing an identical entry would break the back button, so a no-op
+      // navigation is dropped rather than recorded.
+      if (samePath) return;
+      if (replace) window.history.replaceState({ view }, '', url);
+      else window.history.pushState({ view }, '', url);
+    },
+    readRoute() {
+      if (typeof window === 'undefined' || !window.location) {
+        return { path: '/', params: new URLSearchParams() };
+      }
+      let path = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
+      let params = new URLSearchParams(window.location.search || '');
+      const hash = window.location.hash ? window.location.hash.replace(/^#/, '') : '';
+      if (hash) {
+        const hashUrl = hash.startsWith('/') ? hash : `/${hash}`;
+        const queryIndex = hashUrl.indexOf('?');
+        path = (queryIndex >= 0 ? hashUrl.slice(0, queryIndex) : hashUrl).replace(/\/+$/, '') || '/';
+        params = new URLSearchParams(queryIndex >= 0 ? hashUrl.slice(queryIndex + 1) : '');
+      }
+      return { path, params };
+    },
     pushRoute(view, params) {
       if (typeof window !== 'undefined' && window.history?.pushState) {
         window.history.pushState({ view }, '', this.buildRouteUrl(view, params));

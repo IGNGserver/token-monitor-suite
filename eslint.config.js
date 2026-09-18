@@ -24,8 +24,21 @@ module.exports = [
   },
 
   {
-    // Renderer runs in the browser; UMD modules also touch module/window
+    // The desktop renderer entry is browser ESM: it imports the shared UI and
+    // installs the IPC transport. The other renderer files are still UMD/CommonJS
+    // and keep the block below.
+    files: ['src/electron/renderer/boot.js'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: { ...globals.browser },
+    },
+  },
+
+  {
+    // Renderer runs in the browser; UMD modules also touch module/window.
+    // boot.js is excluded: it is ESM and configured in the block above.
     files: ['src/electron/renderer/**/*.js'],
+    ignores: ['src/electron/renderer/boot.js'],
     languageOptions: {
       sourceType: 'commonjs',
       globals: { ...globals.node, ...globals.browser },

@@ -1,0 +1,79 @@
+'use strict';
+
+// Boot contract for the desktop renderer.
+//
+// The desktop shell loads the shared UI through a boot module that installs the
+// IPC transport first. If that ordering regresses, or if the shell stops
+// providing an element the shared UI binds at startup, the window comes up
+// blank with no error — exactly the failure mode this project already hit once
+// with the old renderer. These assertions are cheap and catch that class of
+// drift.
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
+const sharedDir = path.join(__dirname, '..', '..', 'src', 'shared-ui');
+
+const read = (file) => fs.readFileSync(file, 'utf8');
+
+test('the renderer shell loads the shared stylesheet and its own boot module', () => {
+  const html = read(path.join(rendererDir, 'index.html'));
+  assert.match(html, /shared-ui\/styles\/app\.css/, 'the shared stylesheet must be the base');
+  assert.match(html, /src="boot\.js"/, 'the shell must load the boot module');
+  assert.doesNotMatch(html, /floatingBubbleBoot/, 'the widget boot must be gone');
+});
+
+test('the shell provides every element the shared UI binds at startup', () => {
+  const html = read(path.join(rendererDir, 'index.html'));
+  // Ids the shared UI dereferences while rendering chrome or binding events. A
+  // missing one throws during module evaluation and blanks the window.
+  const required = [
+    'app', 'primaryNav', 'streamStatus', 'streamStatusText', 'settingsOpen',
+    'deviceFilter', 'periodTabs', 'customRangeBtn', 'refreshBtn', 'content',
+    'heroStrip', 'totalTokens', 'totalCost', 'deviceCount', 'liveLabel',
+    'authGate', 'settingsDrawer', 'rangePopover', 'rangeFrom', 'rangeTo',
+    'rangeApply', 'rangeClear', 'rangeError', 'toast', 'navScrim'
+  ];
+  const missing = required.filter((id) => !html.includes(`id="${id}"`));
+  assert.deepEqual(missing, [], `shell is missing required element ids: ${missing.join(', ')}`);
+});
+
+test('the boot module installs the transport before importing the shared UI', () => {
+  const boot = read(path.join(rendererDir, 'boot.js'));
+  // A static import would evaluate the shared UI before configureTransport ran,
+  // because ES module imports are evaluated ahead of the importing module body.
+  assert.match(boot, /await import\(/, 'the shared app must be imported dynamically');
+  assert.doesNotMatch(boot, /^import ['"].*shared-ui\/app\.js/m, 'a static app import would break transport ordering');
+  const configureIndex = boot.indexOf('configureTransport(');
+  const importIndex = boot.indexOf("await import('../shared-ui/app.js')");
+  assert.ok(configureIndex >= 0, 'the boot module must configure a transport');
+  assert.ok(importIndex > configureIndex, 'the transport must be configured before the app loads');
+});
+
+test('the boot module points client icons at the packaged asset tree', () => {
+  const boot = read(path.join(rendererDir, 'boot.js'));
+  assert.match(boot, /configureIconBase\(/, 'the desktop icon base must be injected');
+  assert.match(boot, /assets\/icons/, 'icons resolve from the packaged assets directory');
+});
+
+test('the desktop transport keeps hash routing and drops PWA surfaces', () => {
+  const transport = read(path.join(sharedDir, 'transport', 'ipcTransport.js'));
+  assert.match(transport, /routing: 'hash'/, 'file:// has no SPA fallback');
+  assert.match(transport, /pwa: false/, 'the desktop client has no install prompt or service worker');
+  assert.match(transport, /__configured__/, 'the renderer must never receive the raw secret');
+});
+
+test('the preload bridge exposes the transport contract the shared UI requires', () => {
+  const preload = read(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'));
+  for (const member of ['request:', 'getCapabilities:', 'hasSecret:', 'prefsFromSettings', 'prefsToSettingsPatch', 'confirm:', 'onStatsPush:']) {
+    assert.ok(preload.includes(member), `preload must expose ${member}`);
+  }
+  // The prefs mapping is what lets one shared preference model survive in both
+  // hosts; a dropped key silently stops persisting a user's choice.
+  for (const key of ['language', 'currency', 'period', 'usageTab', 'managementTab', 'view']) {
+    assert.ok(preload.includes(`'${key}'`), `prefs mapping must include ${key}`);
+  }
+});

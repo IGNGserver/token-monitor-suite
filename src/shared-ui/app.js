@@ -12,10 +12,12 @@ import {
   openStatsStream,
   promptAction,
   readFlag,
+  readRoute,
   savePrefs,
   saveSecret,
   secretIsRemembered,
-  writeFlag
+  writeFlag,
+  writeRoute
 } from './transport/index.js';
 import { applyI18n, resolveLocale, t } from './core/i18n.js';
 import {
@@ -155,15 +157,9 @@ function normalizeViewId(value) {
 }
 
 function routeFromLocation() {
-  let path = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
-  let params = new URLSearchParams(window.location.search || '');
-  const hash = window.location.hash ? window.location.hash.replace(/^#/, '') : '';
-  if (hash) {
-    const hashUrl = hash.startsWith('/') ? hash : `/${hash}`;
-    const queryIndex = hashUrl.indexOf('?');
-    path = (queryIndex >= 0 ? hashUrl.slice(0, queryIndex) : hashUrl).replace(/\/+$/, '') || '/';
-    params = new URLSearchParams(queryIndex >= 0 ? hashUrl.slice(queryIndex + 1) : '');
-  }
+  // The host decides where a route lives: a path on the Hub, a fragment on the
+  // desktop client where file:// has no server-side SPA fallback.
+  const { path, params } = readRoute();
   const target = LEGACY_ROUTE_ALIASES[path]
     || (Object.entries(VIEW_PATHS).find(([, targetPath]) => targetPath === path)
       ? { view: Object.entries(VIEW_PATHS).find(([, targetPath]) => targetPath === path)[0] }
@@ -206,21 +202,10 @@ function syncUrlForView(viewId, { replace = false, tab = '' } = {}) {
     // a path change would 404. Its transport reports routing:'hash' and builds a
     // `#/view` URL instead.
     if (isCapable('routing') && capabilities().routing === 'hash') {
-      const hashUrl = `#${targetPath}${query ? `?${query}` : ''}`;
-      if (window.location.hash === hashUrl) return;
-      const url = `${window.location.pathname}${hashUrl}`;
-      if (replace) window.history.replaceState({ view: viewId }, '', url);
-      else window.history.pushState({ view: viewId }, '', url);
+      writeRoute(viewId, { targetPath, query, replace, hash: true });
       return;
     }
-    const currentPath = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
-    const url = `${targetPath}${query ? `?${query}` : ''}`;
-    if (currentPath === targetPath && window.location.search === (query ? `?${query}` : '') && !window.location.hash) return;
-    if (replace) {
-      window.history.replaceState({ view: viewId }, '', url);
-    } else {
-      window.history.pushState({ view: viewId }, '', url);
-    }
+    writeRoute(viewId, { targetPath, query, replace, hash: false });
   } catch {
     /* ignore history errors if sandboxed */
   }
@@ -3983,16 +3968,12 @@ async function init() {
   }
   if (isCapable('pwa')) refreshPwaUi();
 
-  // Display rates come from the Hub so this dashboard renders costs in the same
-  // currency units as the widget (which uses live rates); the built-in table is
-  // only a fallback while the fetch is in flight or unavailable. Public route, no
-  // secret needed, and a failure must never block the boot sequence.
+  // Display rates keep this dashboard's costs in the same currency units as the
+  // device that collected them; the built-in table is only a fallback while the
+  // request is in flight or unavailable. A failure must never block boot.
   try {
-    const ratesResponse = await fetch('/api/rates', { headers: { accept: 'application/json' } });
-    if (ratesResponse.ok) {
-      const payload = await ratesResponse.json();
-      if (payload?.rates) configureRates(payload.rates, { source: payload.source, date: payload.date });
-    }
+    const payload = await fetchJson('/api/rates');
+    if (payload?.rates) configureRates(payload.rates, { source: payload.source, date: payload.date });
   } catch {
     /* keep the built-in rates */
   }

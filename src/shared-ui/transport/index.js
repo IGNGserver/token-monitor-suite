@@ -157,10 +157,28 @@ export function routeUrl(view, params) {
 export function pushRoute(view, params) {
   const transport = getTransport();
   if (typeof transport.pushRoute === 'function') return transport.pushRoute(view, params);
-  if (typeof window !== 'undefined' && window.history?.pushState) {
-    window.history.pushState({ view }, '', routeUrl(view, params));
+  return undefined;
+}
+
+/**
+ * Apply a navigation to the URL bar. The host owns whether that is a path
+ * (`pushState` on the Hub) or a fragment (desktop, where file:// has no
+ * server-side SPA fallback), and whether the current entry may be replaced
+ * instead of pushing a new one.
+ */
+export function writeRoute(view, { targetPath = '/', query = '', replace = false, hash = false } = {}) {
+  const transport = getTransport();
+  if (typeof transport.writeRoute === 'function') {
+    return transport.writeRoute(view, { targetPath, query, replace, hash });
   }
   return undefined;
+}
+
+/** Read the current route. The host decodes path-then-hash in its own order. */
+export function readRoute() {
+  const transport = getTransport();
+  if (typeof transport.readRoute === 'function') return transport.readRoute();
+  return null;
 }
 
 /** Desktop-only operations. The Hub transport omits this and callers gate on `capabilities`. */

@@ -24,6 +24,8 @@ import { applyI18n, resolveLocale, t } from './core/i18n.js';
 import { configureViewContext } from './core/viewContext.js';
 import { renderDesktopSettings, readDesktopSettingsPatch } from './views/settingsDesktop.js';
 import { renderLimits } from './views/limits.js';
+import { renderUsage } from './views/usage.js';
+import { renderDevices } from './views/devices.js';
 import {
   renderTrends,
   renderSparkline,
@@ -43,10 +45,7 @@ import {
 } from './core/format.js';
 import {
   toolRows,
-  mapRows,
   modelRows,
-  projectRows,
-  sessionRows,
   deviceRows,
   limitCards,
   historyDaily,
@@ -54,16 +53,9 @@ import {
   clientIconPath,
   devicePlatformLabel,
   countActiveDays,
-  deviceBreakdownRows,
-  agentRuntimeLabel,
-  clientStatusEntries,
-  wslStatusSummary,
   limitRemainingTone,
   clampHomeLimitAccountCount,
-  modelColor,
   HUB_ACCOUNT_PROVIDERS,
-  periodTokenMetrics,
-  periodActivityCounts
 } from './core/data.js';
 
 const UI_ICON_PATHS = Object.freeze({
@@ -1124,294 +1116,6 @@ function renderHome() {
       ${panel(tr('home.limits'), limitsBody, '', viewAllAction('limits'))}
     </div>
     ${panel(tr('home.summary'), heatmapBody)}
-  `;
-}
-
-
-function renderTools() {
-  const period = activePeriod();
-  const tools = toolRows(period).map((row) => ({ ...row, client: row.key }));
-  if (!tools.length) return emptyHtml('empty.usage');
-  const selectedId = state.prefs.selectedToolId || tools[0].key;
-  const selected = tools.find((row) => row.key === selectedId) || tools[0];
-  const modelMap = period?.clientModels?.[selected.key] || {};
-  const modelCostMap = period?.clientModelCosts?.[selected.key] || {};
-  const models = mapRows(modelMap, modelCostMap, {
-    labelFor: (key) => key,
-    colorFor: (key) => modelColor(key)
-  });
-  const toolList = tools.map((row) => {
-    const active = row.key === selected.key ? ' selected' : '';
-    return `
-      <button type="button" class="tool-select-row${active}" data-select-tool="${escapeHtml(row.key)}">
-        <div class="row-main">
-          <img class="client-icon" src="${clientIconPath(row.key)}" alt="" onerror="this.style.display='none'" />
-          <div class="row-copy">
-            <div class="row-name">${escapeHtml(row.name)}</div>
-            <div class="row-sub">${Math.round((row.value / Math.max(1, period.totalTokens || 0)) * 100)}%</div>
-          </div>
-        </div>
-        <div class="row-side">
-          <div class="row-value">${formatNumber(row.value)}</div>
-          <div class="row-cost">${formatCost(row.cost, state.prefs.currency)}</div>
-        </div>
-      </button>`;
-  }).join('');
-
-  return `
-    <div class="grid-2 tools-layout">
-      <section class="panel">
-        <div class="panel-head"><h2 class="panel-title">${tr('nav.tool')}</h2></div>
-        <div class="stack tool-select-list">${toolList}</div>
-      </section>
-      <section class="panel">
-        <div class="panel-head">
-          <h2 class="panel-title">${escapeHtml(selected.name)}</h2>
-          <div class="panel-meta tiny">${tr('tools.models')}</div>
-        </div>
-        ${selected.metrics ? `<div class="usage-detail-label">${escapeHtml(tr('usage.breakdown'))}</div>${renderTokenMix(selected.metrics)}` : ''}
-        <div class="usage-detail-label usage-detail-label-spaced">${escapeHtml(tr('usage.tabs.models'))}</div>
-        ${models.length ? shareBarHtml(models.slice(0, 16)) : emptyHtml('empty.usage')}
-      </section>
-    </div>
-  `;
-}
-
-function usageMetricCard(label, value, detail = '') {
-  return `<div class="usage-metric-card"><span class="summary-label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>${detail ? `<span class="row-sub">${escapeHtml(detail)}</span>` : ''}</div>`;
-}
-
-function renderUsageMetricStrip(period) {
-  const metrics = periodTokenMetrics(period);
-  const counts = periodActivityCounts(period);
-  const cacheRate = metrics.cacheHitPercent == null ? '—' : `${Math.round(metrics.cacheHitPercent)}%`;
-  return `<div class="usage-metric-strip">
-    ${usageMetricCard(tr('stats.tokens'), formatNumber(metrics.totalTokens), `${counts.tools} ${tr('usage.tabs.tools').toLowerCase()} · ${counts.models} ${tr('usage.tabs.models').toLowerCase()}`)}
-    ${usageMetricCard(tr('usage.input'), formatNumber(metrics.inputTokens), `${formatNumber(metrics.uncachedInputTokens)} ${tr('usage.uncached').toLowerCase()}`)}
-    ${usageMetricCard(tr('usage.output'), formatNumber(metrics.outputTokens))}
-    ${usageMetricCard(tr('usage.cacheRate'), cacheRate, `${formatNumber(metrics.cacheReadTokens)} ${tr('usage.cacheRead').toLowerCase()}`)}
-  </div>`;
-}
-
-function renderTokenMix(metrics = {}) {
-  const values = [
-    [tr('usage.input'), metrics.inputTokens, 'var(--accent)'],
-    [tr('usage.output'), metrics.outputTokens, 'var(--good)'],
-    [tr('usage.cacheRead'), metrics.cacheReadTokens, 'var(--warn)'],
-    [tr('usage.cacheWrite'), metrics.cacheWriteTokens, 'var(--bad)'],
-    [tr('usage.uncached'), metrics.uncachedInputTokens, 'var(--stale)']
-  ];
-  const total = Math.max(1, Number(metrics.totalTokens || 0));
-  const visible = values.filter(([, value]) => Number(value || 0) > 0);
-  if (!visible.length) return `<div class="usage-detail-empty muted tiny">${escapeHtml(tr('empty.usage'))}</div>`;
-  return `<div class="token-mix" aria-label="${escapeHtml(tr('usage.breakdown'))}">
-    ${visible.map(([label, value, color]) => {
-      const amount = Number(value || 0);
-      const percent = Math.max(2, Math.min(100, (amount / total) * 100));
-      return `<div class="token-mix-row"><div class="token-mix-head"><span>${escapeHtml(label)}</span><strong>${formatNumber(amount)}</strong></div><div class="share-meter"><span style="width:${percent}%;background:${color}"></span></div></div>`;
-    }).join('')}
-  </div>`;
-}
-
-function renderUsageSubnav() {
-  const current = ['tools', 'models', 'projects', 'sessions'].includes(state.prefs.usageTab)
-    ? state.prefs.usageTab
-    : 'tools';
-  return `<nav class="page-tabs" aria-label="${escapeHtml(tr('nav.usage'))}" role="tablist">
-    ${['tools', 'models', 'projects', 'sessions'].map((tab) => `<button type="button" role="tab" aria-selected="${current === tab ? 'true' : 'false'}" class="page-tab${current === tab ? ' active' : ''}" data-usage-tab="${tab}">${escapeHtml(tr(`usage.tabs.${tab}`))}</button>`).join('')}
-  </nav>`;
-}
-
-function usageRowSummary(row, { icon = false, detail = '' } = {}) {
-  const iconHtml = icon
-    ? `<img class="client-icon" src="${clientIconPath(row.client || row.key)}" alt="" onerror="this.style.display='none'" />`
-    : `<span class="swatch" style="background:${row.color || 'var(--accent)'}"></span>`;
-  const suffix = row.percent != null ? ` · ${Math.round(row.percent)}%` : '';
-  return `<div class="usage-table-row-main"><div class="row-main">${iconHtml}<div class="row-copy"><div class="row-name">${escapeHtml(row.name)}</div><div class="row-sub">${escapeHtml(`${row.sub || ''}${suffix}`.replace(/^ · | · $/g, ''))}</div></div></div><div class="row-metrics"><div class="row-value">${formatNumber(row.value)}</div><div class="row-cost">${formatCost(row.cost, state.prefs.currency)}</div></div>${detail ? `<span class="usage-row-chevron">${uiIcon('chevronDown')}</span>` : ''}</div>`;
-}
-
-function renderUsageMetricRows(rows, { kind, showIcon = false, emptyKey = 'empty.usage' } = {}) {
-  if (!rows.length) return renderListView([], emptyKey);
-  return `<div class="usage-table" data-usage-kind="${escapeHtml(kind || '')}">${rows.map((row) => {
-    const hasMetrics = row.metrics && row.metrics.totalTokens > 0;
-    const detail = hasMetrics ? `<div class="usage-row-detail"><div class="usage-detail-label">${escapeHtml(tr('usage.breakdown'))}</div>${renderTokenMix(row.metrics)}</div>` : '';
-    return detail
-      ? `<details class="usage-table-row"><summary>${usageRowSummary(row, { icon: showIcon, detail: true })}</summary>${detail}</details>`
-      : `<article class="usage-table-row">${usageRowSummary(row, { icon: showIcon })}</article>`;
-  }).join('')}</div>`;
-}
-
-function renderUsageModels(period) {
-  const rows = modelRows(period);
-  return panel(tr('usage.tabs.models'), renderUsageMetricRows(rows, { kind: 'model' }));
-}
-
-function renderUsageProjects(period) {
-  const projectData = projectRows(period, { incomplete: Boolean(viewStats()?.projectsIncomplete) && state.prefs.period === 'allTime' });
-  const incompleteBanner = projectData.incomplete
-    ? `<div class="notice warn" role="status">${escapeHtml(tr('projects.incomplete'))}</div>`
-    : '';
-  const rangeBanner = state.customPeriod
-    ? `<div class="notice" role="status">${escapeHtml(tr('usage.rangeDetailsUnavailable'))}</div>`
-    : '';
-  return `${rangeBanner}${incompleteBanner}${panel(tr('usage.tabs.projects'), renderUsageMetricRows(projectData.rows, { kind: 'project', emptyKey: 'empty.projects' }))}`;
-}
-
-function renderUsageSessions(period) {
-  const sessionData = sessionRows(period);
-  const truncated = sessionData.truncated
-    ? `<div class="notice" role="status">${escapeHtml(tr('sessions.truncated', { shown: sessionData.rows.length, total: sessionData.total }))}</div>`
-    : '';
-  const rangeBanner = state.customPeriod
-    ? `<div class="notice" role="status">${escapeHtml(tr('usage.rangeDetailsUnavailable'))}</div>`
-    : '';
-  const rows = sessionData.rows.map((row) => ({
-    ...row,
-    sub: `${row.sub || ''}${row.lastUsedAt ? ` · ${formatRelative(row.lastUsedAt, state.locale)}` : ''}`
-  }));
-  return `${rangeBanner}${truncated}${panel(tr('usage.tabs.sessions'), renderUsageMetricRows(rows, { kind: 'session', showIcon: true, emptyKey: 'empty.sessions' }))}`;
-}
-
-function renderUsage() {
-  const period = activePeriod();
-  const tab = ['tools', 'models', 'projects', 'sessions'].includes(state.prefs.usageTab)
-    ? state.prefs.usageTab
-    : 'tools';
-  const body = tab === 'tools'
-    ? renderTools()
-    : tab === 'models'
-      ? renderUsageModels(period)
-      : tab === 'projects'
-        ? renderUsageProjects(period)
-        : renderUsageSessions(period);
-  return `<section class="page-intro"><div><div class="eyebrow">${escapeHtml(tr('page.overview.kicker'))}</div><h2>${escapeHtml(tr('nav.usage'))}</h2><p>${escapeHtml(tr('page.usage.description'))}</p></div>${renderUsageSubnav()}</section>${renderHistoryScopeNotice()}${renderUsageMetricStrip(period)}${body}`;
-}
-
-function renderListView(rows, emptyKey, { showIcon = false } = {}) {
-  if (!rows.length) return emptyHtml(emptyKey);
-  return `<div class="stack">${rows.map((row) => rowHtml(row, {
-    showIcon,
-    sub: row.sub || (row.lastUsedAt ? formatRelative(row.lastUsedAt, state.locale) : '')
-  })).join('')}</div>`;
-}
-
-
-function renderDeviceStatusBlocks(device) {
-  const clientEntries = clientStatusEntries(device?.clientStatus || device?.raw?.clientStatus);
-  const wsl = wslStatusSummary(device?.wslStatus || device?.raw?.wslStatus);
-  const parts = [];
-  if (clientEntries.length) {
-    const tags = clientEntries.map((entry) => {
-      const tone = entry.state === 'active' ? 'ok' : (entry.state === 'waiting' ? 'warn' : 'stale');
-      const label = tr(`devices.status.${entry.state}`);
-      return `<span class="badge ${tone}">${escapeHtml(clientLabel(entry.client))} · ${escapeHtml(label)}</span>`;
-    }).join('');
-    parts.push(`<div class="status-block"><div class="row-sub">${tr('devices.clientStatus')}</div><div class="status-tags">${tags}</div></div>`);
-  }
-  if (wsl) {
-    const stateLabel = tr(`devices.wsl.${wsl.state}`);
-    const detail = [
-      wsl.detected.length ? `${tr('devices.wsl.detected')}: ${wsl.detected.map(clientLabel).join(', ')}` : '',
-      wsl.withData.length ? `${tr('devices.wsl.withData')}: ${wsl.withData.map(clientLabel).join(', ')}` : ''
-    ].filter(Boolean).join(' · ');
-    parts.push(`<div class="status-block"><div class="row-sub">${tr('devices.wslStatus')}</div><div class="status-tags"><span class="badge ${wsl.state === 'active' ? 'ok' : 'warn'}">${escapeHtml(stateLabel)}</span></div>${detail ? `<div class="row-sub" style="margin-top:6px">${escapeHtml(detail)}</div>` : ''}</div>`);
-  }
-  return parts.length ? `<div class="device-status-stack">${parts.join('')}</div>` : '';
-}
-
-function renderDevices() {
-  const periodKey = state.customPeriod ? 'today' : (state.prefs.deviceDetailPeriod || state.prefs.period || 'today');
-  const stats = viewStats();
-  const rows = deviceRows(stats, periodKey);
-  if (!rows.length) return emptyHtml('empty.usage');
-  const selectedId = state.prefs.selectedDeviceId || rows[0].key;
-  const selected = rows.find((row) => row.key === selectedId) || rows[0];
-  const breakdown = deviceBreakdownRows(selected.raw || selected, periodKey);
-  const detailPeriod = state.prefs.deviceDetailPeriod || 'today';
-  const activeDevices = rows.filter((row) => !row.stale).length;
-  const runtimes = new Set(rows.map((row) => row.agentRuntimeLabel || agentRuntimeLabel(row.agentRuntime)).filter(Boolean));
-  const fleetSummary = `<div class="usage-metric-strip device-summary-strip">
-    ${usageMetricCard(tr('devices.summary'), rows.length)}
-    ${usageMetricCard(tr('devices.live'), activeDevices)}
-    ${usageMetricCard(tr('devices.stale'), rows.length - activeDevices)}
-    ${usageMetricCard(tr('devices.runtime'), runtimes.size || '—')}
-  </div>`;
-  const detailMeta = [
-    selected.deviceId,
-    selected.receivedAt ? `${tr('devices.lastSeen')} ${formatRelative(selected.receivedAt, state.locale)}` : '',
-    selected.projectsEnabled === false ? tr('projects.incomplete') : ''
-  ].filter(Boolean).join(' · ');
-  const customRangeNotice = state.customPeriod
-    ? `<div class="notice" role="status">${escapeHtml(tr('devices.customRangeNotice'))}</div>`
-    : '';
-
-  return `
-    ${customRangeNotice}
-    ${fleetSummary}
-    <div class="grid-2 devices-layout">
-      <section class="panel">
-        <div class="panel-head"><h2 class="panel-title">${tr('devices.title')}</h2></div>
-        <div style="overflow:auto">
-          <table class="device-table">
-            <thead>
-              <tr>
-                <th>${tr('devices.id')}</th>
-                <th>${tr('devices.platform')}</th>
-                <th>${tr('devices.updated')}</th>
-                <th>${tr('devices.tokens')}</th>
-                <th>${tr('devices.actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map((row) => `
-                <tr class="${row.key === selected.key ? 'selected' : ''}" data-select-device="${escapeHtml(row.key)}">
-                  <td>
-                    <div class="row-name">${escapeHtml(row.name)}</div>
-                    <div class="row-sub">${row.stale ? tr('devices.stale') : tr('devices.live')}${(row.agentRuntimeLabel || agentRuntimeLabel(row.agentRuntime)) ? ` · ${escapeHtml(row.agentRuntimeLabel || agentRuntimeLabel(row.agentRuntime))}` : ''}${row.deviceId && row.deviceId !== row.name ? ` · ${escapeHtml(row.deviceId)}` : ''}</div>
-                  </td>
-                  <td>${escapeHtml(row.platformDisplay || devicePlatformLabel(row.platform, row.osName, row.osVersion))}</td>
-                  <td>${escapeHtml(formatRelative(row.updatedAt, state.locale))}</td>
-                  <td>
-                    <div class="row-value">${formatNumber(row.value)}</div>
-                    <div class="row-cost">${formatCost(row.cost, state.prefs.currency)}</div>
-                  </td>
-                  <td>
-                    <div class="device-actions">
-                      ${state.authorization?.scopes?.includes('admin') ? `<button type="button" class="ghost-btn" data-rename-device="${escapeHtml(row.key)}">${tr('devices.rename')}</button><button type="button" class="danger-btn" data-delete-device="${escapeHtml(row.key)}">${tr('devices.delete')}</button>` : '—'}
-                    </div>
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      </section>
-      <section class="panel">
-        <div class="panel-head">
-          <h2 class="panel-title">${escapeHtml(selected.name)}</h2>
-          <div class="panel-meta tiny">${escapeHtml([
-            selected.platformDisplay || devicePlatformLabel(selected.platform, selected.osName, selected.osVersion),
-            selected.agentRuntimeLabel || agentRuntimeLabel(selected.agentRuntime),
-            selected.stale ? tr('devices.stale') : tr('devices.live')
-          ].filter(Boolean).join(' · '))}</div>
-        </div>
-        ${detailMeta ? `<div class="device-detail-meta muted tiny">${escapeHtml(detailMeta)}</div>` : ''}
-        <div class="toolbar-row">
-          <div class="seg" role="group" aria-label="${tr('devices.period')}">
-            ${segButtons([['today', tr('period.today')], ['month', tr('period.month')], ['allTime', tr('period.allTime')]], detailPeriod, 'device-period')}
-          </div>
-        </div>
-        <div class="summary-grid" style="margin:12px 0 16px">
-          <div class="summary-chip"><span class="summary-label">${tr('stats.tokens')}</span><strong>${formatNumber(breakdown.totalTokens)}</strong></div>
-          <div class="summary-chip"><span class="summary-label">${tr('stats.cost')}</span><strong>${formatCost(breakdown.totalCost, state.prefs.currency)}</strong></div>
-        </div>
-        <div class="usage-detail-label">${escapeHtml(tr('usage.breakdown'))}</div>
-        ${renderTokenMix(periodTokenMetrics(selected.raw?.periods?.[periodKey] || {}))}
-        ${renderDeviceStatusBlocks(selected)}
-        ${panel(tr('devices.tools'), shareBarHtml(breakdown.tools.slice(0, 12)) + (breakdown.tools.some((t) => t.models?.length) ? `<div class="device-tool-models">${breakdown.tools.filter((t) => t.models?.length).slice(0, 6).map((tool) => `<div class="status-block" style="margin-top:12px"><div class="row-sub">${escapeHtml(tool.name)}</div>${shareBarHtml(tool.models.slice(0, 6))}</div>`).join('')}</div>` : ''))}
-        ${panel(tr('devices.models'), shareBarHtml(breakdown.models.slice(0, 12)))}
-      </section>
-    </div>
   `;
 }
 
@@ -3616,11 +3320,15 @@ async function init() {
     emptyHtml,
     panel,
     segButtons,
-    usageMetricCard,
     formatDuration,
     trendValue,
     formatTrendValue,
-    viewStats
+    viewStats,
+    activePeriod,
+    uiIcon,
+    toolRows,
+    shareBarHtml,
+      rowHtml
   });
   if (isCapable('desktopSettings')) await loadDesktopSettings();
   renderStaticUiIcons();

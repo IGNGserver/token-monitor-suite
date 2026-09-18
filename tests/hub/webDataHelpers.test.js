@@ -423,7 +423,12 @@ test('hub web app wires tool drill and trends stack', () => {
   assert.match(app, /ensureHistory/);
   assert.match(app, /\/api\/history/);
   assert.match(app, /modelColor/);
-  assert.match(app, /clampHomeLimitAccountCount,\s*[\r\n\s]*modelColor/);
+  // modelColor must actually be imported by whichever module renders the model
+  // rows. The previous assertion pinned two adjacent import lines in app.js,
+  // which broke the moment a view moved to its own file without anything
+  // behavioural changing.
+  assert.match(app, /import\s*\{[^}]*\bmodelColor\b[^}]*\}\s*from/);
+  assert.match(app, /clampHomeLimitAccountCount/);
   assert.match(app, /VIEW_PATHS/);
   assert.match(app, /data-jump-view/);
   assert.match(app, /data-jump-usage-tab="models"/);

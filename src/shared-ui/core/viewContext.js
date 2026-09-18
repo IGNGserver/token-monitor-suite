@@ -43,3 +43,48 @@ export function settingsOptionList(options, selected) {
 export function optionList(pairs, selected) {
   return settingsOptionList(pairs, selected);
 }
+
+// --- App services the view modules share -----------------------------------
+//
+// The views are pure renderers over `state`, so they read the same small set of
+// primitives the app already owns rather than duplicating them. Each accessor
+// resolves through the installed context on call, not at import time, so a view
+// module can be imported before the app has finished wiring itself.
+
+/** The mutable app state. Views read it; only the app writes `prefs`. */
+export function appState() {
+  return requireContext().state;
+}
+
+/** The cached element lookup table built at boot. */
+export function appElements() {
+  return requireContext().els;
+}
+
+/** Call the app's renderer (used by views whose controls trigger a re-render). */
+export function rerender() {
+  return requireContext().render();
+}
+
+/** Persist a preference change. */
+export function persistPrefs(patch) {
+  return requireContext().savePrefs(patch);
+}
+
+/** Navigate to another view, optionally with a sub-tab. */
+export function goToView(viewId, options) {
+  return requireContext().switchView(viewId, options);
+}
+
+export function showToast(message) {
+  return requireContext().showToast(message);
+}
+
+/** A named helper the app installs, so a view can call it without importing app.js. */
+export function viewHelper(name) {
+  const helper = requireContext()[name];
+  if (typeof helper !== 'function') {
+    throw new Error(`View helper "${name}" is not available on the view context`);
+  }
+  return helper;
+}

@@ -5,6 +5,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
+function appSource() {
+  return fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
+}
+
+function viewSources() {
+  const dir = path.join(__dirname, '../../src/shared-ui/views');
+  return fs.readdirSync(dir).filter((f) => f.endsWith('.js')).map((f) => fs.readFileSync(path.join(dir, f), 'utf8'));
+}
+
 const dataPath = path.join(__dirname, '../../src/shared-ui/core/data.js');
 const source = fs.readFileSync(dataPath, 'utf8');
 
@@ -79,7 +88,9 @@ test('hub web app wires status, heatmap, and active-days controls', () => {
 });
 
 test('hub web navigation exposes the new page model and compatibility routes', () => {
-  const app = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
+  // Views are extracted into src/shared-ui/views/; read the whole package so an
+  // assertion does not break merely because a renderer moved to its own module.
+  const app = [appSource(), ...viewSources()].join('\n');
   for (const view of ['overview', 'usage', 'devices', 'limits', 'trends', 'accounts', 'management', 'settings']) {
     assert.match(app, new RegExp(`id: '${view}'`));
   }

@@ -61,6 +61,10 @@ fun windowKindLabel(kind: String): String = when (kind.lowercase(Locale.US)) {
   "session" -> "会话"
   "weekly" -> "每周"
   "billing" -> "账期"
+  // The shared schema also has `named` (a labelled allowance) and `credits`;
+  // without these the row printed the raw English enum token.
+  "named" -> "额度"
+  "credits" -> "积分"
   else -> kind
 }
 

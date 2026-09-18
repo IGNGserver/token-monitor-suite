@@ -75,26 +75,61 @@ export async function fetchJson(path, { secret, method = 'GET', body, signal } =
   return res.json();
 }
 
+// A half-open socket leaves reader.read() pending forever, so the UI would keep
+// showing stale numbers under a "live" badge. The widget solved this with an idle
+// watchdog plus a request deadline; mirror that here.
+const SSE_IDLE_TIMEOUT_MS = 90_000;
+const SSE_CONNECT_TIMEOUT_MS = 15_000;
+
 export function openStatsStream({ secret, onStats, onStatus, onRetry }) {
   const controller = new AbortController();
   let closed = false;
   let retryTimer = null;
   let retryResolve = null;
   let retryAttempt = 0;
+  // Timestamp of the last frame the server sent. Reported so the UI can show how
+  // old the displayed data is instead of implying it is current.
+  let lastEventAt = null;
 
   function retryDelay(attempt) {
     return Math.min(30_000, 1_000 * (2 ** Math.min(attempt, 5)));
+  }
+
+  /** Abort the current socket after `timeoutMs` without progress. */
+  function watchdog(timeoutMs, arm) {
+    let timer = null;
+    const clear = () => { if (timer !== null) clearTimeout(timer); timer = null; };
+    const reset = () => {
+      clear();
+      if (!closed) timer = setTimeout(() => arm(clear), timeoutMs);
+    };
+    reset();
+    return { reset, clear };
   }
 
   async function run() {
     while (!closed) {
       onStatus?.(retryAttempt ? 'retrying' : 'connecting');
       try {
-        const res = await fetch('/api/stats/stream', {
-          headers: authHeaders(secret, { accept: 'text/event-stream' }),
-          signal: controller.signal,
-          cache: 'no-store'
-        });
+        // Bound the handshake too: a proxy that accepts the TCP connection but
+        // never responds would otherwise hang here forever with the UI stuck on
+        // "connecting".
+        const attempt = new AbortController();
+        const abortAttempt = () => { try { attempt.abort(); } catch { /* ignore */ } };
+        const connectTimer = setTimeout(abortAttempt, SSE_CONNECT_TIMEOUT_MS);
+        const onOuterAbort = () => abortAttempt();
+        controller.signal.addEventListener('abort', onOuterAbort, { once: true });
+        let res;
+        try {
+          res = await fetch('/api/stats/stream', {
+            headers: authHeaders(secret, { accept: 'text/event-stream' }),
+            signal: attempt.signal,
+            cache: 'no-store'
+          });
+        } finally {
+          clearTimeout(connectTimer);
+          controller.signal.removeEventListener('abort', onOuterAbort);
+        }
         if (res.status === 401) {
           onStatus?.('unauthorized');
           return;
@@ -105,13 +140,24 @@ export function openStatsStream({ secret, onStats, onStatus, onRetry }) {
           throw error;
         }
         retryAttempt = 0;
-        onStatus?.('live');
+        lastEventAt = Date.now();
+        // Status is only 'live' once a frame has actually arrived: the old code
+        // announced live on the response headers alone.
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        const idle = watchdog(SSE_IDLE_TIMEOUT_MS, (clear) => {
+          clear();
+          onStatus?.('idle-timeout', { lastEventAt });
+          try { reader.cancel(); } catch { /* already closed */ }
+          try { controller.abort(new Error('stream idle timeout')); } catch { /* ignore */ }
+        });
+        try {
         while (!closed) {
           const { done, value } = await reader.read();
           if (done) break;
+          idle.reset();
+          lastEventAt = Date.now();
           buffer += decoder.decode(value, { stream: true });
           const chunks = buffer.split('\n\n');
           buffer = chunks.pop() || '';
@@ -124,15 +170,22 @@ export function openStatsStream({ secret, onStats, onStatus, onRetry }) {
               else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
             }
             if (!dataLines.length) continue;
+            // A heartbeat proves the socket is alive but carries no data, so it
+            // must not be mistaken for freshness.
+            if (event === 'heartbeat') continue;
             try {
               const payload = JSON.parse(dataLines.join('\n'));
               if (event === 'snapshot' || event === 'stats' || payload?.stats) {
-                onStats?.(payload.stats || payload, event);
+                onStats?.(payload.stats || payload, event, { at: payload.at || null, lastEventAt });
+                onStatus?.('live', { lastEventAt });
               }
             } catch {
               /* ignore malformed frames */
             }
           }
+        }
+        } finally {
+          idle.clear();
         }
         if (closed) return;
         onStatus?.('disconnected');

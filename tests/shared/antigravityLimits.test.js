@@ -97,3 +97,31 @@ test('fetchAntigravityLimits maps unauthorized errors', async () => {
   });
   assert.equal(result.status, 'unauthorized');
 });
+
+test('fetchAntigravityLimits extracts email from antigravityIdToken JWT', async () => {
+  const payload = Buffer.from(JSON.stringify({ email: 'jwt-user@google.com' })).toString('base64');
+  const mockIdToken = `header.${payload}.signature`;
+  const result = (await fetchAntigravityLimits({
+    antigravityAccessToken: 'agy-access-token',
+    antigravityIdToken: mockIdToken
+  }, {
+    now: () => Date.parse('2026-09-12T00:00:00Z'),
+    antigravityCloudBaseUrls: ['https://quota.example.test'],
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        response: {
+          groups: [{
+            displayName: 'Gemini',
+            buckets: [{ bucketId: 'weekly', remainingFraction: 0.8, resetTime: '2026-09-19T00:00:00Z' }]
+          }]
+        }
+      })
+    })
+  }))[0];
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.accountEmail, 'jwt-user@google.com');
+});
+

@@ -37,11 +37,32 @@ services:
       TOKEN_MONITOR_ALLOW_LEGACY_ADMIN: ${TOKEN_MONITOR_ALLOW_LEGACY_ADMIN:-0}
       TOKEN_MONITOR_ALLOW_INSECURE_HTTP: ${TOKEN_MONITOR_ALLOW_INSECURE_HTTP:-0}
       TOKEN_MONITOR_STALE_AFTER_MS: ${TOKEN_MONITOR_STALE_AFTER_MS:-600000}
+      # Proxy-aware client IPs for the auth-failure limiter. Leave unset unless a
+      # trusted reverse proxy sets X-Forwarded-For; Cloudflare's
+      # cf-connecting-ip header is only honoured when this is enabled.
+      TOKEN_MONITOR_TRUST_PROXY: ${TOKEN_MONITOR_TRUST_PROXY:-0}
+      # Account refresh cadence and the hard ceiling for one provider probe.
+      # The probe deadline is what keeps a provider that never answers from
+      # holding the refresh latch and silently stopping all limit refreshes.
+      TOKEN_MONITOR_HUB_REFRESH_MS: ${TOKEN_MONITOR_HUB_REFRESH_MS:-300000}
+      TOKEN_MONITOR_HUB_ACCOUNT_CONCURRENCY: ${TOKEN_MONITOR_HUB_ACCOUNT_CONCURRENCY:-4}
+      TOKEN_MONITOR_HUB_PROBE_DEADLINE_MS: ${TOKEN_MONITOR_HUB_PROBE_DEADLINE_MS:-60000}
+      # Coalescing window for the fleet stats aggregation (ms).
+      TOKEN_MONITOR_HUB_STATS_TTL_MS: ${TOKEN_MONITOR_HUB_STATS_TTL_MS:-1000}
+      # Legacy credential-encryption override and the Google OAuth client secret
+      # used by the Antigravity account adapter.
+      TOKEN_MONITOR_HUB_CREDENTIAL_KEY: ${TOKEN_MONITOR_HUB_CREDENTIAL_KEY:-}
+      AGY_OAUTH_CLIENT_SECRET: ${AGY_OAUTH_CLIENT_SECRET:-}
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
       MYSQL_DATABASE: ${MYSQL_DATABASE:-token_monitor}
       MYSQL_USER: ${MYSQL_USER:-token_monitor}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      # Pool sizing and backpressure. queueLimit bounds the wait queue so a
+      # saturated pool returns 503 instead of hanging every DB-backed route.
+      MYSQL_CONNECTION_LIMIT: ${MYSQL_CONNECTION_LIMIT:-10}
+      MYSQL_QUEUE_LIMIT: ${MYSQL_QUEUE_LIMIT:-200}
+      MYSQL_CONNECT_TIMEOUT_MS: ${MYSQL_CONNECT_TIMEOUT_MS:-10000}
       TOKSCALE_PRICING_CATALOG_URL: ${TOKSCALE_PRICING_CATALOG_URL:-https://models.dev/api.json}
       # Optional HTTPS (enable true PWA install on mobile LAN clients):
       TOKEN_MONITOR_TLS_CERT: ${TOKEN_MONITOR_TLS_CERT:-}
@@ -52,6 +73,21 @@ services:
     #   - ./certs:/certs:ro
     ports:
       - "${TOKEN_MONITOR_PORT:-17321}:17321"
+    # Give the container a real health signal. Without one a Hub that is bound to
+    # loopback inside the container (no TOKEN_MONITOR_SECRET) or wedged on a stuck
+    # query still reports "running", so `docker compose ps` looks healthy while
+    # nothing answers on the published port.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "const s=process.env.TOKEN_MONITOR_TLS_CERT?'https':'http';
+          require(s).get({host:'127.0.0.1',port:17321,path:'/api/health',rejectUnauthorized:false,timeout:4000},
+          r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1)).on('timeout',function(){this.destroy();process.exit(1);});"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 volumes:
   token-monitor-mysql:

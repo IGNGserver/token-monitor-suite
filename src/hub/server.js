@@ -34,6 +34,7 @@ const { calculateUsageEventDeltas, summarizeSessions } = require('./usage-events
 const { createHubAccountService } = require('./accountService');
 const { createOAuthSessionManager } = require('./oauthService');
 const { createOutboundFetch } = require('../shared/outboundFetch');
+const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 const PRICE_FIELDS = [
@@ -43,6 +44,13 @@ const PRICE_FIELDS = [
   'cacheWritePricePerMillion'
 ];
 const SSE_WRITE_TIMEOUT_MS = 45 * 1000;
+// Any read-credential holder can open long-lived streams; each costs a socket, a
+// heartbeat interval and a share of every broadcast. Cap the registry so one
+// client cannot exhaust file descriptors or turn a broadcast into a storm.
+const DEFAULT_MAX_SSE_CLIENTS = 64;
+// Must stay below the account refresh interval so a slow provider cannot consume
+// a whole cycle; accountService also enforces it internally.
+const DEFAULT_HUB_PROBE_DEADLINE_MS = 60 * 1000;
 const RESERVED_DYNAMIC_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
 function hasOwn(object, key) {
@@ -175,11 +183,15 @@ function aggregateHistoryRange(history, from, to, options = {}) {
     if (startDate > endDate) return result;
   }
   result.matchedDays = 0;
+  let coveredFrom = '';
+  let coveredTo = '';
   for (const day of history?.daily || []) {
     const dayKey = String(day?.date || '').slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) continue;
     if (dayKey < startDate || dayKey > endDate) continue;
     result.matchedDays += 1;
+    if (!coveredFrom || dayKey < coveredFrom) coveredFrom = dayKey;
+    if (!coveredTo || dayKey > coveredTo) coveredTo = dayKey;
     const tokens = Math.round(number(day.tokens));
     const cost = number(day.cost);
     result.totalTokens += tokens;
@@ -191,6 +203,16 @@ function aggregateHistoryRange(history, from, to, options = {}) {
       addRangeTokenCost(result.models, result.modelCosts, model, Math.round(number(value?.tokens ?? value)), number(value?.cost));
     }
   }
+  // Report what the daily history actually covered. Without this a range that
+  // reaches past the rolling window (< HISTORY_CAP_DAYS) returned only the
+  // in-window days and presented them as the total for the whole range.
+  result.requestedStart = startDate;
+  result.requestedEnd = endDate;
+  result.coveredFrom = coveredFrom;
+  result.coveredTo = coveredTo;
+  // A gap exists when the request starts before the oldest covered day. The end
+  // cannot gap: daily history always includes today.
+  result.truncated = Boolean(coveredFrom && startDate < coveredFrom);
   return result;
 }
 
@@ -302,6 +324,7 @@ function createHub({
   allowInsecureHttp = false,
   trustProxy = false,
   authFailureLimit = 30,
+  maxSseClients: maxSseClientsOption = DEFAULT_MAX_SSE_CLIENTS,
   ingestRateLimit = 240,
   accountsEnabled = true,
   accountCredentialKey = '',
@@ -345,6 +368,11 @@ function createHub({
       refreshMs: accountRefreshMs,
       concurrency: accountConcurrency,
       probe: accountProbe,
+      // Hard ceiling for one provider probe. Without it a provider that never
+      // answers holds the refresh latch and silently stops all limit refreshes.
+      probeDeadlineMs: Number(process.env.TOKEN_MONITOR_HUB_PROBE_DEADLINE_MS)
+        || DEFAULT_HUB_PROBE_DEADLINE_MS,
+      refreshCeilingOverride: Number(process.env.TOKEN_MONITOR_HUB_REFRESH_CEILING_MS) || null,
       oauthFetch: oauthHttpFetch,
       logger,
       onUpdate: () => { void broadcastStats('account-update'); }
@@ -352,6 +380,7 @@ function createHub({
     : null;
   const oauthManager = createOAuthSessionManager();
   const capabilities = hubCapabilities('node-hub', { hubAccounts: Boolean(accountService) });
+  const maxSseClients = Math.max(1, Math.floor(Number(maxSseClientsOption) || DEFAULT_MAX_SSE_CLIENTS));
   const authFailures = createFixedWindowRateLimiter({ limit: authFailureLimit, windowMs: 60_000 });
   const ingestRequests = createFixedWindowRateLimiter({ limit: ingestRateLimit, windowMs: 60_000 });
   const bindHost = resolveBindHost(host, auth.configured ? 'configured' : '');
@@ -369,6 +398,46 @@ function createHub({
   let statsCache = null;
   let subscriptionsCache = emptySubscriptionDocument();
 
+  // Display rates for the dashboard. Fetched at most once per day and kept in
+  // memory; a failed fetch falls back to the shared built-in table so cost
+  // rendering never breaks because a third-party endpoint is down.
+  let displayRates = null;
+  let displayRatesFetch = null;
+
+  async function getDisplayRates() {
+    const fresh = displayRates && !isCacheStale(displayRates.date);
+    if (fresh) return { rates: displayRates.rates, date: displayRates.date, source: displayRates.source };
+    if (displayRatesFetch) return displayRatesFetch;
+    displayRatesFetch = (async () => {
+      try {
+        const fetched = await fetchRates({ fetchImpl: oauthHttpFetch });
+        displayRates = fetched;
+        return { rates: fetched.rates, date: fetched.date, source: fetched.source };
+      } catch (error) {
+        logger.warn?.(`[hub-rates] live rates unavailable: ${error?.message || error}`);
+        const fallback = displayRates || { rates: null, date: null, source: 'built-in' };
+        return { rates: fallback.rates, date: fallback.date, source: fallback.source || 'built-in' };
+      } finally {
+        displayRatesFetch = null;
+      }
+    })();
+    return displayRatesFetch;
+  }
+  // Coalescing window for the stats aggregation. `statsCache` is invalidated by
+  // every mutation (ingest, rename, delete, subscriptions), so the only thing a
+  // TTL adds is protection against a burst of identical reads. Without it every
+  // /api/stats poll, /api/devices poll and SSE snapshot recomputed the whole
+  // fleet synchronously on the single event loop (measured 266 ms at 20 devices,
+  // 1564 ms at 50), which stalls the heartbeats and every other request.
+  const statsCacheTtlMs = Math.max(0, Number(process.env.TOKEN_MONITOR_HUB_STATS_TTL_MS ?? 1000) || 0);
+  let statsCacheAt = 0;
+  let statsInFlight = null;
+
+  function invalidateStatsCache() {
+    statsCache = null;
+    statsCacheAt = 0;
+  }
+
   async function getSubscriptions() {
     if (typeof store.getSubscriptions === 'function') {
       subscriptionsCache = await store.getSubscriptions();
@@ -377,6 +446,23 @@ function createHub({
   }
 
   async function getStats() {
+    const now = Date.now();
+    if (statsCache && statsCacheTtlMs > 0 && now - statsCacheAt < statsCacheTtlMs) {
+      return statsCache;
+    }
+    // Share one computation across concurrent readers instead of stacking them.
+    if (statsInFlight) return statsInFlight;
+    statsInFlight = computeStats()
+      .then((stats) => {
+        statsCache = stats;
+        statsCacheAt = Date.now();
+        return stats;
+      })
+      .finally(() => { statsInFlight = null; });
+    return statsInFlight;
+  }
+
+  async function computeStats() {
     const records = await store.listDeviceRecords();
     const stats = aggregateDevices(records, staleAfterMs);
     const centralLimits = accountService
@@ -393,7 +479,6 @@ function createHub({
     stats.subscriptionsUpdatedAt = (await getSubscriptions()).updatedAt || '';
     stats.apiVersion = HUB_API_VERSION;
     stats.capabilities = capabilities;
-    statsCache = stats;
     return stats;
   }
 
@@ -430,6 +515,9 @@ function createHub({
       await store.setSubscriptions(next, current.updatedAt);
     }
     subscriptionsCache = next;
+    // stats.subscriptionsUpdatedAt is part of the stats payload, so it has to be
+    // rebuilt rather than served from the coalescing cache.
+    invalidateStatsCache();
     await broadcastStats('subscriptions');
     return subscriptionsCache;
   }
@@ -541,7 +629,7 @@ function createHub({
     });
     if (number(historyAgg.matchedDays) > 0 || number(historyAgg.totalTokens) > 0) {
       const { matchedDays, ...payload } = historyAgg;
-      return {
+      const response = {
         from: from.toISOString(),
         to: to.toISOString(),
         startDate: range.startDate,
@@ -551,6 +639,40 @@ function createHub({
         source: 'history_daily',
         ...payload
       };
+      // The daily history is a rolling window, so a request that reaches further
+      // back was silently answered with only the in-window days. Fill the
+      // uncovered head from the append-only ledger and say so, instead of
+      // presenting a partial total as the whole range.
+      if (historyAgg.truncated && historyAgg.coveredFrom && typeof store.aggregateUsageRange === 'function') {
+        const uncoveredTo = new Date(`${historyAgg.coveredFrom}T00:00:00.000Z`);
+        if (uncoveredTo.getTime() > from.getTime()) {
+          try {
+            const head = await store.aggregateUsageRange({ from, to: uncoveredTo });
+            if (number(head.eventCount) > 0) {
+              const merged = { ...emptyUsageRangePayload(), ...payload };
+              merged.totalTokens = number(payload.totalTokens) + number(head.totalTokens);
+              merged.costUsd = number(payload.costUsd) + number(head.costUsd);
+              for (const mapName of ['clients', 'clientCosts', 'models', 'modelCosts']) {
+                merged[mapName] = { ...(payload[mapName] || {}) };
+                for (const [key, value] of Object.entries(head[mapName] || {})) {
+                  merged[mapName][key] = number(merged[mapName][key]) + number(value);
+                }
+              }
+              response.totalTokens = merged.totalTokens;
+              response.costUsd = merged.costUsd;
+              response.clients = merged.clients;
+              response.clientCosts = merged.clientCosts;
+              response.models = merged.models;
+              response.modelCosts = merged.modelCosts;
+              response.source = 'history_daily+usage_events';
+              response.headSource = 'usage_events';
+            }
+          } catch (error) {
+            logger.warn?.(`[hub-range] head fill failed: ${error?.message || error}`);
+          }
+        }
+      }
+      return response;
     }
 
     const eventsAgg = typeof store.aggregateUsageRange === 'function'
@@ -646,6 +768,11 @@ function createHub({
   function writeSse(res, payload, kind = 'data') {
     const state = sseStates.get(res);
     if (!state || !sseClients.has(res)) return false;
+    // Registered but still awaiting its first snapshot: writing now would emit an
+    // implicit writeHead() with the default content type, so the client would not
+    // parse the stream as SSE. Frames are simply skipped until ready; the client
+    // receives a fresh snapshot immediately after registration.
+    if (state.ready !== true) return false;
     if (state.backpressured) {
       queueLatestSse(state, payload, kind);
       return true;
@@ -701,13 +828,31 @@ function createHub({
     }
     const usagePayload = { ...payload };
     delete usagePayload.limits;
+    // A limits-only update describes no usage: it carries provider quota data and
+    // nothing else. docs/API.md accepts the flag "for mixed-version compatibility",
+    // and usage.js has a mergeDeviceRecord branch for it, but stripping the flag
+    // before the merge made that branch unreachable — so a limits-only body was
+    // treated as a full update, zeroing the device's periods, deleting its session
+    // rows, and making the next real tick look like a counter reset (which then
+    // re-added the whole all-time snapshot to the ledger).
+    const limitsOnly = payload.limitsOnly === true;
     delete usagePayload.limitsOnly;
     validateDeviceRecordPayload(usagePayload);
     const record = await store.transaction(async (connection) => {
       const deviceId = String(usagePayload.deviceId || usagePayload.id);
       const existing = await store.getDeviceRecord(deviceId, connection);
-      const merged = mergeDeviceRecord(existing, { ...usagePayload, receivedAt: new Date().toISOString() });
+      const merged = mergeDeviceRecord(existing, {
+        ...usagePayload,
+        receivedAt: new Date().toISOString(),
+        ...(limitsOnly ? { limitsOnly: true } : {})
+      });
       merged.limits = normalizeLimitsSummary({});
+      if (limitsOnly) {
+        // No usage to record: keep the stored periods/sessions and the ledger
+        // untouched. Only the carried-forward attribution may have changed.
+        await store.saveDevice(merged, connection);
+        return merged;
+      }
       const { candidates, events } = calculateUsageEventDeltas(existing, merged);
       const pricingByModel = await store.getPricing(events.map((event) => event.model), connection);
       const pricedEvents = events.map((event) => priceSnapshot(event, pricingByModel.get(event.model)));
@@ -716,13 +861,24 @@ function createHub({
       await store.replaceSessions(merged.deviceId, summarizeSessions(candidates), connection);
       return merged;
     });
-    statsCache = null;
+    invalidateStatsCache();
+    // The transaction has committed by now, so the payload IS stored. A failure
+    // while building or broadcasting the response must not be reported as a client
+    // error: the old code let it fall into the route's catch-all and answer
+    // `400 bad_request`, which told agents their data was rejected when it had
+    // actually been accepted (so they retried and alerted for the wrong reason).
     let stats = null;
     if (includeStats || sseClients.size > 0 || statsListeners.size > 0) {
-      stats = await getStats();
-      await broadcastStats('ingest', stats);
+      try {
+        stats = await getStats();
+        await broadcastStats('ingest', stats);
+      } catch (error) {
+        logger.warn?.(`[hub-ingest] post-commit stats/broadcast failed: ${error?.message || error}`);
+        stats = null;
+      }
     }
-    return includeStats ? { record, stats } : record;
+    if (!includeStats || !stats) return record;
+    return { record, stats };
   }
 
   async function recordAccountAudit(principal, action, accountId = '', details = null) {
@@ -753,7 +909,7 @@ function createHub({
 
   async function deleteDevice(deviceId) {
     const deleted = await store.transaction((connection) => store.deleteDevice(deviceId, connection));
-    statsCache = null;
+    invalidateStatsCache();
     await broadcastStats('delete');
     return deleted;
   }
@@ -763,7 +919,7 @@ function createHub({
       store.renameDevice(previousDeviceId, nextDeviceId, connection)
     ));
     if (result?.renamed) {
-      statsCache = null;
+      invalidateStatsCache();
       await broadcastStats('rename');
     }
     return result;
@@ -832,6 +988,10 @@ function createHub({
     if (req.method === 'OPTIONS') return sendText(res, 204, '');
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
+    if (req.method === 'GET' && url.pathname === '/api/rates') {
+      return sendJson(res, 200, { ok: true, ...(await getDisplayRates()) });
+    }
+
     if (url.pathname === '/api/health') {
       return sendJson(res, 200, {
         ok: true,
@@ -865,6 +1025,11 @@ function createHub({
         return result;
       }
       let peer = String(req.socket?.remoteAddress || 'unknown');
+      // Forwarded client-IP headers are only trustworthy behind a proxy that
+      // overwrites them. The `cf-connecting-ip` branch used to run even when
+      // trustProxy was off, so an unauthenticated caller could pick its own
+      // rate-limit bucket per request (rotating it also evicted other clients'
+      // counters) and the documented auth-failure throttle never fired.
       if (isTrustProxy) {
         const xForwardedFor = req.headers['x-forwarded-for'];
         if (typeof xForwardedFor === 'string' && xForwardedFor.trim()) {
@@ -875,8 +1040,6 @@ function createHub({
         } else if (typeof req.headers['cf-connecting-ip'] === 'string' && req.headers['cf-connecting-ip'].trim()) {
           peer = req.headers['cf-connecting-ip'].trim();
         }
-      } else if (typeof req.headers['cf-connecting-ip'] === 'string' && req.headers['cf-connecting-ip'].trim()) {
-        peer = req.headers['cf-connecting-ip'].trim();
       }
       const limited = authFailures.take(peer);
       if (!limited.ok) {
@@ -950,7 +1113,17 @@ function createHub({
           res.shouldKeepAlive = false;
           return sendJson(res, 413, { error: 'payload_too_large', message: error.message }, { connection: 'close' });
         }
-        return sendJson(res, 400, { error: 'bad_request', message: error.message });
+        // Storage-side failures are ours, not the caller's: answer 5xx so the agent
+        // retries, and keep internal text out of the response.
+        if (error.code === 'ER_CON_COUNT_ERROR' || error.code === 'POOL_ENQUEUELIMIT' || error.code === 'PROTOCOL_CONNECTION_LOST') {
+          res.shouldKeepAlive = false;
+          return sendJson(res, 503, { error: 'hub_busy', message: 'Hub database pool is saturated; retry shortly.' }, { connection: 'close' });
+        }
+        if (/^(ER_|PROTOCOL_|ECONN|ETIMEDOUT|ENOTFOUND)/.test(String(error.code || ''))) {
+          logger.error?.(error);
+          return sendJson(res, 503, { error: 'hub_storage_unavailable', message: 'Hub storage is temporarily unavailable.' });
+        }
+        return sendJson(res, 400, { error: 'bad_request', message: errorMessageForApi(error) });
       }
     }
     if (req.method === 'GET' && url.pathname === '/api/usage/range') {
@@ -1105,29 +1278,60 @@ function createHub({
     }
 
     if (req.method === 'GET' && url.pathname === '/api/stats/stream') {
-      const snapshot = await getStats();
-      res.writeHead(200, {
-        'content-type': 'text/event-stream',
-        'cache-control': 'no-cache, no-transform',
-        'connection': 'keep-alive',
-        'x-accel-buffering': 'no'
-      });
+      // Register and subscribe BEFORE the first await. Node emits 'close' only
+      // once: a client that disconnects while getStats() is still running used to
+      // miss the subscription entirely, leaving a dead response in sseClients
+      // forever (plus its heartbeat interval). The leak rate was proportional to
+      // getStats() latency, so a busy Hub leaked fastest — a probe measured 1500
+      // of 1500 aborted connections retained.
+      if (sseClients.size >= maxSseClients) {
+        // Refuse rather than evict: an existing dashboard should not be dropped to
+        // make room for a new one.
+        return sendJson(res, 503, {
+          error: 'too_many_streams',
+          message: `Hub already has ${sseClients.size} live streams (max ${maxSseClients}); retry later.`
+        }, { 'retry-after': '30' });
+      }
       sseClients.add(res);
       sseStates.set(res, {
+        ready: false,
         backpressured: false,
         pending: null,
         pendingKind: null,
         drainHandler: null,
         drainTimer: null
       });
+      const cleanup = () => dropSseClient(res);
+      // Subscribe on the RESPONSE, not the request. A GET request has already had
+      // its (empty) body fully read by the time the handler runs, so 'close' on
+      // `req` fires immediately and would tear the stream down before the snapshot
+      // is written. `res` emits 'close' when the response finishes or the socket
+      // goes away, which is the event this teardown actually needs. The 'error'
+      // listener keeps an async write failure to a dying socket from becoming an
+      // uncaughtException.
+      res.on('close', cleanup);
+      res.on('error', cleanup);
+
+      const snapshot = await getStats();
+      // The client may have gone away during the await.
+      if (res.destroyed || res.writableEnded) {
+        dropSseClient(res);
+        return;
+      }
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache, no-transform',
+        'connection': 'keep-alive',
+        'x-accel-buffering': 'no'
+      });
+      const streamState = sseStates.get(res);
+      if (!streamState || !sseClients.has(res)) return;
+      streamState.ready = true;
       if (!writeSse(res, sseFormat('snapshot', { type: 'stats', reason: 'snapshot', stats: snapshot, at: new Date().toISOString() }))) return;
       // Heartbeats intentionally do not query MySQL. Slow reads therefore never
       // delay the fixed 30-second SSE keepalive cadence.
       const heartbeat = setInterval(() => { writeSse(res, ': hb\n\n', 'heartbeat'); }, sseHeartbeatMs);
       sseHeartbeats.set(res, heartbeat);
-      const cleanup = () => dropSseClient(res);
-      req.on('close', cleanup);
-      req.on('error', cleanup);
       return;
     }
 
@@ -1238,7 +1442,15 @@ function createHub({
   const requestListener = (req, res) => {
     handleRequest(req, res).catch((error) => {
       (logger.error || console.error)(error);
-      sendJson(res, 500, { error: 'internal_error', message: error.message });
+      // A saturated MySQL pool (queueLimit reached) is a capacity problem, not an
+      // internal bug: report 503 so clients retry instead of treating it as a
+      // malformed request. Never echo raw driver text to the caller.
+      const code = error?.code || '';
+      if (code === 'ER_CON_COUNT_ERROR' || code === 'POOL_ENQUEUELIMIT' || code === 'PROTOCOL_CONNECTION_LOST') {
+        res.shouldKeepAlive = false;
+        return sendJson(res, 503, { error: 'hub_busy', message: 'Hub database pool is saturated; retry shortly.' }, { connection: 'close' });
+      }
+      return sendJson(res, 500, { error: 'internal_error', message: errorMessageForApi(error) });
     });
   };
   const server = tlsOptions
@@ -1312,7 +1524,10 @@ function createHub({
     replaceAuthPolicy,
     bindHost,
     protocol,
-    getCachedStats: () => statsCache
+    getCachedStats: () => statsCache,
+    // Observability for the SSE registry: a monotonic leak here is what made a
+    // busy Hub degrade until restart. Exposed for tests and health diagnostics.
+    getSseClientCount: () => sseClients.size
   };
 }
 
@@ -1355,10 +1570,36 @@ if (require.main === module) {
     .then(() => {
       console.log(`Token Monitor hub listening on ${hub.protocol}://${hub.bindHost}:${port}`);
 
-      // Global uncaught exception and unhandled rejection protection
+      // A non-loopback bind with no credential is silently rewritten to loopback,
+      // which inside a container makes the published port dead while the container
+      // reports healthy. Say so loudly instead of leaving it to the operator to
+      // notice the 127.0.0.1 in the startup line.
+      if (String(process.env.TOKEN_MONITOR_HOST || '').trim() && hub.bindHost !== String(process.env.TOKEN_MONITOR_HOST).trim()) {
+        console.warn(
+          `[hub-config] TOKEN_MONITOR_HOST=${process.env.TOKEN_MONITOR_HOST} was ignored because no credential is configured; `
+          + `bound to ${hub.bindHost}. Set TOKEN_MONITOR_SECRET (docker compose: .env) or the published port will not answer.`
+        );
+      }
+
+      // Global uncaught exception and unhandled rejection protection.
+      //
+      // Node's contract is that resuming after an uncaught exception is unsafe:
+      // state machines and in-flight callbacks are left undefined. Logging and
+      // carrying on turns a self-healing restart (Compose sets
+      // restart: unless-stopped) into a silently degraded process that can only
+      // be fixed by hand, so exit instead.
+      let fatalExitArmed = false;
       process.on('uncaughtException', (err) => {
         console.error(`[hub-fatal] uncaughtException: ${err?.message || err}`);
         if (err?.stack) console.error(err.stack);
+        if (fatalExitArmed) return;
+        fatalExitArmed = true;
+        const timer = setTimeout(() => process.exit(1), 2000);
+        timer.unref?.();
+        Promise.resolve()
+          .then(() => hub.stop())
+          .catch(() => {})
+          .finally(() => process.exit(1));
       });
 
       process.on('unhandledRejection', (reason) => {

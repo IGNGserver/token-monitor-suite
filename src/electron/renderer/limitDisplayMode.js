@@ -17,16 +17,27 @@
   // surfaces — limits list, home card, tray bars — in exact agreement no
   // matter which of them can see usedPercent; usedPercent is only a fallback
   // for the never-produced remaining-absent window.
+  // A credits/balance window carries no percentage at all and the shared layer
+  // signals that with `null`. Number(null) is 0, which is finite, so a naive
+  // coercion rendered a funded account as "100% used" (or "0% left") with a fully
+  // filled or empty meter. Treat null/undefined/blank as "no percentage".
+  function limitPercentValue(value) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'string' && value.trim() === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
   function limitFillPercent(remainingPercent, usedPercent, showUsed) {
-    const remaining = Number(remainingPercent);
-    const used = Number(usedPercent);
+    const remaining = limitPercentValue(remainingPercent);
+    const used = limitPercentValue(usedPercent);
     if (showUsed) {
-      if (Number.isFinite(remaining)) return 100 - remaining;
-      if (Number.isFinite(used)) return used;
+      if (remaining !== null) return 100 - remaining;
+      if (used !== null) return used;
       return 0;
     }
-    if (Number.isFinite(remaining)) return remaining;
-    if (Number.isFinite(used)) return 100 - used;
+    if (remaining !== null) return remaining;
+    if (used !== null) return 100 - used;
     return 0;
   }
 

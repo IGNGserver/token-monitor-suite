@@ -34,6 +34,12 @@ function createMySqlPool(options = {}) {
     database: options.database || process.env.MYSQL_DATABASE || 'token_monitor',
     waitForConnections: true,
     connectionLimit: Number(options.connectionLimit || process.env.MYSQL_CONNECTION_LIMIT || 10),
+    // mysql2 has no acquire timeout and defaults queueLimit to 0 (unbounded), so
+    // without a limit a saturated pool leaves every DB-backed route hanging with
+    // no error. A bounded queue turns that into a fast 503, which clients already
+    // treat as a transport failure.
+    queueLimit: Math.max(0, Number(options.queueLimit ?? process.env.MYSQL_QUEUE_LIMIT ?? 200) || 0),
+    connectTimeout: Math.max(1000, Number(options.connectTimeout ?? process.env.MYSQL_CONNECT_TIMEOUT_MS ?? 10_000) || 10_000),
     timezone: 'Z',
     decimalNumbers: true,
     dateStrings: false,

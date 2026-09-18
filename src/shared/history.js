@@ -485,10 +485,28 @@ function mergeHistories(histories, options = {}) {
 }
 
 // Defensively normalize arbitrary wire JSON to the { daily, monthly, summary } shape.
+// Newest-first cap for the daily tier.
+//
+// The device already trims to DEFAULT_CAP_DAYS before uploading, but the wire
+// validator accepts up to MAX_HISTORY_ROWS (4096) rows per tier and the Hub used
+// to store them verbatim. Every later stats call then walked and hashed the whole
+// thing, so one oversized (still legal, ~1 MiB) payload permanently slowed the
+// Hub for everyone. Re-applying the product window here is behaviour-preserving
+// for real clients, which never produce rows older than it.
+function capDailyRows(days, capDays = DEFAULT_CAP_DAYS) {
+  const rows = Array.isArray(days) ? days : [];
+  const cap = Math.max(1, Math.floor(Number(capDays) || DEFAULT_CAP_DAYS));
+  if (rows.length <= cap) return rows;
+  return rows
+    .slice()
+    .sort((a, b) => String(a?.date || '').localeCompare(String(b?.date || '')))
+    .slice(-cap);
+}
+
 function coerceHistory(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
   return {
-    daily: Array.isArray(src.daily) ? src.daily : [],
+    daily: capDailyRows(src.daily),
     monthly: Array.isArray(src.monthly) ? src.monthly : [],
     summary: src.summary && typeof src.summary === 'object' ? src.summary : {}
   };

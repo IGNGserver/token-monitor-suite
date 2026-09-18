@@ -54,4 +54,30 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
   };
 }
 
-module.exports = { composeLocalSyncStats };
+/**
+ * Reattach the local collector's Reasonix native sessions/projects to an already
+ * aggregated local snapshot.
+ *
+ * `aggregateDevices()` normalizes wire records and is a field whitelist, so it
+ * drops `nativeSessions`/`nativeProjects` — the ONLY channel carrying Reasonix
+ * session and project detail (Reasonix is excluded from the ordinary session
+ * path). Sync mode reattaches them through composeLocalSyncStats(); the default
+ * local mode did not, so its session/project views and the tray recency provider
+ * were empty for Reasonix while everything else worked.
+ *
+ * These fields are display-only and local-only: syncPayload.js strips them from
+ * uploads, so this must never be applied to a record bound for the Hub.
+ */
+function reattachLocalNativeView(stats, localDevice) {
+  if (!stats || !localDevice) return stats;
+  const nativeSessions = hasOwn(localDevice, 'nativeSessions') ? localDevice.nativeSessions : undefined;
+  const nativeProjects = hasOwn(localDevice, 'nativeProjects') ? localDevice.nativeProjects : undefined;
+  if (nativeSessions === undefined && nativeProjects === undefined) return stats;
+  return {
+    ...stats,
+    ...(nativeSessions === undefined ? {} : { nativeSessions }),
+    ...(nativeProjects === undefined ? {} : { nativeProjects })
+  };
+}
+
+module.exports = { composeLocalSyncStats, reattachLocalNativeView };

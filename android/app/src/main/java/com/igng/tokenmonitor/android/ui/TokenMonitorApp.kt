@@ -73,6 +73,8 @@ fun TokenMonitorApp(
 ) {
   val navController = rememberNavController()
   val hubState by hubViewModel.state.collectAsStateWithLifecycle()
+  // Pause the live stream while the app is backgrounded.
+  ActivityForegroundEffect { foreground -> hubViewModel.setForeground(foreground) }
   val connectionState by connectionViewModel.state.collectAsStateWithLifecycle()
   val snackbarHost = remember { SnackbarHostState() }
   val navBackStack by navController.currentBackStackEntryAsState()
@@ -181,7 +183,9 @@ fun TokenMonitorApp(
           SettingsScreen(
             state = connectionState,
             viewModel = connectionViewModel,
-            restartRealtime = hubViewModel::restartRealtime,
+            // Saving a connection must reset Hub-derived state: restartRealtime
+            // alone kept the previous Hub's stats/devices/history on screen.
+            restartRealtime = hubViewModel::onConnectionChanged,
             onHome = navigateHome,
             onBack = {
               if (!navController.popBackStack()) {

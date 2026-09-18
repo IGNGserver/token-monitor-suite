@@ -1,7 +1,7 @@
 {
   "name": "token-monitor",
   "productName": "Token Monitor",
-  "version": "0.45.0-rev.38",
+  "version": "0.45.0-rev.39",
   "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
   "main": "src/electron/main.js",
   "scripts": {
@@ -33,10 +33,11 @@
     "package:headless": "node scripts/package-headless.js",
     "package:hub-compose": "node scripts/package-hub-compose.js",
     "lint": "eslint .",
-    "verify": "npm run verify:product-scope && npm run lint && npm test",
+    "verify": "npm run verify:product-scope && npm run verify:css-vars && npm run lint && npm test",
     "dist:win:dir": "electron-builder --config scripts/electron-builder.config.js --win dir --x64 --publish never",
     "dist:win:prepackaged": "electron-builder --config scripts/electron-builder.config.js --prepackaged dist/win-unpacked --win nsis portable --x64 --publish never",
-    "verify:product-scope": "node scripts/verify-product-scope.js"
+    "verify:product-scope": "node scripts/verify-product-scope.js",
+    "verify:css-vars": "node scripts/verify-renderer-css-vars.js"
   },
   "build": {
     "appId": "com.igng.tokenmonitor",
@@ -49,7 +50,22 @@
       "src/shared/**/*",
       "assets/icon.png",
       "assets/icons/**/*",
-      "package.json"
+      "package.json",
+      "!node_modules/**/*.map",
+      "!node_modules/**/{docs,doc,example,examples,test,tests,benchmark,benchmarks}/**",
+      "!node_modules/**/*.{md,markdown,h,hh,hpp,c,cc,cpp}",
+      "!node_modules/mysql2/**",
+      "!node_modules/iconv-lite/**",
+      "!node_modules/aws-ssl-profiles/**",
+      "!node_modules/long/**",
+      "!node_modules/sql-escaper/**",
+      "!node_modules/safer-buffer/**",
+      "!node_modules/denque/**",
+      "!node_modules/lru.min/**",
+      "!node_modules/is-property/**",
+      "!node_modules/generate-function/**",
+      "!node_modules/named-placeholders/**",
+      "!node_modules/@types/**"
     ],
     "asarUnpack": [
       "node_modules/@tokscale/**/*",

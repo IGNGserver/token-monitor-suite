@@ -13,6 +13,23 @@ const MAX_PROJECT_FIELD_LENGTH = 255;
 const MAX_MAP_ENTRIES = 16 * 1024;
 const MAX_HISTORY_ROWS = 4096;
 const MAX_TRACKED_CLIENTS = 256;
+// Numeric ceilings for ingest. The MySQL columns are BIGINT UNSIGNED and
+// DECIMAL(24,10); a value beyond them (e.g. 1e300 from a corrupted client) makes
+// the INSERT fail under strict mode and rolls back the whole ingest transaction,
+// so the device can never be stored again while it keeps resending that number.
+// Reject such payloads at the boundary instead.
+const MAX_TOKEN_VALUE = Number.MAX_SAFE_INTEGER;
+const MAX_COST_VALUE = 1e12;
+const TOKEN_VALUE_FIELDS = [
+  'totalTokens', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens',
+  'reasoningTokens', 'unclassifiedTokens', 'timedTokens', 'timedOutputTokens'
+];
+const COST_VALUE_FIELDS = ['costUsd'];
+const TOKEN_VALUE_MAPS = [
+  'clients', 'clientCacheReads', 'clientCacheWrites', 'clientOutputs', 'clientUnclassifiedTokens',
+  'models', 'modelCacheReads', 'modelCacheWrites', 'modelOutputs', 'modelUnclassifiedTokens'
+];
+const COST_VALUE_MAPS = ['clientCosts', 'modelCosts'];
 const PERIOD_NAMES = ['today', 'month', 'allTime'];
 const CLIENT_MAPS = [
   'clients', 'clientCosts', 'clientCacheReads', 'clientCacheWrites', 'clientOutputs',
@@ -129,8 +146,29 @@ function ensureProjects(value, field) {
   }
 }
 
+function ensureBoundedNumber(value, max, field) {
+  if (value === undefined || value === null || value === '') return;
+  if (typeof value === 'string' && value.trim() === '') return;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    throw validationError('invalid_payload', `${field} must be a finite number`, { field });
+  }
+  if (Math.abs(numeric) > max) {
+    throw validationError('invalid_payload', `${field} exceeds the supported range`, { field });
+  }
+}
+
+function ensureBoundedMap(map, max, field) {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return;
+  for (const [key, value] of Object.entries(map)) ensureBoundedNumber(value, max, `${field}.${key}`);
+}
+
 function ensurePeriod(period, field) {
   if (!ensureObject(period, field)) return;
+  for (const name of TOKEN_VALUE_FIELDS) ensureBoundedNumber(period[name], MAX_TOKEN_VALUE, `${field}.${name}`);
+  for (const name of COST_VALUE_FIELDS) ensureBoundedNumber(period[name], MAX_COST_VALUE, `${field}.${name}`);
+  for (const mapName of TOKEN_VALUE_MAPS) ensureBoundedMap(period[mapName], MAX_TOKEN_VALUE, `${field}.${mapName}`);
+  for (const mapName of COST_VALUE_MAPS) ensureBoundedMap(period[mapName], MAX_COST_VALUE, `${field}.${mapName}`);
   for (const mapName of CLIENT_MAPS) {
     if (mapName === 'clientModels' || mapName === 'clientModelCosts') {
       ensureNestedMap(period[mapName], MAX_CLIENT_ID_LENGTH, MAX_MODEL_ID_LENGTH, `${field}.${mapName}`);

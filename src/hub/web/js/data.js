@@ -21,6 +21,10 @@ export const CLIENT_LABELS = {
   kiro: 'Kiro',
   codebuddy: 'CodeBuddy',
   workbuddy: 'WorkBuddy',
+  commandcode: 'Command Code',
+  qodercn: 'Qoder CN',
+  reasonix: 'Reasonix',
+  'deepseek-harness': 'DeepSeek Harness',
   proma: 'Proma',
   deepseek: 'DeepSeek',
   minimax: 'Minimax',
@@ -52,6 +56,7 @@ export const CLIENT_COLORS = {
   grok: '#000000',
   copilot: '#000000',
   deepseek: '#4d6bfe',
+  'deepseek-harness': '#4d6bfe',
   cursor: '#000000',
   opencode: '#000000',
   openclaw: '#ff4d4d',
@@ -67,6 +72,9 @@ export const CLIENT_COLORS = {
   kiro: '#9046FF',
   codebuddy: '#6C4DFF',
   workbuddy: '#0DC8A5',
+  commandcode: '#4D8CFF',
+  qodercn: '#2ADB5C',
+  reasonix: '#4D6BFE',
   proma: '#000000',
   moonshot: '#16191e',
   zai: '#000000',
@@ -134,7 +142,13 @@ const ICON_ALIASES = {
   grok: 'grok',
   zai: 'zai',
   zaiteam: 'zai',
-  thirdparty: 'openrouter'
+  thirdparty: 'openrouter',
+  // Without these the dashboard requested /icons/clients/<id>.svg for ids the
+  // server does not ship and the request 404s on every re-render (sendJson sets
+  // cache-control: no-store). The desktop widget already aliases them the same way.
+  kimi: 'moonshot',
+  zcode: 'zai',
+  'claude-desktop': 'claude'
 };
 
 export function clientLabel(id) {
@@ -263,6 +277,17 @@ export function providerDisplayName(provider, peers = [], locale = 'en') {
       return sameEmail ? `${email} · ${workspace}` : email;
     }
     return email || workspace || accountLabel || 'Codex';
+  }
+
+  if (id === 'antigravity') {
+    const rawLabel = accountLabel.toLowerCase();
+    const isGeneric = !accountLabel || rawLabel === 'antigravity' || rawLabel === 'antigravity remote';
+    const specificLabel = isGeneric ? '' : accountLabel;
+    if (email && workspace) {
+      const sameEmail = (peers || []).filter((p) => String(p?.accountEmail || '').trim().toLowerCase() === email.toLowerCase()).length > 1;
+      return sameEmail ? `${email} · ${workspace}` : email;
+    }
+    return email || workspace || specificLabel || (PROVIDER_LABELS[id] || id || 'Account');
   }
 
   return accountName || accountLabel || email || (PROVIDER_LABELS[id] || id || 'Account');

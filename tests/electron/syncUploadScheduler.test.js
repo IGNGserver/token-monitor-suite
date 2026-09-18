@@ -246,7 +246,7 @@ test('a failed upload retains the same summary and retries without a newer event
   scheduler.stop();
 });
 
-test('retry-after is respected and non-retryable failures remain failed until new data or manual retry', async () => {
+test('retry-after is respected and a non-retryable failure falls back to the slow retry cadence', async () => {
   const clock = createManualClock();
   const uploads = [];
   let attempts = 0;
@@ -274,9 +274,14 @@ test('retry-after is respected and non-retryable failures remain failed until ne
   await Promise.resolve();
   await Promise.resolve();
   assert.deepEqual(uploads, ['retry-after', 'retry-after']);
-  assert.equal(scheduler.getDiagnostics().state, 'failed');
-  assert.equal(clock.timerCount(), 0);
+  // A 403 is not quickly retryable, so there is no short backoff; the bounded slow
+  // retry (15 min by default) keeps the uploader alive instead of wedging it.
+  assert.equal(scheduler.getDiagnostics().state, 'waiting');
+  assert.equal(clock.timerCount(), 1);
+  await clock.advance(5 * 1000);
+  assert.deepEqual(uploads, ['retry-after', 'retry-after'], 'the slow cadence must not be a quick retry');
 
+  // Manual retry stays available and delivers immediately.
   await scheduler.retryNow();
   assert.deepEqual(uploads, ['retry-after', 'retry-after', 'retry-after']);
   assert.equal(scheduler.getDiagnostics().state, 'idle');
@@ -302,14 +307,47 @@ test('a non-retryable failure does not quick-retry when newer data arrives', asy
   await assert.rejects(scheduler.enqueue({ id: 'first' }), /denied/);
   const queued = await scheduler.enqueue({ id: 'newer' });
 
-  assert.deepEqual(uploads, ['first']);
+  assert.deepEqual(uploads, ['first'], 'arriving data must not trigger an immediate retry');
   assert.equal(queued.queued, true);
-  assert.equal(scheduler.getDiagnostics().state, 'failed');
   assert.equal(scheduler.getDiagnostics().pendingRevision, 2);
+  // A 403 is neither retryable-with-backoff nor a configuration error, so it gets
+  // the bounded slow retry rather than stopping the uploader for good.
+  assert.equal(scheduler.getDiagnostics().state, 'waiting');
+  assert.equal(clock.timerCount(), 1);
 
-  const retried = await scheduler.retryNow();
-  assert.equal(retried.ok, true);
+  // Let the slow cadence elapse: the pending payload goes out without operator action.
+  await clock.advance(16 * 60 * 1000);
   assert.deepEqual(uploads, ['first', 'newer']);
+  assert.equal(scheduler.getDiagnostics().failureCode, null);
+
+  scheduler.stop();
+});
+
+test('a transient non-retryable response recovers on the slow retry cadence', async () => {
+  const clock = createManualClock();
+  const uploads = [];
+  let attempts = 0;
+  const scheduler = createSyncUploadScheduler({
+    intervalMs: 0,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    terminalRetryMs: 5 * 60 * 1000,
+    upload: async (summary) => {
+      uploads.push(summary.id);
+      attempts += 1;
+      // A version-skewed Hub rejecting the body (413) or a proxy injecting a 403.
+      if (attempts === 1) throw Object.assign(new Error('payload too large'), { status: 413 });
+    }
+  });
+
+  await assert.rejects(scheduler.enqueue({ id: 'big' }), /too large/);
+  assert.deepEqual(uploads, ['big']);
+  assert.equal(scheduler.getDiagnostics().state, 'waiting');
+
+  await clock.advance(5 * 60 * 1000);
+  assert.deepEqual(uploads, ['big', 'big'], 'the snapshot should be retried automatically');
+  assert.equal(scheduler.getDiagnostics().failureCode, null);
   scheduler.stop();
 });
 

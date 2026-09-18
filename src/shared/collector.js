@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const chokidar = require('chokidar');
 const semver = require('semver');
-const { readJson, sharedDataDir } = require('./config');
+const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
 const { tokscalePackageNamesForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
@@ -195,18 +195,67 @@ function parseJsonOutput(stdout) {
   throw new Error(`Could not parse tokscale JSON output: ${text.slice(0, 300)}`);
 }
 
+// Terminate a timed-out child decisively.
+//
+// SIGTERM alone is not enough: if the child (or a grandchild that inherited its
+// pipes) ignores it, the promise is already rejected so the tick moves on while
+// the process keeps burning CPU and its 'data' handlers keep appending to the
+// stdout/stderr strings for the life of the parent. That breaks the "one tokscale
+// at a time" invariant AGENTS.md relies on, so load ratchets up instead of
+// decaying. Escalate to SIGKILL, stop reading, and detach.
+function terminateChild(child, options = {}) {
+  if (!child || child.killed) return;
+  const killTimer = setTimeout(() => {
+    try {
+      // Negative pid targets the whole process group when the child was spawned
+      // detached; fall back to the direct pid otherwise.
+      process.kill(child.pid, 'SIGKILL');
+    } catch (_) { /* already gone */ }
+  }, Number(options.escalateMs) > 0 ? Number(options.escalateMs) : 5000);
+  killTimer.unref?.();
+  child.once('close', () => clearTimeout(killTimer));
+  try { child.kill('SIGTERM'); } catch (_) { /* already gone */ }
+}
+
+// Drop stdio listeners and any buffered text once a child is abandoned, so a
+// surviving process cannot keep growing parent memory.
+function abandonChildStreams(child) {
+  for (const stream of [child?.stdout, child?.stderr]) {
+    try {
+      stream?.removeAllListeners('data');
+      stream?.destroy();
+    } catch (_) { /* ignore */ }
+  }
+  try { child?.removeAllListeners('close'); } catch (_) { /* ignore */ }
+  try { child?.unref?.(); } catch (_) { /* ignore */ }
+}
+
 function spawnTokscaleJson(userArgs, commandTimeoutMs) {
   const { bin, prefixArgs, env } = tokscaleCommand();
   return new Promise((resolve, reject) => {
     const child = spawn(bin, [...prefixArgs, ...userArgs], { env, windowsHide: true });
     let stdout = '';
     let stderr = '';
-    const timeout = setTimeout(() => { child.kill('SIGTERM'); reject(new Error(`tokscale timed out after ${commandTimeoutMs}ms`)); }, commandTimeoutMs);
-    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', (error) => { clearTimeout(timeout); reject(error); });
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      terminateChild(child);
+      abandonChildStreams(child);
+      reject(new Error(`tokscale timed out after ${commandTimeoutMs}ms`));
+    }, commandTimeoutMs);
+    child.stdout.on('data', (chunk) => { if (!settled) stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { if (!settled) stderr += chunk.toString(); });
+    child.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
     child.on('close', (code) => {
       clearTimeout(timeout);
+      if (settled) return;
+      settled = true;
       if (code !== 0) return reject(new Error(`tokscale exited with code ${code}: ${stderr.trim() || stdout.trim()}`));
       try { resolve(parseJsonOutput(stdout)); } catch (error) { reject(error); }
     });
@@ -616,7 +665,23 @@ function timestampFromJsonLine(line) {
   }
 }
 
+// Bounded: keys are transcript paths, and a long-running widget/agent sees churn
+// in ~/.claude/projects and ~/.codex/sessions, so deleted trees used to leave
+// their entries (and cached values) alive for the whole process lifetime.
+const PROJECT_PATH_CACHE_MAX = 10_000;
 const projectPathCache = new Map();
+
+// Insertion-ordered Map: re-inserting on hit keeps the newest entries at the end,
+// so evicting the front is a cheap approximation of LRU.
+function cacheSetBounded(cache, key, value, maxEntries) {
+  if (cache.has(key)) cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > maxEntries) {
+    const oldest = cache.keys().next();
+    if (oldest.done) break;
+    cache.delete(oldest.value);
+  }
+}
 
 function projectPathFromJsonl(filePath) {
   let text;
@@ -642,12 +707,12 @@ function projectPathFromJsonl(filePath) {
       const value = payload.cwd || payload.project_path || payload.projectPath || payload.workingDirectory || payload.working_directory;
       if (typeof value === 'string' && value.trim()) {
         const result = value.trim();
-        projectPathCache.set(filePath, { key: cacheKey, value: result });
+        cacheSetBounded(projectPathCache, filePath, { key: cacheKey, value: result }, PROJECT_PATH_CACHE_MAX);
         return result;
       }
     } catch (_) { /* skip partial or non-JSON lines */ }
   }
-  projectPathCache.set(filePath, { key: cacheKey, value: '' });
+  cacheSetBounded(projectPathCache, filePath, { key: cacheKey, value: '' }, PROJECT_PATH_CACHE_MAX);
   return '';
 }
 
@@ -674,6 +739,7 @@ function projectIdentity(value) {
 // The tail timestamp only moves when the transcript grows, so a mtime match lets
 // a full-tick decoration skip re-reading every idle session (issue: periodic UI
 // stutter once project tracking made this run on every session each tick).
+const JSONL_TIMESTAMP_CACHE_MAX = 10_000;
 const jsonlTimestampCache = new Map();
 
 function lastJsonlTimestamp(filePath) {
@@ -690,7 +756,7 @@ function lastJsonlTimestamp(filePath) {
     if (timestamp) { value = timestamp; break; }
   }
   if (!value) value = stat.mtime.toISOString();
-  jsonlTimestampCache.set(filePath, { key: cacheKey, value });
+  cacheSetBounded(jsonlTimestampCache, filePath, { key: cacheKey, value }, JSONL_TIMESTAMP_CACHE_MAX);
   return value;
 }
 
@@ -896,7 +962,8 @@ async function maybeSyncAntigravity(clientsCsv, logger, home = os.homedir(), opt
     const child = spawn(bin, [...prefixArgs, 'antigravity', 'sync'], { env, windowsHide: true });
     let stderr = '';
     const timer = setTimeout(() => {
-      child.kill('SIGTERM');
+      terminateChild(child);
+      abandonChildStreams(child);
       settle(true, 'sync-timeout', { failureStage: 'timeout' });
     }, 30000);
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
@@ -2662,6 +2729,23 @@ function deriveClientStatus(clientsCsv, allTimePeriod, options = {}) {
 // month only if from the same month. Otherwise a cross-day / cross-month full
 // scan would briefly add the previous period's WSL usage to the preview before
 // the final fresh scan corrects it. Returns the WSL period to merge, or null.
+// True when a WSL scan produced any usable usage. A per-home tokscale failure is
+// swallowed inside collectWslUsage (it logs and contributes nothing), so its
+// bundle can be empty even though the distro holds data. Used to avoid replacing a
+// good frozen snapshot with that empty bundle.
+function wslBundleHasUsage(bundle) {
+  if (!bundle || typeof bundle !== 'object') return false;
+  for (const periodName of ['today', 'month', 'allTime']) {
+    const period = bundle[periodName];
+    if (!period || typeof period !== 'object') continue;
+    if (Number(period.totalTokens) > 0) return true;
+    if (Number(period.costUsd) > 0) return true;
+    if (period.clients && Object.keys(period.clients).length > 0) return true;
+    if (period.sessions && Object.keys(period.sessions).length > 0) return true;
+  }
+  return false;
+}
+
 function wslPeriodsForPreview(wslAnchor, anchorDateKey, todayKey) {
   if (!wslAnchor) return { today: null, month: null };
   const key = anchorDateKey || '';
@@ -3224,13 +3308,27 @@ function startCollector(options) {
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {})
         };
-        wslAnchor = captured.wslBundle;
-        wslStatusAnchor = captured.wslStatus || null;
+        // A per-home tokscale failure (9P timeout, distro stopping mid-scan) is
+        // swallowed inside collectWslUsage, which returns a partial/empty bundle.
+        // Freezing that as the new anchor drops the WSL share of every card until
+        // the next full scan, so keep the last good snapshot when the fresh scan
+        // produced nothing but the previous one had usage.
+        const freshWslHasUsage = wslBundleHasUsage(captured.wslBundle);
+        const anchoredWslHasUsage = wslBundleHasUsage(wslAnchor);
+        if (freshWslHasUsage || !anchoredWslHasUsage) {
+          wslAnchor = captured.wslBundle;
+          wslStatusAnchor = captured.wslStatus || null;
+        } else {
+          options.logger?.('wsl scan returned no usage; keeping the previous snapshot');
+        }
         if (!qoderCnReadState.periodFailed) lastFullScanAt = Date.now();
         if (options.anchorPersistenceEnabled !== false) {
           try {
-            fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
-            fs.writeFileSync(anchorPath, JSON.stringify({
+            // Atomic: a concurrent reader at startup must never see a truncated
+            // file (readJson would return null and force an expensive full rescan).
+            // This path is shared by the widget and a headless agent on the same
+            // machine, so the temp name has to be unique per writer.
+            writeJsonAtomic(anchorPath, {
               dateKey: anchor.dateKey,
               today: anchor.today,
               month: anchor.month,
@@ -3247,7 +3345,7 @@ function startCollector(options) {
                 qoderCnSourceKey || qoderCnDbPath
               ),
               fullScanAt: new Date(lastFullScanAt).toISOString()
-            }));
+            });
           } catch (_) {}
         }
       } else if (anchored && captured) {
@@ -3838,6 +3936,8 @@ async function collectCustomRangeOnce(options = {}) {
 }
 
 module.exports = {
+  terminateChild,
+  abandonChildStreams,
   applySessionTimestamps,
   projectIdentity,
   projectPathFromJsonl,

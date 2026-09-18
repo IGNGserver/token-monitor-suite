@@ -70,3 +70,21 @@ test('soft-delete migration is restart-safe using MySQL-supported conditional DD
   assert.match(sql, /PREPARE token_monitor_device_soft_delete/i);
   assert.match(sql, /ALTER TABLE `devices` ADD COLUMN `deleted_at`/i);
 });
+
+test('the usage_events range index migration is restart-safe and leading-columned', () => {
+  // /api/usage/range filters on recorded_at alone, so the index has to LEAD with
+  // it; the pre-existing (device_id, recorded_at) index could not serve the scan.
+  const sql = fs.readFileSync(
+    path.join(__dirname, '../../migrations/005_usage_events_recorded_index.sql'),
+    'utf8'
+  );
+  // MySQL has no ADD INDEX IF NOT EXISTS, so the guard must go through
+  // information_schema plus a prepared statement.
+  assert.doesNotMatch(sql, /ADD\s+INDEX\s+IF\s+NOT\s+EXISTS/i);
+  assert.match(sql, /information_schema\.STATISTICS/i);
+  assert.match(sql, /INDEX_NAME = 'idx_usage_events_recorded'/);
+  assert.match(sql, /ADD INDEX `idx_usage_events_recorded` \(`recorded_at`\)/i);
+  // The covering index for the range GROUP BY.
+  assert.match(sql, /ADD INDEX `idx_usage_events_recorded_client_model` \(`recorded_at`, `client`, `model`\)/i);
+  assert.match(sql, /DEALLOCATE PREPARE/i);
+});

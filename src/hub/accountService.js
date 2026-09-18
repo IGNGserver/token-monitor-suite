@@ -10,12 +10,21 @@ const { probeLimitProvider } = require('../shared/limitCollector');
 const { refreshOAuthCredential } = require('./oauthService');
 const { createMimoManagedAccount } = require('../shared/mimoLimits');
 const { normalizeThirdPartyBaseUrl } = require('../shared/thirdPartyLimits');
+const { runWithProbeDeadline } = require('../shared/probeDeadline');
 
 const MAX_ACCOUNT_NAME_LENGTH = 128;
 const MAX_ACCOUNT_LABEL_LENGTH = 256;
 const MAX_CREDENTIAL_BYTES = 128 * 1024;
 const DEFAULT_REFRESH_MS = 5 * 60 * 1000;
 const DEFAULT_CONCURRENCY = 4;
+
+// Hard ceiling for one provider probe on the Hub. Some fetchers (openrouter,
+// thirdparty, opencode) rely solely on the caller's signal, so without this they
+// are bounded only by undici's 300 s *inactivity* timeouts — which a peer that
+// trickles bytes can defeat indefinitely. A probe that never settles holds the
+// refresh latch below and silently stops every account's limit refresh until the
+// process is restarted.
+const DEFAULT_PROBE_DEADLINE_MS = 60 * 1000;
 
 // These providers already accept an explicit API key, Cookie, or profile. The
 // remaining providers currently depend on a local CLI, browser profile, or OS
@@ -364,7 +373,9 @@ function createHubAccountService({
   oauthFetch,
   logger = console,
   onUpdate = null,
-  now = Date.now
+  now = Date.now,
+  probeDeadlineMs = DEFAULT_PROBE_DEADLINE_MS,
+  refreshCeilingOverride = null
 } = {}) {
   if (!store || typeof store.listHubAccounts !== 'function') {
     throw new TypeError('Hub account repository methods are required');
@@ -373,9 +384,13 @@ function createHubAccountService({
     ? Number(refreshMs)
     : DEFAULT_REFRESH_MS;
   const maxConcurrency = Math.max(1, Math.min(32, Number(concurrency) || DEFAULT_CONCURRENCY));
+  const probeTimeoutMs = Number.isFinite(Number(probeDeadlineMs)) && Number(probeDeadlineMs) > 0
+    ? Number(probeDeadlineMs)
+    : DEFAULT_PROBE_DEADLINE_MS;
   let timer = null;
   let stopped = false;
   let refreshPromise = null;
+  let refreshStartedAt = 0;
 
   async function runTransaction(work) {
     if (typeof store.transaction === 'function') return store.transaction(work);
@@ -420,7 +435,15 @@ function createHubAccountService({
       const snapshot = typeof store.getHubAccountSnapshot === 'function'
         ? await store.getHubAccountSnapshot(account.id)
         : null;
-      if (snapshot?.provider) providers.push({ ...snapshot.provider, authority: 'hub', accountId: account.id });
+      if (snapshot?.provider) {
+        providers.push({
+          ...snapshot.provider,
+          authority: 'hub',
+          accountId: account.id,
+          accountName: snapshot.provider.accountName || account.name || '',
+          accountLabel: snapshot.provider.accountLabel || account.label || ''
+        });
+      }
     }
     return normalizeLimitsSummary({
       updatedAt: new Date(now()).toISOString(),
@@ -449,11 +472,17 @@ function createHubAccountService({
     }
 
     const probeWith = async (candidate) => {
-      const probeDeps = {
-        fetch: oauthFetch,
-        ...runtime
-      };
-      const result = await probe(account.provider, providerOptions(account, candidate), {}, probeDeps);
+      // runWithProbeDeadline owns the controller; forward ITS signal so fetchers
+      // that honour deps.signal abort the moment the deadline fires instead of
+      // holding a socket until undici's inactivity timeout.
+      const result = await runWithProbeDeadline(
+        ({ signal }) => probe(account.provider, providerOptions(account, candidate), {}, {
+          fetch: oauthFetch,
+          signal,
+          ...runtime
+        }),
+        { deadlineMs: probeTimeoutMs }
+      );
       return { candidate, rows: rowsFromProbe(result) };
     };
     let attempt = await probeWith(activeCredential);
@@ -576,9 +605,34 @@ function createHubAccountService({
     }
   }
 
+  // A refresh cycle must never outlive its own schedule. The probe deadline above
+  // bounds each provider call, but an unforeseen await (a repository call, an
+  // OAuth refresh) could still stall the cycle and leave refreshPromise latched,
+  // which silently stops every later refresh. Past the ceiling, detach the latch so
+  // the next tick can start a fresh cycle instead of returning the dead promise
+  // forever.
+  const ceilingOption = Number(refreshCeilingOverride);
+  const refreshCeilingMs = Number.isFinite(ceilingOption) && ceilingOption > 0
+    ? ceilingOption
+    : Math.max(
+      60 * 1000,
+      Math.floor(intervalMs * 0.8),
+      Math.ceil(probeTimeoutMs * (maxConcurrency + 1))
+    );
+
   async function refreshAll(reason = 'interval') {
     if (stopped) return [];
-    if (refreshPromise) return refreshPromise;
+    if (refreshPromise) {
+      const ageMs = now() - refreshStartedAt;
+      if (ageMs <= refreshCeilingMs) return refreshPromise;
+      logger.warn?.(
+        `[hub-accounts] refresh cycle exceeded ${refreshCeilingMs}ms (age ${ageMs}ms); releasing the latch so limits can resume`
+      );
+      await onUpdate?.({ type: 'account-refresh-stalled', ageMs, ceilingMs: refreshCeilingMs, reason });
+      refreshPromise = null;
+      refreshStartedAt = 0;
+    }
+    refreshStartedAt = now();
     refreshPromise = (async () => {
       let accounts = [];
       try {
@@ -608,7 +662,10 @@ function createHubAccountService({
     })().catch((err) => {
       logger.warn?.(`[hub-accounts] refreshAll unhandled failure: ${err?.message || err}`);
       return [];
-    }).finally(() => { refreshPromise = null; });
+    }).finally(() => {
+      refreshPromise = null;
+      refreshStartedAt = 0;
+    });
     return refreshPromise;
   }
 

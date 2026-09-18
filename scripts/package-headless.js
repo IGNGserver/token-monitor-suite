@@ -28,12 +28,38 @@ const archivePath = path.join(outDir, `Token-Monitor-Headless-${version}.tar.gz`
 const files = [
   ['src/agent', 'src/agent'],
   ['src/shared', 'src/shared'],
-  ['package.json', 'package.json'],
-  ['package-lock.json', 'package-lock.json'],
   ['.env.example', '.env.example'],
   ['docs/headless-agent.md', 'README.md'],
   ['LICENSE', 'LICENSE']
 ];
+
+// The operator installs dependencies with `npm ci --omit=dev`, and shipping the
+// root manifest made that pull 47.9 MB for a 25.0 MB closure (the widget, updater
+// and Hub driver are all unreachable from src/agent/agent.js). Emit a manifest
+// scoped to the real closure so a headless install stops paying ~22.8 MB per
+// machine. `tokscale` must stay: its per-platform optional dependency is how npm
+// selects the target machine's native binary.
+const HEADLESS_DEPENDENCIES = ['chokidar', 'dotenv', 'semver', 'tokscale'];
+
+function headlessPackageJson() {
+  const dependencies = {};
+  for (const name of HEADLESS_DEPENDENCIES) {
+    const range = packageJson.dependencies?.[name];
+    if (!range) throw new Error(`headless dependency ${name} is not declared in package.json`);
+    dependencies[name] = range;
+  }
+  return {
+    name: 'token-monitor-headless',
+    version,
+    private: true,
+    description: 'Headless Token Monitor collector: scans local AI tool usage and posts it to a Docker Compose Hub.',
+    main: 'src/agent/agent.js',
+    bin: { 'token-monitor-agent': 'src/agent/agent.js' },
+    scripts: { start: 'node src/agent/agent.js', once: 'node src/agent/agent.js --once' },
+    dependencies,
+    engines: packageJson.engines
+  };
+}
 
 fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(stageDir, { recursive: true });
@@ -44,6 +70,14 @@ for (const [sourceRelative, destinationRelative] of files) {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.cpSync(source, destination, { recursive: true });
 }
+
+// Written after the copy loop: the root package.json is deliberately no longer
+// part of `files`, so the bundle must not inherit the Electron entry point or the
+// full dependency set.
+fs.writeFileSync(
+  path.join(stageDir, 'package.json'),
+  `${JSON.stringify(headlessPackageJson(), null, 2)}\n`
+);
 
 async function main() {
   await tar.c({ cwd: outDir, gzip: true, file: archivePath }, [stageName]);

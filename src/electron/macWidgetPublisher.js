@@ -187,6 +187,11 @@ function createMacWidgetPublisher(options = {}) {
   }
 
   async function processWork(work) {
+    // Check demand BEFORE fetching history. The staleness check used to run after
+    // the await, so a superseded or undemanded publish still issued a full history
+    // request; because publishes are driven by stats pushes, a busy Hub turned that
+    // into up to one /api/history GET per push.
+    if (stopped || work.sequence !== latestSequence || !hasDemand()) return;
     let history;
     try {
       history = await getHistory();
@@ -194,6 +199,7 @@ function createMacWidgetPublisher(options = {}) {
       safeLog(logger, `[mac-widget] history refresh failed: ${error.message || error}`);
       history = work.stats?.history || { daily: [], monthly: [], summary: {} };
     }
+    // Re-check after the await: the request may have been superseded meanwhile.
     if (stopped || work.sequence !== latestSequence || !hasDemand()) return;
     const generatedAt = new Date(now());
     const snapshot = buildMacWidgetSnapshot(work.stats, {

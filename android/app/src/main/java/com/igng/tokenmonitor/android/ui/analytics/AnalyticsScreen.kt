@@ -150,6 +150,10 @@ private fun ShareAnalyticsTab(
     AnalyticsPeriodKind.Month -> state.stats?.periods?.month
     AnalyticsPeriodKind.AllTime -> state.stats?.periods?.allTime
     AnalyticsPeriodKind.Custom -> state.customRangeResult?.let {
+      // Keep this in step with resolvePeriod() below: dropping clientModels /
+      // clientModelCosts here made the Tools model list read "No usage" for every
+      // custom range, and the share tab disagree with the detail screen about the
+      // same range.
       PeriodDto(
         totalTokens = it.totalTokens,
         costUsd = it.costUsd,
@@ -157,6 +161,8 @@ private fun ShareAnalyticsTab(
         clientCosts = it.clientCosts,
         models = it.models,
         modelCosts = it.modelCosts,
+        clientModels = it.clientModels,
+        clientModelCosts = it.clientModelCosts,
         projects = it.projects,
         sessions = it.sessions
       )
@@ -556,7 +562,13 @@ private fun TrendAnalyticsTab(state: HubUiState, onEnsureHistory: () -> Unit) {
 
   if (history == null || (daily.isEmpty() && monthly.isEmpty())) {
     EmptyState(
-      text = "Hub 暂无历史预览。设备上报历史后，这里会显示 7/30 日与 12 月趋势。",
+      // Distinguish "the Hub has no history yet" from "the request failed":
+      // /api/history carries the per-client/per-model stacks and 370 days of
+      // detail, while the fallback preview has neither and is capped at 30 days,
+      // so a swallowed failure silently degrades every chart below. Offer a retry
+      // instead of reporting an empty Hub.
+      text = state.historyError?.let { "无法加载历史数据（$it）。下拉或点击重试。" }
+        ?: "Hub 暂无历史预览。设备上报历史后，这里会显示 7/30 日与 12 月趋势。",
       icon = Icons.Outlined.Timeline
     )
     return

@@ -74,26 +74,44 @@ const KNOWN_CLIENTS = [
   { id: 'deepseek-harness', label: 'DeepSeek Harness' },
   { id: 'claude-desktop', label: 'Claude Desktop' }
 ];
-const LIMIT_PROVIDERS = [
-  { id: 'claude', label: 'Claude', settingsLabel: 'Claude Code' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'cursor', label: 'Cursor' },
-  { id: 'antigravity', label: 'Antigravity' },
-  { id: 'opencode', label: 'OpenCode' },
-  { id: 'openrouter', label: 'OpenRouter' },
-  { id: 'deepseek', label: 'DeepSeek' },
-  { id: 'minimax', label: 'Minimax' },
-  { id: 'mimo', label: 'MiMo' },
-  { id: 'grok', label: 'Grok' },
-  { id: 'copilot', label: 'GitHub Copilot' },
-  { id: 'kiro', label: 'Kiro' },
-  { id: 'zai', label: 'GLM' },
-  { id: 'zaiteam', label: 'GLM Team' },
-  { id: 'volcengine', label: 'Volcengine' },
-  { id: 'qoder', label: 'Qoder' },
-  { id: 'kimi', label: 'Kimi' },
-  { id: 'ollama', label: 'Ollama' }
-];
+// Display labels for the canonical provider list in src/shared/limitProviders.js
+// (exposed to this file as window.TokenMonitorLimitProviders). Only labels live
+// here; membership and order come from the shared list so a new provider cannot
+// be silently dropped from the UI, the tray, or a saved settings round-trip.
+const LIMIT_PROVIDER_LABELS = {
+  claude: { label: 'Claude', settingsLabel: 'Claude Code' },
+  codex: { label: 'Codex' },
+  opencode: { label: 'OpenCode' },
+  cursor: { label: 'Cursor' },
+  antigravity: { label: 'Antigravity' },
+  kimi: { label: 'Kimi' },
+  grok: { label: 'Grok' },
+  copilot: { label: 'GitHub Copilot' },
+  commandcode: { label: 'Command Code' },
+  mimo: { label: 'MiMo' },
+  zai: { label: 'GLM' },
+  zaiteam: { label: 'GLM Team' },
+  kiro: { label: 'Kiro' },
+  qoder: { label: 'Qoder' },
+  deepseek: { label: 'DeepSeek' },
+  openrouter: { label: 'OpenRouter' },
+  minimax: { label: 'Minimax' },
+  volcengine: { label: 'Volcengine' },
+  ollama: { label: 'Ollama' },
+  thirdparty: { label: 'Third-party' }
+};
+
+const LIMIT_PROVIDER_IDS = (() => {
+  const shared = window.TokenMonitorLimitProviders?.LIMIT_PROVIDER_IDS;
+  if (Array.isArray(shared) && shared.length > 0) return shared.slice();
+  // Fallback keeps the widget usable if the shared script failed to load.
+  return Object.keys(LIMIT_PROVIDER_LABELS);
+})();
+
+const LIMIT_PROVIDERS = LIMIT_PROVIDER_IDS.map((id) => ({
+  id,
+  ...(LIMIT_PROVIDER_LABELS[id] || { label: id })
+}));
 const TRAY_ICON_VARIANTS = [
   { id: 'claude-brand', label: 'Claude', after: 'claude' },
   { id: 'chatgpt', label: 'ChatGPT', after: 'codex' }
@@ -156,6 +174,9 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   'Web/API': 'settings.limits.capability.webApi',
   'App/CLI must be open': 'settings.limits.capability.appMustBeOpen',
   RPC: 'settings.limits.capability.rpc',
+  CLI: 'settings.limits.capability.cli',
+  'Local/Web': 'settings.limits.capability.localWeb',
+  'Team Plan': 'settings.limits.capability.teamPlan',
   'Local/Zen': 'settings.limits.capability.localZen',
   'Pay-as-you-go': 'settings.limits.capability.payg',
   Subscription: 'settings.limits.capability.subscription',
@@ -270,7 +291,7 @@ let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), usageEstimateBadge: document.getElementById('usageEstimateBadge'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInput: document.getElementById('showLimitUsedInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), usageEstimateBadge: document.getElementById('usageEstimateBadge'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), allowInsecureHubHttpInput: document.getElementById('allowInsecureHubHttpInput'), deviceIdInput: document.getElementById('deviceIdInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInput: document.getElementById('showLimitUsedInput'), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInput: document.getElementById('floatingBubbleTriggerInput'), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab')
 };
 Object.assign(els, {
   viewBackRow: document.getElementById('viewBackRow'),
@@ -4465,6 +4486,7 @@ const SYNC_HEALTH_REASON_KEYS = {
 const SYNC_HEALTH_STATE_KEYS = {
   idle: 'settings.sync.healthState.idle',
   collecting: 'settings.sync.healthState.collecting',
+  relay: 'settings.sync.healthState.relay',
   ok: 'settings.sync.healthState.ok',
   uploading: 'settings.sync.healthState.uploading',
   waiting: 'settings.sync.healthState.waiting',
@@ -5969,7 +5991,9 @@ function syncSettingsForm() {
   syncCurrencyRateControls();
   els.hubUrlInput.value = state.settings.hubUrl || '';
   els.secretInput.value = state.settings.secret || '';
-  els.deviceIdInput.value = state.settings.deviceId || '';
+  // deviceId has no editor in the restricted local/client UI; the stored value is
+  // only echoed when a legacy markup still provides the field.
+  if (els.deviceIdInput) els.deviceIdInput.value = state.settings.deviceId || '';
   els.showLimitSourceInput.checked = Boolean(state.settings.showLimitSource);
   els.maskLimitAccountEmailsInput.checked = Boolean(state.settings.maskLimitAccountEmails);
   els.showLimitUsedInput.value = state.settings.showLimitUsed ? 'used' : 'remaining';
@@ -7511,12 +7535,13 @@ els.settingsButton.addEventListener('click', (event) => {
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
 });
-els.saveSettingsButton.addEventListener('click', async () => {
+// Guarded on purpose: this binding is a top-level statement, so a missing element
+// would abort the whole renderer (see tests/electron/rendererBindings.test.js).
+els.saveSettingsButton?.addEventListener('click', async () => {
   const patch = {
     hubUrl: els.hubUrlInput.value.trim(),
     secret: els.secretInput.value,
-    allowInsecureHubHttp: Boolean(els.allowInsecureHubHttpInput?.checked),
-    deviceId: els.deviceIdInput.value.trim()
+    allowInsecureHubHttp: Boolean(els.allowInsecureHubHttpInput?.checked)
   };
   try {
     await saveSettings(patch);
@@ -7534,9 +7559,20 @@ els.saveSettingsButton.addEventListener('click', async () => {
 els.hubModeOptions.addEventListener('change', async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement) || target.name !== 'hubMode') return;
-  await saveSettings({ hubMode: target.value });
-  await refreshHubAccounts();
-  await refreshStats();
+  try {
+    await saveSettings({ hubMode: target.value });
+    await refreshHubAccounts();
+    await refreshStats();
+  } catch (error) {
+    // saveSettings already re-reads the persisted settings and re-runs
+    // syncSettingsForm(), so the radios snap back to the applied mode. Surface
+    // the reason instead of leaving an unhandled rejection.
+    if (els.syncClientStatus) {
+      els.syncClientStatus.textContent = error?.message || String(error);
+      els.syncClientStatus.className = 'hub-status error';
+      els.syncClientStatus.hidden = false;
+    }
+  }
 });
 
 els.languageInput?.addEventListener('change', async () => {
@@ -8675,13 +8711,51 @@ function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
   return barsDataUrlForMode(mode, size, colors, options);
 }
 
-async function maybeUpdateBarsIcon(options = {}) {
+// The generated tray icon is a pure function of the tray mode plus the rendered
+// numbers, but this ran on every stats push (every 3-5s in live mode) and
+// re-rasterized a 44px canvas through toDataURL each time. Fingerprint the inputs
+// and skip the work when nothing that can change the bitmap changed.
+let trayIconFingerprint = null;
+
+// Only the fields the tray renderers read, so the signature stays cheap on a big
+// stats payload while still moving whenever a rendered number moves.
+function trayIconSignature(mode) {
+  const limits = state.stats?.limits || {};
+  const providers = Array.isArray(limits.providers)
+    ? limits.providers.map((provider) => [
+      provider?.provider,
+      provider?.status,
+      provider?.stale === true ? 1 : 0,
+      provider?.windows?.map((window) => [window?.kind, window?.remainingPercent ?? null, window?.remaining ?? null])
+    ])
+    : null;
+  return JSON.stringify([
+    mode,
+    state.settings?.currency || '',
+    state.settings?.showTrayProviderBadge === true,
+    state.settings?.showLimitUsed === true,
+    state.settings?.trayCustomLayout || null,
+    configuredLimitProviderOrder(),
+    limits.updatedAt || '',
+    providers,
+    state.stats?.periods?.today?.totalTokens ?? null,
+    state.stats?.periods?.month?.totalTokens ?? null
+  ]);
+}
+
+function maybeUpdateBarsIcon(options = {}) {
   if (options.refreshComposers !== false) refreshTrayComposers();
   const mode = state.settings?.trayContent;
   if (!window.TokenMonitorTrayText.isGeneratedTrayIconMode(mode)) return;
   if (!window.tokenMonitor.setTrayIcons) return;
+  // A hidden tray icon needs no bitmap at all: the previous code rasterized one
+  // and shipped it over IPC regardless of showTrayIcon.
+  if (state.settings?.showTrayIcon === false) return;
+  const signature = trayIconSignature(mode);
+  if (signature === trayIconFingerprint) return;
   const dataUrl = trayDataUrlForMode(mode, 44);
-  try { await window.tokenMonitor.setTrayIcons({ [mode]: dataUrl || null }); } catch (_) {}
+  trayIconFingerprint = signature;
+  try { window.tokenMonitor.setTrayIcons({ [mode]: dataUrl || null }); } catch (_) {}
 }
 
 function trayComposerProviderIcon(provider) {
@@ -8956,8 +9030,14 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
   maybeUpdateBarsIcon();
 }
 
+// Mirror of HUB_MANUAL_PROVIDER_IDS (src/shared/limitProviderSources.js), which is
+// what the Hub actually accepts. `codex` and `antigravity` were missing here, so
+// those accounts could not be created from the widget and existing ones (created
+// through the web dashboard) rendered their raw id.
 const HUB_ACCOUNT_PROVIDERS = [
   { id: 'claude', label: 'Claude' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'antigravity', label: 'Antigravity' },
   { id: 'opencode', label: 'OpenCode' },
   { id: 'openrouter', label: 'OpenRouter' },
   { id: 'deepseek', label: 'DeepSeek' },

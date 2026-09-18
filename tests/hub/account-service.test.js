@@ -257,3 +257,75 @@ test('Hub rejects third-party account targets that could reach local services', 
   );
   assert.equal(probed, false);
 });
+
+test('a provider probe that never settles is cut off by the Hub deadline', async () => {
+  const repository = new MemoryRepository();
+  let hang = false;
+  let sawSignal = null;
+  const service = createHubAccountService({
+    store: repository,
+    credentialKey: 'hub-key',
+    probeDeadlineMs: 40,
+    probe: (provider, options, context, runtime) => {
+      sawSignal = runtime?.signal || null;
+      // Never settles and never reacts to the signal: the deadline must still
+      // release the caller.
+      if (hang) return new Promise(() => {});
+      return Promise.resolve(probeRow(provider));
+    }
+  });
+
+  await service.addAccount({ provider: 'deepseek', name: 'slow', credential: { apiKey: 'slow-key' } });
+  hang = true;
+
+  const startedAt = Date.now();
+  const results = await service.refreshAll('test');
+  const elapsed = Date.now() - startedAt;
+
+  assert.ok(elapsed < 3000, `refreshAll should return promptly, took ${elapsed}ms`);
+  assert.ok(sawSignal && typeof sawSignal.aborted === 'boolean', 'the probe should receive an abort signal');
+  assert.equal(sawSignal.aborted, true, 'the deadline should abort the forwarded signal');
+  const failed = results.find((row) => row?.provider === 'deepseek');
+  assert.ok(failed, 'the provider should still be reported after a timeout');
+  // `statusFromError` maps a timeout onto the canonical 'error' status (the wire
+  // vocabulary has no separate timeout state), but it must not read as ok.
+  assert.equal(failed.status, 'error');
+  assert.ok(
+    elapsed >= 30 && elapsed < 2000,
+    `the probe should be cut off near its 40ms deadline, took ${elapsed}ms`
+  );
+});
+
+test('a stalled refresh cycle releases its latch instead of wedging limits', async () => {
+  const repository = new MemoryRepository();
+  let hang = false;
+  const service = createHubAccountService({
+    store: repository,
+    credentialKey: 'hub-key',
+    refreshMs: 60_000,
+    probeDeadlineMs: 600,
+    refreshCeilingOverride: 80,
+    probe: (provider) => {
+      if (hang) return new Promise(() => {});
+      return Promise.resolve(probeRow(provider));
+    }
+  });
+  await service.addAccount({ provider: 'deepseek', name: 'stall', credential: { apiKey: 'k' } });
+
+  // First cycle parks on a never-settling probe and is cut off only by the
+  // per-probe deadline (600ms), which is well past the 80ms latch ceiling.
+  hang = true;
+  const stalledStarted = Date.now();
+  const stalled = await service.refreshAll('test');
+  assert.ok(Array.isArray(stalled), 'a stalled cycle still resolves');
+  assert.ok(Date.now() - stalledStarted >= 500, 'the first cycle should hit the probe deadline');
+
+  // The latch must be free: a healthy probe now succeeds instead of the caller
+  // being handed the dead in-flight cycle forever.
+  hang = false;
+  const healthy = await service.refreshAll('test');
+  assert.ok(
+    healthy.some((row) => row?.status === 'ok'),
+    'a later cycle should run fresh and succeed'
+  );
+});

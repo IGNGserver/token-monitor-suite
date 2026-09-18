@@ -204,3 +204,137 @@ test('GET /api/usage/range falls back to live today when history is empty', asyn
     await hub.stop();
   }
 });
+
+test('aggregateHistoryRange reports the window it actually covered', () => {
+  const history = {
+    daily: [
+      { date: '2026-07-20', tokens: 100, cost: 1 },
+      { date: '2026-07-21', tokens: 50, cost: 0.5 }
+    ]
+  };
+  // The request reaches back before the rolling window starts.
+  const truncated = aggregateHistoryRange(
+    history,
+    new Date('2025-01-01T00:00:00'),
+    new Date('2026-07-21T00:00:00'),
+    { startDate: '2025-01-01', endDate: '2026-07-21' }
+  );
+  assert.equal(truncated.truncated, true);
+  assert.equal(truncated.coveredFrom, '2026-07-20');
+  assert.equal(truncated.coveredTo, '2026-07-21');
+  assert.equal(truncated.requestedStart, '2025-01-01');
+
+  // A fully covered request is not flagged.
+  const covered = aggregateHistoryRange(
+    history,
+    new Date('2026-07-20T00:00:00'),
+    new Date('2026-07-21T00:00:00'),
+    { startDate: '2026-07-20', endDate: '2026-07-21' }
+  );
+  assert.equal(covered.truncated, false);
+  assert.equal(covered.coveredFrom, '2026-07-20');
+});
+
+test('a range reaching past the daily window is topped up from the ledger', async () => {
+  const repository = new MemoryRepository();
+  // Ledger rows for the uncovered head (2024), well before the daily window.
+  await repository.insertUsageEvents('dev-a', [{
+    client: 'codex',
+    model: 'gpt-5',
+    // The ledger stores token components, not a single `tokens` field.
+    inputTokens: 500,
+    outputTokens: 200,
+    costUsd: 7,
+    recordedAt: '2024-06-01T00:00:00.000Z'
+  }]);
+
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', repository, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    // Only a 2026 daily row exists, so the 2024 portion is not in history.
+    await repository.saveDevice({
+      deviceId: 'dev-a',
+      hostname: 'host',
+      platform: 'linux-x64',
+      updatedAt: '2026-07-21T00:00:00.000Z',
+      receivedAt: '2026-07-21T00:00:00.000Z',
+      history: {
+        daily: [{ date: '2026-07-20', tokens: 100, cost: 1, perClient: { codex: { tokens: 100, cost: 1 } }, perModel: { 'gpt-5': { tokens: 100, cost: 1 } } }],
+        monthly: [],
+        summary: {}
+      },
+      periods: {}
+    });
+
+    const range = await hub.getUsageRange({ startDate: '2024-06-01', endDate: '2026-07-20' });
+    assert.equal(range.source, 'history_daily+usage_events', 'the uncovered head should be filled from the ledger');
+    assert.equal(range.headSource, 'usage_events');
+    assert.equal(range.totalTokens, 800, 'in-window 100 plus the ledger head 700');
+    assert.equal(range.costUsd, 8);
+    assert.equal(range.clients.codex, 800);
+  } finally {
+    await hub.stop();
+  }
+});
+
+test('an oversized daily history is capped to the product window on coercion', () => {
+  const { coerceHistory } = require('../../src/shared/history');
+  const rows = [];
+  for (let index = 0; index < 4000; index += 1) {
+    rows.push({ date: new Date(Date.UTC(2020, 0, 1) + index * 86_400_000).toISOString().slice(0, 10), tokens: index, cost: 0 });
+  }
+  const capped = coerceHistory({ daily: rows, monthly: [{ month: '2020-01' }], summary: { activeDays: 3 } });
+  assert.equal(capped.daily.length, 370, 'the daily tier should be trimmed to the product window');
+  // The newest rows are the ones that matter, so they must survive the trim.
+  assert.equal(capped.daily[capped.daily.length - 1].date, rows[rows.length - 1].date);
+  assert.equal(capped.monthly.length, 1, 'the monthly tier is the lifetime rollup and must be kept');
+  assert.deepEqual(capped.summary, { activeDays: 3 });
+  // A history already inside the window must pass through untouched.
+  const small = [{ date: '2026-07-20', tokens: 1, cost: 0 }];
+  assert.equal(coerceHistory({ daily: small }).daily, small);
+});
+
+test('a limits-only ingest preserves the stored usage and ledger', async () => {
+  // docs/API.md accepts `limitsOnly` for mixed-version compatibility, and
+  // mergeDeviceRecord has a branch for it. Stripping the flag before the merge made
+  // that branch unreachable, so a limits-only body zeroed the device's periods,
+  // deleted its sessions and made the next real tick look like a counter reset.
+  const repository = new MemoryRepository();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', repository, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const full = {
+      deviceId: 'dev-limits',
+      hostname: 'host',
+      platform: 'linux-x64',
+      updatedAt: '2026-07-21T00:00:00.000Z',
+      allTime: { totalTokens: 100, costUsd: 1, clients: { codex: 100 }, models: { 'gpt-5': 100 } },
+      today: { totalTokens: 100 },
+      month: { totalTokens: 100 }
+    };
+    await hub.ingest(full);
+    const eventsAfterFull = repository.events.length;
+    assert.ok(eventsAfterFull > 0, 'the full ingest should append ledger rows');
+
+    // The documented mixed-version shape: limits only, no period objects.
+    await hub.ingest({
+      deviceId: 'dev-limits',
+      updatedAt: '2026-07-21T00:05:00.000Z',
+      limitsOnly: true,
+      limits: { providers: [{ provider: 'codex', status: 'ok', windows: [] }] }
+    });
+
+    const stored = await repository.getDeviceRecord('dev-limits');
+    assert.equal(stored.periods.allTime.totalTokens, 100, 'the stored all-time total must survive');
+    assert.equal(stored.periods.today.totalTokens, 100, 'the stored today total must survive');
+    assert.equal(repository.events.length, eventsAfterFull, 'a limits-only update must not touch the ledger');
+
+    // And a following real tick must not be seen as a counter reset.
+    await hub.ingest({ ...full, updatedAt: '2026-07-21T00:10:00.000Z' });
+    const stats = await hub.getStats();
+    const device = stats.devices.find((entry) => entry.deviceId === 'dev-limits');
+    assert.equal(device.periods.allTime.totalTokens, 100);
+  } finally {
+    await hub.stop();
+  }
+});

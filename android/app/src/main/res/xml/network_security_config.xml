@@ -1,9 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext is permitted at the platform layer because the Android client
+  supports an intentional LAN/VPN Hub over plain HTTP — the same case the desktop
+  covers with "Allow remote HTTP on a trusted LAN/VPN".
+
+  The real gate is application-level: HubApiFactory.checkedUrl() rejects a
+  non-HTTPS Hub unless the user enabled that opt-in, so cleartext is never used
+  implicitly. Keeping the platform policy in step with the app avoids the
+  misleading state where the checkbox says HTTP is allowed but the OS blocks the
+  request anyway (Android's platform policy overrides the manifest flag on API 24+).
+
+  User-installed CAs are deliberately NOT trusted in release builds: trusting them
+  would let any user-added root silently MITM every HTTPS Hub, including for users
+  who never enabled plain HTTP. Debug builds add them via debug-overrides.
+-->
 <network-security-config>
   <base-config cleartextTrafficPermitted="true">
     <trust-anchors>
       <certificates src="system" />
-      <certificates src="user" />
     </trust-anchors>
   </base-config>
+  <debug-overrides>
+    <trust-anchors>
+      <certificates src="user" />
+    </trust-anchors>
+  </debug-overrides>
 </network-security-config>

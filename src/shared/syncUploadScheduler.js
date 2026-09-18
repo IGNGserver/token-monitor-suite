@@ -4,6 +4,13 @@ const DEFAULT_SYNC_UPLOAD_INTERVAL_MS = 0;
 const DEFAULT_RETRY_BASE_MS = 1000;
 const DEFAULT_RETRY_MAX_MS = 30 * 1000;
 const DEFAULT_FLUSH_TIMEOUT_MS = 15 * 1000;
+// A response that is neither retryable nor a configuration error (e.g. a 413 from
+// an older Hub with a smaller body cap, or a 403 injected by a proxy) used to stop
+// uploading for good: `failureCode` only clears on success and the terminal path
+// armed no timer, so a long-running agent silently stopped reporting until the
+// process was restarted. Re-attempt at a slow fixed cadence instead; a genuinely
+// wrong configuration (`NON_RETRYABLE_UPLOAD_CODES`) still retries nothing.
+const DEFAULT_TERMINAL_RETRY_MS = 15 * 60 * 1000;
 const NON_RETRYABLE_UPLOAD_CODES = new Set([
   'hub_not_configured',
   'hub_transport_unavailable',
@@ -93,6 +100,7 @@ function createSyncUploadScheduler(options = {}) {
   const retryBaseMs = positiveMs(options.retryBaseMs, DEFAULT_RETRY_BASE_MS);
   const retryMaxMs = Math.max(retryBaseMs, positiveMs(options.retryMaxMs, DEFAULT_RETRY_MAX_MS));
   const flushTimeoutMs = positiveMs(options.flushTimeoutMs, DEFAULT_FLUSH_TIMEOUT_MS);
+  const terminalRetryMs = positiveMs(options.terminalRetryMs, DEFAULT_TERMINAL_RETRY_MS);
 
   let stopped = false;
   let generation = 1;
@@ -100,6 +108,11 @@ function createSyncUploadScheduler(options = {}) {
   let pending = null;
   let active = null;
   let timer = null;
+  // Why the pending timer exists. A failure backoff or a slow terminal retry must
+  // survive an arriving snapshot (otherwise a steady stream of updates would keep
+  // pushing the retry back, or clear it entirely); a plain interval wait may be
+  // reset so new data goes out promptly.
+  let timerReason = null;
   let lastUploadAt = null;
   let lastAttemptAt = null;
   let lastSuccessAt = null;
@@ -118,6 +131,7 @@ function createSyncUploadScheduler(options = {}) {
   function clearScheduledTimer() {
     if (timer !== null) clearTimer(timer);
     timer = null;
+    timerReason = null;
     nextRetryAt = null;
   }
 
@@ -149,8 +163,10 @@ function createSyncUploadScheduler(options = {}) {
     clearScheduledTimer();
     const delay = Math.max(0, Number(delayMs) || 0);
     nextRetryAt = new Date(Number(now()) + delay).toISOString();
+    timerReason = reason;
     timer = setTimer(() => {
       timer = null;
+      timerReason = null;
       nextRetryAt = null;
       if (stopped || !pending || active) {
         updateState();
@@ -282,6 +298,13 @@ function createSyncUploadScheduler(options = {}) {
         // already folded into `delay` as a floor; manual retryNow() is the
         // explicit escape hatch for an operator who wants to bypass it.
         schedule(delay, hadNewerPending ? 'retry-latest' : 'retry');
+      } else if (!NON_RETRYABLE_UPLOAD_CODES.has(failureCode)) {
+        // Neither quickly retryable nor a configuration error (a 413 from an older
+        // Hub, a proxy's 403): keep a slow cadence so the uploader cannot wedge
+        // until the process is restarted. Scheduled here rather than at enqueue
+        // time so the timer is armed even when the failure surfaces before any
+        // later snapshot arrives.
+        schedule(terminalRetryMs, 'terminal-retry');
       } else {
         clearScheduledTimer();
         updateState();
@@ -299,18 +322,24 @@ function createSyncUploadScheduler(options = {}) {
     // retryable transport failure into a rapid retry loop. Replace the pending
     // payload while preserving the existing backoff; manual retry/flush remains
     // available when an operator wants to attempt delivery immediately.
-    const preserveRetryBackoff = failureRetryable && timer !== null;
-    if (timer !== null && !preserveRetryBackoff) clearScheduledTimer();
+    // Preserve a failure-driven schedule (transport backoff or the slow terminal
+    // retry) so arriving data cannot postpone or cancel recovery. An interval wait
+    // is resettable: a fresh snapshot should go out on its own cadence.
+    const preserveScheduledRetry = timer !== null && timerReason !== 'interval' && timerReason !== 'trailing';
+    if (timer !== null && !preserveScheduledRetry) clearScheduledTimer();
     if (active) {
       updateState();
       return Promise.resolve({ queued: true, revision: item.revision });
     }
-    if (preserveRetryBackoff) {
+    if (preserveScheduledRetry) {
       updateState();
       return Promise.resolve({ queued: true, revision: item.revision });
     }
     const canStartAutomatically = failureCode === null || failureRetryable;
     if (!canStartAutomatically) {
+      // The failure path already armed the slow retry (or nothing, for a
+      // configuration error). Re-arming here would push the cadence back on every
+      // arriving snapshot, so leave the existing schedule in place.
       updateState();
       return Promise.resolve({ queued: true, revision: item.revision });
     }

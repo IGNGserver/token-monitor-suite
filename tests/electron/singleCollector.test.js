@@ -1,0 +1,134 @@
+'use strict';
+
+// Guards the single-collector invariant.
+//
+// When a headless agent is running on the same machine it already collects and
+// posts this device's usage. The widget's client-mode sync collector used to
+// start anyway: its beforeEnqueue() refused every upload, but the runtime still
+// spawned a full tokscale scan set plus a chokidar watch over the same trees, so
+// two collectors ran concurrently. Measured on a real install that was ~170% of
+// one core for two processes that should have been one collector plus one relay.
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const rootDir = path.join(__dirname, '..', '..');
+const mainSource = fs.readFileSync(path.join(rootDir, 'src', 'electron', 'main.js'), 'utf8');
+
+function functionBody(source, name) {
+  const start = source.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `${name} should exist`);
+  // Walk braces so the body is captured even with nested functions/templates.
+  const open = source.indexOf('{', start);
+  let depth = 0;
+  for (let index = open; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1;
+    else if (source[index] === '}') {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  throw new Error(`unbalanced braces in ${name}`);
+}
+
+test('the sync collector refuses to start while an external agent is active', () => {
+  const body = functionBody(mainSource, 'startSyncCollector');
+  assert.match(
+    body,
+    /if \(isExternalAgentActive\(\)\)/,
+    'startSyncCollector must consult isExternalAgentActive() before building a runtime'
+  );
+  // The gate has to come before the runtime is constructed, otherwise the scans
+  // still start and only the upload is suppressed.
+  const gateIndex = body.indexOf('if (isExternalAgentActive())');
+  const runtimeIndex = body.indexOf('createDeviceRuntime(');
+  const sinkIndex = body.indexOf('createSyncUploadSink(');
+  assert.notEqual(runtimeIndex, -1, 'the runtime should still be created on the normal path');
+  assert.ok(
+    gateIndex < runtimeIndex,
+    'the agent gate must run before createDeviceRuntime(), not after'
+  );
+  assert.ok(
+    gateIndex < sinkIndex,
+    'the agent gate must run before createSyncUploadSink(), not after'
+  );
+  // Returning early is what actually prevents the second collector.
+  const gateBody = body.slice(gateIndex, gateIndex + 320);
+  assert.match(gateBody, /return;/, 'the gated branch must return instead of falling through');
+  assert.match(gateBody, /publishSyncHealth\(\)/, 'the relay state should still be published to the renderer');
+});
+
+test('the relay state is a known sync-health state in every locale', () => {
+  const rendererDir = path.join(rootDir, 'src', 'electron', 'renderer');
+  const appSource = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const i18n = require(path.join(rendererDir, 'i18n.js'));
+
+  const mapping = appSource.match(/const SYNC_HEALTH_STATE_KEYS = \{([\s\S]*?)\n\};/);
+  assert.ok(mapping, 'SYNC_HEALTH_STATE_KEYS should exist');
+  const relayKey = mapping[1].match(/relay:\s*'([^']+)'/);
+  assert.ok(relayKey, "the renderer must map the 'relay' state to a translation key");
+
+  const missing = [];
+  for (const locale of Object.keys(i18n.MESSAGES)) {
+    if (i18n.MESSAGES[locale]?.[relayKey[1]] === undefined) missing.push(locale);
+  }
+  assert.deepEqual(missing, [], `locales missing ${relayKey[1]}: ${missing.join(', ')}`);
+});
+
+test('every sync-health state the main process can set is renderable', () => {
+  const rendererDir = path.join(rootDir, 'src', 'electron', 'renderer');
+  const appSource = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const mapping = appSource.match(/const SYNC_HEALTH_STATE_KEYS = \{([\s\S]*?)\n\};/)[1];
+  const known = new Set([...mapping.matchAll(/^\s*'?([a-z-]+)'?:/gm)].map((match) => match[1]));
+
+  // Collect the state literals assigned through updateSyncHealth({ state: ... })
+  // plus the initial syncHealth literal, so a new state cannot silently render
+  // as "unknown".
+  const assigned = new Set();
+  for (const match of mainSource.matchAll(/state:\s*'([a-z-]+)'/g)) assigned.add(match[1]);
+  for (const match of mainSource.matchAll(/state:\s*([a-z]+)\s*\?/g)) assigned.add(match[1]);
+
+  const unknown = [...assigned].filter((state) => !known.has(state));
+  assert.deepEqual(unknown, [], `sync-health states with no renderer label: ${unknown.join(', ')}`);
+});
+
+test('stats pushes are coalesced instead of broadcast per tick', () => {
+  // Each push rebuilt the tray menu, re-rasterized the generated tray icon, cloned
+  // the record three times and serialized a ~1.3 MB IPC message, and the producer
+  // runs on every collector tick (watch ticks re-arm every 1.5s).
+  const sendBody = functionBody(mainSource, 'sendPush');
+  assert.match(sendBody, /PUSH_COALESCE_MS/, 'the push must go through the coalescing window');
+  assert.match(sendBody, /pendingPush = payload;/, 'only the newest payload should be kept');
+  assert.match(
+    sendBody,
+    /if \(pendingPushTimer !== null\) return;/,
+    'a queued push must not schedule a second timer'
+  );
+  assert.doesNotMatch(
+    sendBody,
+    /mainWindow\.webContents\.send/,
+    'sendPush must not broadcast synchronously; the flush does that'
+  );
+
+  const flushBody = functionBody(mainSource, 'flushPush');
+  assert.match(flushBody, /updateTrayDisplay\(\)/, 'the tray refresh belongs to the flush');
+  assert.match(flushBody, /mainWindow\.webContents\.send\('stats:push'/, 'the flush performs the broadcast');
+  // The history revision must be compared across the whole coalesced window so the
+  // dashboard is notified exactly once, and only when it really moved.
+  assert.match(flushBody, /nextHistoryRevision !== previousHistoryRevision/);
+
+  // A queued push must still reach the consumers on the read path and on quit.
+  assert.match(mainSource, /function flushPendingPush\(\)/);
+  // A plain slice: the brace-walker above is not string/template aware and these
+  // bodies contain literals with braces.
+  const fetchStart = mainSource.indexOf('async function fetchStats(');
+  assert.notEqual(fetchStart, -1, 'fetchStats should exist');
+  assert.match(
+    mainSource.slice(fetchStart, fetchStart + 300),
+    /flushPendingPush\(\)/,
+    'fetchStats should not report a stale snapshot'
+  );
+  assert.match(mainSource, /flushPendingPush\(\);\n {2}macWidgetPublisher\?\.stop\(\);/);
+});

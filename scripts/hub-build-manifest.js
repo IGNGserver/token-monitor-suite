@@ -57,6 +57,7 @@ const NODE_RUNTIME_SOURCE_FILES = Object.freeze([
   'src/shared/dailyHistoryArchive.js',
   'src/shared/deepseekBalanceHistory.js',
   'src/shared/deepseekHarnessUsage.js',
+  'src/shared/exchangeRates.js',
   'src/shared/grokLimits.js',
   'src/shared/hashKey.js',
   'src/shared/hermesProfiles.js',

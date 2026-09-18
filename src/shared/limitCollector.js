@@ -31,7 +31,7 @@ const openrouterLimits = require('./openrouterLimits');
 const thirdPartyLimits = require('./thirdPartyLimits');
 const { sharedDataDir } = require('./config');
 const { recordConsumption } = require('./deepseekBalanceHistory');
-const { codexAccountKey, codexAuthIdentity } = require('./codexAuth');
+const { codexAccountKey, codexAuthIdentity, decodeJwtPayload } = require('./codexAuth');
 const minimaxLimits = require('./minimaxLimits');
 const { minimaxToken, minimaxBaseUrl, parseMinimaxTiers, fetchMinimaxLimits } = minimaxLimits;
 const mimoLimits = require('./mimoLimits');
@@ -3508,7 +3508,10 @@ async function fetchAntigravityCloudLimits(options = {}, deps = {}) {
   };
   const projectId = String(options.antigravityProjectId || '').trim();
   const refreshToken = String(options.antigravityRefreshToken || '').trim();
-  const configuredAccountEmail = String(options.antigravityAccountEmail || '').trim().toLowerCase();
+  const idTokenEmail = options.antigravityIdToken
+    ? String(decodeJwtPayload(options.antigravityIdToken)?.email || '').trim().toLowerCase()
+    : '';
+  const configuredAccountEmail = String(options.antigravityAccountEmail || idTokenEmail || '').trim().toLowerCase();
   const fallbackAccountKey = hashKey('antigravity', configuredAccountEmail || refreshToken || projectId || accessToken);
   let lastError = errorWithStatus('unavailable', 'Antigravity cloud quota unavailable');
   for (const baseUrl of baseUrls) {
@@ -3537,11 +3540,13 @@ async function fetchAntigravityCloudLimits(options = {}, deps = {}) {
         || payload?.userStatus?.userTier?.name
         || response?.userStatus?.userTier?.name
         || '';
+      const planLabel = antigravityPlanLabelFromParts(plan);
       return [normalizeLimitProvider({
         provider: 'antigravity',
         accountKey,
         accountEmail,
-        accountLabel: antigravityPlanLabelFromParts(plan) || 'Antigravity',
+        accountLabel: planLabel || '',
+        planLabel: planLabel || '',
         source: 'oauth',
         sourceDetail: 'managed',
         credentialOrigin: 'manual',
@@ -3558,7 +3563,8 @@ async function fetchAntigravityCloudLimits(options = {}, deps = {}) {
     provider: 'antigravity',
     accountKey: fallbackAccountKey,
     accountEmail: configuredAccountEmail,
-    accountLabel: 'Antigravity',
+    accountLabel: '',
+    planLabel: '',
     source: 'oauth',
     sourceDetail: 'managed',
     credentialOrigin: 'manual',

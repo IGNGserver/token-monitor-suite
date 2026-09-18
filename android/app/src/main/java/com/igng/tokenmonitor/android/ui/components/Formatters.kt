@@ -236,3 +236,28 @@ fun limitAccountDisplayName(
     }
   }
 }
+
+/**
+ * Connection label for a device row.
+ *
+ * `stale` alone is not enough: the Hub keeps a snapshot for `staleAfterMs`
+ * (10 minutes by default), so a device that stopped reporting still reads "在线"
+ * for that whole window, and a device whose every client reports `missing` reads
+ * online too. The backend already publishes the per-client truth in
+ * `clientStatus`, so use it.
+ */
+fun deviceConnectionLabel(stale: Boolean, clientStatus: Map<String, String>?): String {
+  if (stale) return "离线"
+  val states = clientStatus.orEmpty().values.map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+  return when {
+    states.isEmpty() -> "在线"
+    states.all { it == "missing" } -> "未发现客户端"
+    states.any { it == "active" } -> "在线"
+    states.any { it == "waiting" } -> "等待活动"
+    else -> "在线"
+  }
+}
+
+/** True when a device should count as online in the fleet summary. */
+fun deviceCountsAsOnline(stale: Boolean, clientStatus: Map<String, String>?): Boolean =
+  !stale && deviceConnectionLabel(stale, clientStatus) == "在线"

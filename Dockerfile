@@ -2,7 +2,8 @@ FROM node:22.13.1-bookworm-slim AS dependencies
 
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+COPY scripts/prune-hub-deps.js ./scripts/prune-hub-deps.js
+RUN npm ci --omit=dev && node scripts/prune-hub-deps.js && npm cache clean --force
 
 FROM node:22.13.1-bookworm-slim AS runtime
 

@@ -558,6 +558,9 @@
               </label>
               <div id="syncClientStatus" class="hub-status" hidden></div>
               <div id="syncHealthStatus" class="hub-status" role="status" aria-live="polite" hidden></div>
+              <div class="settings-actions">
+                <button id="saveSettingsButton" type="button" class="primary-button" data-i18n="settings.sync.saveConnection">Save connection</button>
+              </div>
             </div>
           </div>
         </div>
@@ -653,6 +656,7 @@
     <button id="floatingBubbleTab" class="floating-bubble-tab" type="button" title="Show Token Monitor" aria-label="Show Token Monitor" data-i18n-title="floatingBubble.expand" data-i18n-aria-label="floatingBubble.expand">
       <span id="floatingBubbleContent" aria-hidden="true">Σ</span>
     </button>
+    <script src="../../shared/limitProviders.js"></script>
     <script src="trayBars.js"></script>
     <script src="usageCharts.js"></script>
     <script src="homeOverview.js"></script>

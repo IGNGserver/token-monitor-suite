@@ -10,6 +10,7 @@ import {
 } from './api.js';
 import { applyI18n, resolveLocale, t } from './i18n.js';
 import {
+  configureRates,
   formatCompact,
   formatCost,
   formatNumber,
@@ -315,6 +316,9 @@ const state = {
   customRange: null,
   customPeriod: null,
   stream: 'offline',
+  // Wall-clock time of the last data frame, so the UI can state how old the
+  // displayed numbers are instead of implying they are current.
+  dataAsOf: null,
   stopStream: null,
   toastTimer: null,
   navOpen: false,
@@ -395,7 +399,30 @@ function showToast(message) {
   state.toastTimer = setTimeout(() => els.toast.classList.add('hidden'), 2200);
 }
 
-function setStreamStatus(status) {
+/**
+ * Build a client -> model -> value map from session rows.
+ *
+ * Used where the wire payload only carries flat per-client and per-model maps but
+ * the UI renders a nested split (Usage -> Tools under a custom range).
+ */
+function deriveClientModels(sessions, field) {
+  const result = {};
+  for (const session of Object.values(sessions || {})) {
+    const client = String(session?.client || '').trim();
+    if (!client) continue;
+    const values = session?.[field];
+    if (!values || typeof values !== 'object') continue;
+    const bucket = result[client] || (result[client] = {});
+    for (const [model, value] of Object.entries(values)) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || numeric <= 0) continue;
+      bucket[model] = (bucket[model] || 0) + numeric;
+    }
+  }
+  return result;
+}
+
+function setStreamStatus(status, meta = {}) {
   state.stream = status;
   const map = {
     connecting: 'status.connecting',
@@ -404,13 +431,20 @@ function setStreamStatus(status) {
     disconnected: 'status.offline',
     offline: 'status.offline',
     unauthorized: 'status.unauthorized',
+    'idle-timeout': 'status.idleTimeout',
     error: 'status.error'
   };
   const live = status === 'live';
   els.streamStatus.dataset.state = live ? 'live' : (status === 'unauthorized' || status === 'error' ? 'error' : 'offline');
   els.streamStatusText.textContent = tr(map[status] || 'status.offline');
   els.liveLabel.textContent = live ? tr('stats.live.on') : tr('stats.live.off');
-  if (live || status === 'unauthorized') els.streamStatus.title = '';
+  // Always publish the age of the displayed data: the badge alone used to read
+  // "live" while the numbers could be arbitrarily old.
+  const at = Number(meta.lastEventAt) || null;
+  if (at) state.dataAsOf = at;
+  els.streamStatus.title = state.dataAsOf
+    ? `${tr('status.dataAsOf')} ${new Date(state.dataAsOf).toLocaleTimeString()}`
+    : '';
   if (status === 'unauthorized') showAuth(true);
 }
 
@@ -1045,7 +1079,7 @@ function renderHome() {
               <span class="swatch" style="background:${row.color}"></span>
               <div class="row-copy">
                 <div class="row-name">${escapeHtml(row.name)}</div>
-                <div class="row-sub">${row.platformDisplay || devicePlatformLabel(row.platform, row.osName, row.osVersion)}${row.stale ? ` · ${tr('devices.stale')}` : ''}</div>
+                <div class="row-sub">${escapeHtml(row.platformDisplay || devicePlatformLabel(row.platform, row.osName, row.osVersion))}${row.stale ? ` · ${escapeHtml(tr('devices.stale'))}` : ''}</div>
               </div>
             </div>
             <div class="row-metrics">
@@ -2173,7 +2207,8 @@ function connectStream() {
   state.stopStream = openStatsStream({
     secret: state.secret,
     onStatus: setStreamStatus,
-    onStats: (stats) => {
+    onStats: (stats, _event, meta) => {
+      if (meta?.lastEventAt) state.dataAsOf = meta.lastEventAt;
       applyStatsSnapshot(stats);
     },
     onRetry: (delay) => {
@@ -3103,6 +3138,11 @@ async function applyCustomRange() {
       clientCosts: payload.clientCosts || {},
       models: payload.models || {},
       modelCosts: payload.modelCosts || {},
+      // /api/usage/range does not nest client->model maps, so derive them from the
+      // returned sessions. Without this the per-client model split read "No usage"
+      // for every custom range while the preset periods showed it.
+      clientModels: payload.clientModels || deriveClientModels(payload.sessions, 'models'),
+      clientModelCosts: payload.clientModelCosts || deriveClientModels(payload.sessions, 'modelCosts'),
       projects: payload.projects || {},
       sessions: payload.sessions || {}
     };
@@ -3814,6 +3854,20 @@ async function init() {
     }
   }
   refreshPwaUi();
+
+  // Display rates come from the Hub so this dashboard renders costs in the same
+  // currency units as the widget (which uses live rates); the built-in table is
+  // only a fallback while the fetch is in flight or unavailable. Public route, no
+  // secret needed, and a failure must never block the boot sequence.
+  try {
+    const ratesResponse = await fetch('/api/rates', { headers: { accept: 'application/json' } });
+    if (ratesResponse.ok) {
+      const payload = await ratesResponse.json();
+      if (payload?.rates) configureRates(payload.rates, { source: payload.source, date: payload.date });
+    }
+  } catch {
+    /* keep the built-in rates */
+  }
 
   try {
     state.health = await fetchHealth();

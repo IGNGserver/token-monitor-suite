@@ -111,7 +111,18 @@ const {
   resolveMacWidgetConfiguration
 } = require('./macWidgetPublisher');
 const { parseMacWidgetDeepLink } = require('./macWidgetDeepLink');
-const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
+// Loaded lazily: discordRpc.js requires @xhayper/discord-rpc at module scope,
+// which costs ~240 ms warm / ~520 ms cold and 170 modules on every launch, for a
+// feature that is off by default (settings.discordRpcEnabled === false). The
+// first real call pulls it in; when the feature stays disabled it is never loaded.
+let discordRpcApi = null;
+function loadDiscordRpc() {
+  if (!discordRpcApi) discordRpcApi = require('./discordRpc');
+  return discordRpcApi;
+}
+function startDiscordRpc(...args) { return loadDiscordRpc().startDiscordRpc(...args); }
+function stopDiscordRpc(...args) { return loadDiscordRpc().stopDiscordRpc(...args); }
+function updateDiscordRpc(...args) { return loadDiscordRpc().updateDiscordRpc(...args); }
 const linuxAutostart = require('./linuxAutostart');
 const {
   buildTrayIcon,
@@ -132,7 +143,7 @@ const {
 } = require('./trayModeSettings');
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
 const { classifyStreamFailure } = require('./syncConnection');
-const { composeLocalSyncStats } = require('./syncDisplayStats');
+const { composeLocalSyncStats, reattachLocalNativeView } = require('./syncDisplayStats');
 const { normalizeSyncUploadIntervalMs } = require('../shared/syncUploadScheduler');
 const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const {
@@ -1658,6 +1669,17 @@ function startSyncCollector() {
   stopSyncCollector();
   mode = 'sync';
   updateSyncHealth('local', { state: 'collecting', failureCode: null });
+  // A headless agent on this machine already collects and posts this device's
+  // usage, and beforeEnqueue() below refuses every upload in that state. Starting
+  // the runtime anyway spawns a second full scan set (tokscale + a chokidar watch
+  // over the same trees) whose records are all discarded — measured at roughly
+  // doubling this machine's collector CPU. The gate is read once here; a later
+  // agent start/stop is picked up by the next mode transition or runtime refresh.
+  if (isExternalAgentActive()) {
+    updateSyncHealth('local', { state: 'relay', failureCode: null });
+    publishSyncHealth();
+    return;
+  }
   const syncUploadSink = createSyncUploadSink({
     intervalMs: syncUploadIntervalMs(),
     flushTimeoutMs: HUB_REQUEST_TIMEOUT_MS,
@@ -1803,8 +1825,35 @@ function scheduleMacWidgetSnapshot(stats = latestStats) {
   return ensureMacWidgetPublisher()?.publish(stats) || false;
 }
 
+// Coalesce stats pushes.
+//
+// Each push rebuilt the tray menu, re-rasterized the generated tray icon, cloned
+// the record three times and serialized a ~1.3 MB structured-clone IPC message,
+// and the producer runs on every collector tick (watch ticks re-arm every 1.5s).
+// Nothing here needs sub-frame latency, so keep only the newest payload and flush
+// on a short trailing timer. The history-revision comparison is computed across
+// the whole coalesced window so the dashboard is told exactly once, and only when
+// the revision really moved.
+const PUSH_COALESCE_MS = 200;
+let pendingPush = null;
+let pendingPushTimer = null;
+let pendingPushHistoryRevision = null;
+
 function sendPush(payload) {
-  const previousHistoryRevision = statsHistoryRevision(latestStats);
+  if (payload?.data?.stats) pendingPushHistoryRevision ??= statsHistoryRevision(latestStats);
+  pendingPush = payload;
+  if (pendingPushTimer !== null) return;
+  pendingPushTimer = setTimeout(flushPush, PUSH_COALESCE_MS);
+  pendingPushTimer.unref?.();
+}
+
+function flushPush() {
+  pendingPushTimer = null;
+  const payload = pendingPush;
+  pendingPush = null;
+  if (!payload) return;
+  const previousHistoryRevision = pendingPushHistoryRevision;
+  pendingPushHistoryRevision = null;
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
@@ -1825,6 +1874,16 @@ function sendPush(payload) {
       try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
     }
   }
+}
+
+// Deliver anything still queued, e.g. before quitting or before a synchronous
+// reader asks for latestStats.
+function flushPendingPush() {
+  if (pendingPushTimer !== null) {
+    clearTimeout(pendingPushTimer);
+    pendingPushTimer = null;
+  }
+  if (pendingPush) flushPush();
 }
 
 function statsHistoryRevision(stats) {
@@ -1940,7 +1999,13 @@ function startLocalCollector() {
       const visibleSummary = summary;
       localDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       lastCollectedDevice = localDevice;
-      localStats = withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]);
+      // aggregateDevices() drops the Reasonix native view (it is a wire-record
+      // whitelist), so reattach it here — otherwise local mode, the default, has
+      // no Reasonix sessions or projects at all while sync mode does.
+      localStats = reattachLocalNativeView(
+        withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]),
+        localDevice
+      );
       updateDiscordRpc(localStats, settings.currency);
       sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } });
       updateSyncHealth('local', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null });
@@ -2724,6 +2789,9 @@ async function writeExportTo(dir, periods, options = {}) {
 }
 
 async function fetchStats(options = {}) {
+  // Apply anything still inside the push coalescing window so callers never see a
+  // snapshot older than one this process already produced.
+  flushPendingPush();
   const force = Boolean(options?.force);
   // forceHistory stays independent of `force` on purpose: tool settings, account
   // sign-ins and limits actions all refresh with { force: true }, so folding the
@@ -4393,6 +4461,9 @@ app.on('second-instance', focusExistingWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('before-quit', () => {
   quitRequested = true;
+  // Deliver a queued push before tearing down so the final numbers reach the
+  // renderer/tray instead of being dropped with the timer.
+  flushPendingPush();
   macWidgetPublisher?.stop();
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);

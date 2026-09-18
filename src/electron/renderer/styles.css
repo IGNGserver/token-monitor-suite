@@ -64,7 +64,26 @@ html, body {
   -webkit-user-select: none;
 }
 button, input, select { font: inherit; }
-button:focus, button:focus-visible { outline: none; }
+/* Scope the reset: `:focus-visible` still needs an indicator (see below). */
+button:focus:not(:focus-visible) { outline: none; }
+button:focus-visible,
+.icon-button:focus-visible,
+.refresh-button:focus-visible,
+.tab:focus-visible,
+.mode-button:focus-visible,
+.settings-actions button:focus-visible,
+.back-home-button:focus-visible,
+.home-empty-action:focus-visible,
+.period-calendar-button:focus-visible {
+  outline: 2px solid var(--focus-ring, #6ab4f0);
+  outline-offset: 2px;
+}
+/* Range inputs had their border zeroed, so a border-colour focus style could
+   never show; give them a real ring instead. */
+.settings-panel input[type="range"]:focus-visible {
+  outline: 2px solid var(--focus-ring, #6ab4f0);
+  outline-offset: 3px;
+}
 input, textarea, [contenteditable="true"] {
   user-select: text;
   -webkit-user-select: text;
@@ -579,6 +598,9 @@ body.is-windows #closeButton:focus-visible {
   opacity: 0;
   pointer-events: none;
   transform: translateY(-4px);
+  /* Visibility (not just opacity) so the collapsed panel leaves the tab order and
+     the accessibility tree; app.js also toggles `inert` for the same reason. */
+  visibility: hidden;
 }
 .settings-panel label, .settings-field { display: grid; min-width: 0; gap: 4px; color: var(--muted); font-size: 11px; }
 .settings-field-label { min-width: 0; }
@@ -919,6 +941,8 @@ span.settings-note.settings-item-desc {
   grid-template-rows: 0fr;
   pointer-events: none;
   margin-top: 0 !important;
+  /* Leave the tab order and accessibility tree when collapsed. */
+  visibility: hidden;
 }
 
 /* Convert Grid Gaps to animatable margins for accordion containers */
@@ -1490,7 +1514,7 @@ span.settings-note.settings-item-desc {
   justify-content: flex-start;
   gap: 8px;
   margin: 0;
-  color: var(--fg);
+  color: var(--text);
   font-size: 11px;
   cursor: pointer;
   user-select: none;
@@ -1619,7 +1643,7 @@ span.settings-note.settings-item-desc {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--fg);
+  color: var(--text);
   font-size: 11px;
   font-weight: 500;
   text-overflow: ellipsis;
@@ -2958,6 +2982,16 @@ html.is-windows .settings-panel select option {
   -webkit-mask-image: url(../../../assets/icons/moonshot.svg);
   mask-image: url(../../../assets/icons/moonshot.svg);
 }
+.limit-icon-commandcode {
+  -webkit-mask-image: url(../../../assets/icons/commandcode.svg);
+  mask-image: url(../../../assets/icons/commandcode.svg);
+}
+/* A user-configured third-party endpoint has no brand of its own; newapi.svg is
+   the generic provider glyph already shipped for that role. */
+.limit-icon-thirdparty {
+  -webkit-mask-image: url(../../../assets/icons/newapi.svg);
+  mask-image: url(../../../assets/icons/newapi.svg);
+}
 .limit-icon-mimo {
   -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);
   mask-image: url(../../../assets/icons/xiaomi.svg);
@@ -3159,7 +3193,7 @@ html.is-windows .settings-panel select option {
 }
 .service-status-description {
   overflow: hidden;
-  color: var(--fg);
+  color: var(--text);
   font-size: 11px;
   line-height: 1.25;
   text-overflow: ellipsis;
@@ -4986,6 +5020,7 @@ body.is-windows[data-windows-surface] .view-switcher-menu-item.is-current {
   opacity: 1 !important;
   transform: none !important;
   pointer-events: auto !important;
+}
 
 /* Custom tray/bubble composer ------------------------------------------------
    The preview is deliberately a menu-bar-like recessed strip. Its children

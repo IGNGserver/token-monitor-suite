@@ -33,4 +33,38 @@ config.deb.fpm = [
   `${metainfoPath}=/usr/share/metainfo/token-monitor.metainfo.xml`
 ];
 
+// Keep only the Chromium locale packs the UI can actually select (renderer
+// i18n.js exposes auto/en/zh-TW/zh-CN/ko/ja). electron-builder ships all 55,
+// which is ~42 MB of a 139 MB AppImage for languages the app does not offer;
+// Chromium falls back to en-US.pak for anything removed. Needs the en-US/en-GB
+// pair plus the three CJK packs (zh-CN and zh-TW are distinct builds).
+const KEPT_LOCALE_PACKS = new Set(['en-US', 'en-GB', 'zh-CN', 'zh-TW', 'ko', 'ja']);
+
+function pruneChromiumLocales(context) {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const resources = path.join(context.appOutDir, 'resources');
+  const candidates = [
+    path.join(context.appOutDir, 'locales'),
+    path.join(resources, 'locales')
+  ];
+  let removed = 0;
+  for (const dir of candidates) {
+    let entries;
+    try { entries = fs.readdirSync(dir); } catch (_) { continue; }
+    for (const entry of entries) {
+      if (!entry.endsWith('.pak')) continue;
+      if (KEPT_LOCALE_PACKS.has(entry.slice(0, -'.pak'.length))) continue;
+      try { fs.rmSync(path.join(dir, entry)); removed += 1; } catch (_) { /* keep going */ }
+    }
+  }
+  if (removed > 0) {
+    console.log(`[electron-builder] pruned ${removed} unused Chromium locale packs`);
+  }
+}
+
+config.afterPack = async (context) => {
+  pruneChromiumLocales(context);
+};
+
 module.exports = config;

@@ -78,13 +78,16 @@ function readActiveAccount({ home = os.homedir() } = {}) {
 
 function runTokscaleSubcommand(args, { stdin = null, timeoutMs = 30000 } = {}) {
   return new Promise((resolve, reject) => {
-    const { tokscaleCommand } = require('./collector');
+    const { tokscaleCommand, terminateChild, abandonChildStreams } = require('./collector');
     const { bin, prefixArgs, env } = tokscaleCommand();
     const child = spawn(bin, [...prefixArgs, 'cursor', ...args], { env, windowsHide: true });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
-      child.kill('SIGTERM');
+      // SIGTERM alone leaves a surviving child burning CPU with its stdio
+      // handlers still appending to these buffers; escalate and detach.
+      terminateChild(child);
+      abandonChildStreams(child);
       reject(new Error(`tokscale cursor ${args[0]} timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });

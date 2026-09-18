@@ -48,7 +48,10 @@ data class HubUiState(
   val analyticsPeriod: AnalyticsPeriodKind = AnalyticsPeriodKind.Today,
   val customRange: CustomRangeSelection? = null,
   val customRangeResult: UsageRangeDto? = null,
-  val customRangeLoading: Boolean = false
+  val customRangeLoading: Boolean = false,
+  /** Set when /api/history failed: trends and model splits fall back to the
+   *  narrower historyPreview until it succeeds, so the UI can offer a retry. */
+  val historyError: String? = null
 )
 
 @HiltViewModel
@@ -84,9 +87,13 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
   
   fun refreshHistory() = viewModelScope.launch {
     when (val result = repository.history()) {
-      is HubResult.Success -> _state.value = _state.value.copy(history = result.value)
+      is HubResult.Success -> _state.value = _state.value.copy(history = result.value, historyError = null)
       is HubResult.Failure -> {
-        // Non-fatal: trends can still use historyPreview totals.
+        // Not fatal to the dashboard, but the fallback (historyPreview) carries no
+        // per-client/per-model stacks and is capped at 30 days, so trends and the
+        // client model split stay degraded until this succeeds. Record it so the
+        // UI can offer a retry instead of silently showing less.
+        _state.value = _state.value.copy(historyError = result.error.message)
       }
     }
   }
@@ -141,6 +148,26 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
     }
   }
 
+  /** Reset every Hub-derived field when the connection target changes.
+   *
+   *  Without this, saving a different Hub URL/secret left the previous Hub's
+   *  stats, devices and history on screen (with a live-looking status) until the
+   *  new Hub happened to answer — presenting one deployment's numbers as another's.
+   */
+  fun onConnectionChanged() {
+    rangeJob?.cancel()
+    sseJob?.cancel()
+    _state.value = HubUiState(realtime = RealtimeStatus.Reconnecting)
+    viewModelScope.launch {
+      when (val result = repository.capabilities()) {
+        is HubResult.Success -> _state.value = _state.value.copy(authorization = result.value)
+        is HubResult.Failure -> _state.value = _state.value.copy(error = result.error.message)
+      }
+      refreshAll()
+      startRealtime()
+    }
+  }
+
   fun clearBatchResult() { _state.value = _state.value.copy(batchResult = null) }
   fun dismissError() { _state.value = _state.value.copy(error = null) }
 
@@ -150,7 +177,14 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
         _state.value = _state.value.copy(error = "当前 Hub 不支持自定义时间范围。")
         return
       }
-      _state.value = _state.value.copy(analyticsPeriod = AnalyticsPeriodKind.Custom)
+      // Clear any previous range result: the tab renders customRangeResult
+      // whenever the period is Custom, so keeping it would show the old range's
+      // numbers under the new selection.
+      _state.value = _state.value.copy(
+        analyticsPeriod = AnalyticsPeriodKind.Custom,
+        customRangeResult = null,
+        customRangeLoading = false
+      )
       return
     }
     rangeJob?.cancel()
@@ -187,6 +221,7 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
           customRangeLoading = false
         )
         is HubResult.Failure -> _state.value = _state.value.copy(
+          customRangeResult = null,
           customRangeLoading = false,
           error = result.error.message
         )
@@ -234,6 +269,24 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
   }
 
   fun restartRealtime() { sseJob?.cancel(); startRealtime() }
+
+  /** Start or stop the live stream as the app moves between foreground and background.
+   *
+   *  viewModelScope outlives onStop, so the SSE loop used to keep an authenticated
+   *  connection open, answer 15s pings and re-dial on a 1-30s backoff forever while
+   *  the app was backgrounded — battery/radio drain and Hub-side connection churn
+   *  for a client the user believes is idle.
+   */
+  fun setForeground(foreground: Boolean) {
+    if (foreground) {
+      if (sseJob?.isActive != true) refreshAll()
+      startRealtime()
+    } else {
+      sseJob?.cancel()
+      sseJob = null
+      _state.value = _state.value.copy(realtime = RealtimeStatus.Disconnected)
+    }
+  }
 
   private fun startRealtime() {
     if (!repository.connection().isComplete) return

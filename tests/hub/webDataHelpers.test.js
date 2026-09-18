@@ -249,6 +249,23 @@ test('providerDisplayName and planLabel handle identity fields', () => {
     { provider: 'codex', accountEmail: 'u@x.com', accountName: 'Home' }
   ];
   assert.equal(providerDisplayName(peers[0], peers, 'en'), 'u@x.com · Work');
+
+  assert.equal(
+    providerDisplayName({ provider: 'antigravity', accountEmail: 'user@google.com', accountLabel: 'Antigravity' }),
+    'user@google.com'
+  );
+  assert.equal(
+    providerDisplayName({ provider: 'antigravity', accountName: 'agy-work', accountLabel: 'Antigravity' }),
+    'agy-work'
+  );
+  const agyPeers = [
+    { provider: 'antigravity', accountEmail: 'user@google.com', accountName: 'agy-work' },
+    { provider: 'antigravity', accountEmail: 'user@google.com', accountName: 'agy-home' }
+  ];
+  assert.equal(
+    providerDisplayName(agyPeers[0], agyPeers),
+    'user@google.com · agy-work'
+  );
 });
 
 test('projectRows returns incomplete flag and client color', () => {
@@ -426,4 +443,144 @@ test('limitCards surfaces named Codex allowances, credit counts and fetch time',
   assert.equal(credits.value, '820');
   assert.equal(credits.showMeter, false);
   assert.equal(credits.detail, '~12-40 local messages');
+});
+
+test('every id the dashboard can request an icon for resolves to a shipped file', async () => {
+  // clientIconPath() builds /icons/clients/<id>.svg (after ICON_ALIASES) and the
+  // <img> falls back to onerror="display:none" — except inline event handlers are
+  // blocked by the Hub's own CSP, so a missing file renders a broken-image glyph
+  // and re-requests it on every re-render (responses are cache-control: no-store).
+  // `claude-desktop` (a default client), `commandcode`, `kimi` and `zcode` were
+  // all missing this way.
+  const iconsDir = path.join(__dirname, '../../src/hub/web/icons/clients');
+  const shipped = new Set(
+    fs.readdirSync(iconsDir).filter((name) => name.endsWith('.svg')).map((name) => name.replace(/\.svg$/, ''))
+  );
+
+  const aliasesBlock = source.match(/const ICON_ALIASES = \{([\s\S]*?)\n\};/);
+  assert.ok(aliasesBlock, 'ICON_ALIASES should exist');
+  const aliases = Object.fromEntries(
+    [...aliasesBlock[1].matchAll(/^\s*'?([a-z0-9-]+)'?:\s*'([a-z0-9-]+)'/gm)].map((match) => [match[1], match[2]])
+  );
+
+  const labelBlocks = [...source.matchAll(/const (?:CLIENT_LABELS|PROVIDER_LABELS) = \{([\s\S]*?)\n\};/g)];
+  assert.ok(labelBlocks.length >= 2, 'expected the client and provider label maps');
+  const ids = new Set();
+  for (const block of labelBlocks) {
+    for (const match of block[1].matchAll(/^\s*'?([a-z0-9-]+)'?:\s*'/gm)) ids.add(match[1]);
+  }
+
+  const missing = [...ids]
+    .filter((id) => id !== 'default')
+    .filter((id) => !shipped.has(aliases[id] || id))
+    .sort();
+  assert.deepEqual(missing, [], `ids that would 404 their icon: ${missing.join(', ')}`);
+
+  // Any alias target must itself exist, so the table cannot point at nothing.
+  const dangling = Object.entries(aliases)
+    .filter(([, target]) => !shipped.has(target))
+    .map(([id, target]) => `${id}->${target}`);
+  assert.deepEqual(dangling, [], `icon aliases pointing at missing files: ${dangling.join(', ')}`);
+});
+
+test('the shared client list is fully branded on the dashboard', async () => {
+  const shared = require('../../src/shared/clientTracking.js').KNOWN_CLIENTS.split(',');
+  const aliasBlock = source.match(/const ICON_ALIASES = \{([\s\S]*?)\n\};/)[1];
+  const aliases = Object.fromEntries(
+    [...aliasBlock.matchAll(/^\s*'?([a-z0-9-]+)'?:\s*'([a-z0-9-]+)'/gm)].map((match) => [match[1], match[2]])
+  );
+  const iconsDir = path.join(__dirname, '../../src/hub/web/icons/clients');
+  const shipped = new Set(
+    fs.readdirSync(iconsDir).filter((name) => name.endsWith('.svg')).map((name) => name.replace(/\.svg$/, ''))
+  );
+  const unbranded = shared.filter((id) => !shipped.has(aliases[id] || id));
+  assert.deepEqual(unbranded, [], `tracked clients with no dashboard icon: ${unbranded.join(', ')}`);
+});
+
+test('the dashboard rate table is configurable and falls back to shared defaults', async () => {
+  const formatPath = path.join(__dirname, '../../src/hub/web/js/format.js');
+  const format = await import(pathToFileUrl(formatPath));
+
+  // Defaults must match src/shared/currency.js so the two clients agree before the
+  // /api/rates fetch resolves.
+  const shared = require('../../src/shared/currency.js').CURRENCY_RATES;
+  const initial = format.currentRates();
+  for (const code of Object.keys(shared)) {
+    assert.equal(
+      initial.rates[code].rate,
+      shared[code].rate,
+      `${code} default rate should match the shared module`
+    );
+  }
+
+  // The Hub's live rates are applied.
+  format.configureRates({ CNY: 7.2, TWD: 32.4, HKD: 7.9 }, { source: 'hub', date: '2026-09-18' });
+  const updated = format.currentRates();
+  assert.equal(updated.rates.CNY.rate, 7.2);
+  assert.equal(updated.source, 'hub');
+  assert.equal(updated.date, '2026-09-18');
+  assert.equal(format.formatCost(1, 'CNY'), '¥7.20');
+
+  // A partial or hostile payload cannot blank a currency or break USD.
+  format.configureRates({ CNY: 'nonsense', USD: 99, EUR: 5 }, { source: 'hub' });
+  const guarded = format.currentRates();
+  assert.equal(guarded.rates.CNY.rate, 7.2, 'a non-numeric rate must be ignored');
+  assert.equal(guarded.rates.USD.rate, 1, 'USD must stay pinned to 1');
+  assert.equal(guarded.rates.EUR, undefined, 'unsupported currencies are ignored');
+  assert.equal(format.formatCost(2, 'USD'), '$2.00');
+});
+
+test('the dashboard fetches its rates from the Hub during boot', () => {
+  const appSource = fs.readFileSync(path.join(__dirname, '../../src/hub/web/js/app.js'), 'utf8');
+  assert.match(appSource, /fetch\('\/api\/rates'/, 'the dashboard should read the Hub rate feed');
+  assert.match(appSource, /configureRates\(payload\.rates/, 'the fetched rates should be applied');
+});
+
+test('every tracked client is labelled and coloured on the dashboard', () => {
+  // The dashboard kept its own copies of these maps, which had drifted: three
+  // DEFAULT_CLIENTS ids (commandcode, deepseek-harness, reasonix) plus the opt-in
+  // qodercn rendered as raw slugs with hashed fallback colours.
+  const shared = require('../../src/shared/clientTracking.js').KNOWN_CLIENTS.split(',');
+  const labelsBlock = source.match(/const CLIENT_LABELS = \{([\s\S]*?)\n\};/)[1];
+  const colorsBlock = source.match(/const CLIENT_COLORS = \{([\s\S]*?)\n\};/)[1];
+  const keysOf = (block) => [...block.matchAll(/^\s*'?([a-z0-9-]+)'?:\s*'/gm)].map((match) => match[1]);
+
+  const labels = new Set(keysOf(labelsBlock));
+  const colors = new Set(keysOf(colorsBlock));
+  const unlabelled = shared.filter((id) => !labels.has(id));
+  const uncoloured = shared.filter((id) => !colors.has(id));
+  assert.deepEqual(unlabelled, [], `tracked clients with no label: ${unlabelled.join(', ')}`);
+  assert.deepEqual(uncoloured, [], `tracked clients with no colour: ${uncoloured.join(', ')}`);
+
+  // Provider labels must cover the canonical provider list too.
+  const providers = require('../../src/shared/limitProviders.js').LIMIT_PROVIDER_IDS;
+  const providerBlock = source.match(/const PROVIDER_LABELS = \{([\s\S]*?)\n\};/)[1];
+  const providerLabels = new Set([...providerBlock.matchAll(/^\s*'?([a-z0-9-]+)'?:\s*'/gm)].map((match) => match[1]));
+  const missingProviders = providers.filter((id) => !providerLabels.has(id));
+  assert.deepEqual(missingProviders, [], `providers with no label: ${missingProviders.join(', ')}`);
+});
+
+test('the dashboard detects an idle stream and reports how old its data is', () => {
+  // A half-open socket leaves reader.read() pending forever, so the badge used to
+  // read "live" while the numbers were arbitrarily old. The widget solved this
+  // with an idle watchdog; the dashboard must too.
+  const apiSource = fs.readFileSync(path.join(__dirname, '../../src/hub/web/js/api.js'), 'utf8');
+  assert.match(apiSource, /SSE_IDLE_TIMEOUT_MS/, 'the stream needs an idle timeout');
+  assert.match(apiSource, /onStatus\?\.\('idle-timeout'/, 'an idle stream should report a distinct status');
+  assert.match(apiSource, /if \(event === 'heartbeat'\) continue;/, 'heartbeats prove liveness but not freshness');
+
+  const appSource = fs.readFileSync(path.join(__dirname, '../../src/hub/web/js/app.js'), 'utf8');
+  assert.match(appSource, /'idle-timeout': 'status\.idleTimeout'/, 'the new status needs a label');
+  assert.match(appSource, /state\.dataAsOf/, 'the app should record when the data last arrived');
+  assert.match(appSource, /tr\('status\.dataAsOf'\)/, 'the UI should state the data age');
+});
+
+test('a custom range derives the per-client model split from its sessions', () => {
+  // /api/usage/range returns flat clients/models maps, so the nested split the
+  // Usage -> Tools view renders was empty ("No usage") for every custom range
+  // while the preset periods showed it.
+  const appSource = fs.readFileSync(path.join(__dirname, '../../src/hub/web/js/app.js'), 'utf8');
+  assert.match(appSource, /function deriveClientModels\(/, 'the derivation helper should exist');
+  assert.match(appSource, /clientModels: payload\.clientModels \|\| deriveClientModels\(payload\.sessions, 'models'\)/);
+  assert.match(appSource, /clientModelCosts: payload\.clientModelCosts \|\| deriveClientModels\(payload\.sessions, 'modelCosts'\)/);
 });

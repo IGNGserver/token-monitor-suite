@@ -113,6 +113,14 @@ function normalizeIsoTimestamp(value) {
   return ms > 0 ? new Date(ms).toISOString() : '';
 }
 
+// Returns a canonical ISO string only when the input is a usable timestamp.
+// Used where a malformed value would silently disable period expiry.
+function firstValidIso(value) {
+  if (value === undefined || value === null || value === '') return '';
+  const ms = timestampMs(value);
+  return Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : '';
+}
+
 function emptyPeriod() {
   return {
     capabilities: { tokenComponents: true },
@@ -933,12 +941,17 @@ function normalizeDeviceOsName(value) {
 
 function normalizeDeviceRecord(record) {
   const nowIso = new Date().toISOString();
+  // An unparseable updatedAt makes recordDate()/isPeriodExpired() treat the
+  // device's frozen today/month windows as never expiring, so a stale snapshot is
+  // summed into the fleet aggregate forever. Fall back through receivedAt to the
+  // current time instead of storing garbage.
+  const receivedAtIso = firstValidIso(record.receivedAt) || nowIso;
   const normalized = {
     deviceId: String(record.deviceId || record.id || 'unknown'),
     hostname: record.hostname ? String(record.hostname) : '',
     platform: record.platform ? String(record.platform) : '',
-    updatedAt: record.updatedAt || nowIso,
-    receivedAt: record.receivedAt || nowIso,
+    updatedAt: firstValidIso(record.updatedAt) || receivedAtIso,
+    receivedAt: receivedAtIso,
     agentVersion: record.agentVersion || '',
     agentRuntime: record.agentRuntime ? String(record.agentRuntime) : '',
     periods: {},
@@ -1048,14 +1061,33 @@ function missingProjectAttribution(sourceProjects, restoredProjects, clients) {
   return false;
 }
 
+// True when the two records describe the same today/month window.
+//
+// The window's own `key` is the device-LOCAL day/month the collector stamped, and
+// it is what every other window decision uses (see isPeriodExpired and
+// computePeriodWindows). Comparing the UTC days of two updatedAt timestamps
+// instead mis-decides for every non-UTC device, because a device-local day spans
+// two UTC days: within one local day the carry was skipped (losing the frozen
+// untracked-client bucket for the rest of that day) and early-morning records
+// carried the previous day's bucket into the new one (double counting). The UTC
+// comparison is kept only as the fallback for producers that predate
+// periodWindows and therefore have no key at all.
 function shouldPreservePeriod(periodName, existingRecord, incomingRecord) {
   if (periodName === 'allTime') return true;
+  const existingKey = periodWindowKey(existingRecord, periodName);
+  const incomingKey = periodWindowKey(incomingRecord, periodName);
+  if (existingKey && incomingKey) return existingKey === incomingKey;
   const existingDate = recordDate(existingRecord);
   const incomingDate = recordDate(incomingRecord);
   if (!existingDate || !incomingDate) return false;
   if (periodName === 'today') return utcDayKey(existingDate) === utcDayKey(incomingDate);
   if (periodName === 'month') return utcMonthKey(existingDate) === utcMonthKey(incomingDate);
   return false;
+}
+
+function periodWindowKey(record, periodName) {
+  const key = record?.periodWindows?.[periodName]?.key;
+  return key === undefined || key === null || key === '' ? '' : String(key);
 }
 
 function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedClients) {

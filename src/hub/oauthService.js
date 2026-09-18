@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const { fetchBufferedWithTimeout } = require('../shared/http');
 const { createOutboundFetch } = require('../shared/outboundFetch');
+const { decodeJwtPayload } = require('../shared/codexAuth');
 
 // Official OpenAI Codex CLI OAuth Client ID
 const CODEX_OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -492,6 +493,11 @@ function createOAuthSessionManager({ now = Date.now, ttlMs = SESSION_TTL_MS } = 
             expiresAt: tokenExpiry({ expires_in: parsed.expiresIn }, now())
           };
       sessions.delete(sessionId);
+      let accountEmail = '';
+      if (tokens.idToken) {
+        const payload = decodeJwtPayload(tokens.idToken);
+        accountEmail = String(payload?.email || '').trim().toLowerCase();
+      }
       return {
         provider: 'antigravity',
         credential: {
@@ -499,6 +505,7 @@ function createOAuthSessionManager({ now = Date.now, ttlMs = SESSION_TTL_MS } = 
           accessToken: tokens.accessToken,
           ...(tokens.refreshToken ? { refreshToken: tokens.refreshToken } : {}),
           ...(tokens.idToken ? { idToken: tokens.idToken } : {}),
+          ...(accountEmail ? { accountEmail } : {}),
           ...(tokens.expiresAt ? { expiresAt: tokens.expiresAt } : {})
         }
       };

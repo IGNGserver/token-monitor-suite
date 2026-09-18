@@ -23,6 +23,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import com.igng.tokenmonitor.android.ui.components.agentRuntimeLabel
 import com.igng.tokenmonitor.android.ui.components.clientStatusLabel
 import com.igng.tokenmonitor.android.ui.components.devicePlatformLabel
+import com.igng.tokenmonitor.android.ui.components.deviceConnectionLabel
+import com.igng.tokenmonitor.android.ui.components.deviceCountsAsOnline
 import com.igng.tokenmonitor.android.ui.components.wslStatusLabel
 import com.igng.tokenmonitor.android.ui.components.ClientBranding
 import com.igng.tokenmonitor.android.data.model.PeriodDto
@@ -74,7 +76,7 @@ fun DevicesScreen(
       Text("设备", style = MaterialTheme.typography.headlineSmall)
       Text(
         if (devices.isEmpty()) "暂无上报设备"
-        else "${devices.count { !it.stale }} 在线 · ${devices.size} 台合计",
+        else "${devices.count { deviceCountsAsOnline(it.stale, it.clientStatus) }} 在线 · ${devices.size} 台合计",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant
       )
@@ -126,7 +128,7 @@ fun DevicesScreen(
                     buildString {
                       append(devicePlatformLabel(device.platform, device.osName, device.osVersion))
                       append(" · ")
-                      append(if (device.stale) "离线" else "在线")
+                      append(deviceConnectionLabel(device.stale, device.clientStatus))
                       agentRuntimeLabel(device.agentRuntime).takeIf { it.isNotBlank() }?.let {
                         append(" · ")
                         append(it)
@@ -232,7 +234,7 @@ fun DeviceDetailScreen(
             buildString {
               append(devicePlatformLabel(device.platform, device.osName, device.osVersion))
               append(" · ")
-              append(if (device.stale) "离线" else "在线")
+              append(deviceConnectionLabel(device.stale, device.clientStatus))
               agentRuntimeLabel(device.agentRuntime).takeIf { it.isNotBlank() }?.let {
                 append(" · ")
                 append(it)

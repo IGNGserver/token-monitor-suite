@@ -65,11 +65,27 @@ function readJson(filePath, fallback = null) {
   }
 }
 
-function writeJsonAtomic(filePath, value) {
+// Atomic JSON write.
+//
+// The temp name carries the pid and a random suffix: a fixed `${filePath}.tmp`
+// collides when two collectors (the widget and a headless agent) share a data
+// directory, which is exactly the case the anchor path hits. Default output is
+// compact — these are machine-read state/archive files and pretty-printing them
+// inflated the session archive by ~36%, which is paid on every serialization.
+// Pass { pretty: true } for small operator-editable files.
+function writeJsonAtomic(filePath, value, options = {}) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.tmp`;
-  fs.writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  fs.renameSync(tempPath, filePath);
+  const tempPath = `${filePath}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
+  const text = options.pretty === true
+    ? `${JSON.stringify(value, null, 2)}\n`
+    : `${JSON.stringify(value)}\n`;
+  try {
+    fs.writeFileSync(tempPath, text, 'utf8');
+    fs.renameSync(tempPath, filePath);
+  } catch (error) {
+    try { fs.rmSync(tempPath, { force: true }); } catch (_) { /* best effort */ }
+    throw error;
+  }
 }
 
 function loadDotEnv() {

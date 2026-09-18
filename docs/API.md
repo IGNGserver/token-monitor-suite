@@ -1,6 +1,6 @@
 # API
 
-The hub exposes a JSON HTTP API and serves a same-origin web dashboard (PWA) from the hub root (`/`). Static UI assets and `/api/health` are public; private API routes require a scoped credential. Remote connections use HTTPS by default. Docker Compose Hub/agent/desktop require `TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1` for an intentional non-loopback HTTP deployment; Android release builds do not permit cleartext traffic.
+The hub exposes a JSON HTTP API and serves a same-origin web dashboard (PWA) from the hub root (`/`). Static UI assets and `/api/health` are public; private API routes require a scoped credential. Remote connections use HTTPS by default. Docker Compose Hub/agent/desktop require `TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1` for an intentional non-loopback HTTP deployment. The Android client supports the same intentional LAN/VPN plain-HTTP Hub behind an explicit opt-in: the platform permits cleartext (so the OS does not silently contradict the in-app switch), while `HubApiFactory` rejects a non-HTTPS URL unless that switch is on. User-installed CAs are trusted in debug builds only.
 
 
 For pricing refreshes, the Hub invokes `tokscale pricing <model> --json` first. If tokscale cannot complete its upstream catalog request, the Hub retries against the configured `TOKSCALE_PRICING_CATALOG_URL` (default `https://models.dev/api.json`), which is a public catalog tokscale also uses. The catalog is cached in the Hub process for six hours; the resulting `model_pricing` row remains durable.

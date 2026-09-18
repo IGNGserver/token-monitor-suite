@@ -11,6 +11,22 @@ function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
 }
 
+// Marks an archive whose entries are already canonical (see
+// normalizeSessionUsageArchive). The pipeline hands the same normalized archive
+// through load -> capture -> apply on every tick, and each step used to re-walk
+// and re-normalize every entry: that redundant work is what made the per-tick
+// cost scale with the archive size. A WeakSet keeps the marker off the object so
+// it can never leak into the serialized file, and is immune to JSON round trips
+// resurrecting it.
+const normalizedArchives = new WeakSet();
+
+function markSessionArchiveNormalized(archive) {
+  if (archive && typeof archive === 'object' && archive.sessions && typeof archive.sessions === 'object') {
+    normalizedArchives.add(archive.sessions);
+  }
+  return archive;
+}
+
 function mapNumber(map, key) {
   return hasOwn(map, key) ? numberValue(map[key]) : 0;
 }
@@ -51,14 +67,20 @@ function localMonth(dateValue) {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
 }
 
+// Every caller feeds this function a session that has already been through
+// normalizePeriod(), so `client` is a canonical client id and `sessionId` is a
+// trimmed non-empty string. Rebuilding a synthetic period here just to read two
+// strings back out cost a full normalizePeriod per session per period, which
+// dominated the whole archive pipeline (~90% of the per-tick transform) and grew
+// linearly with the archive. Keep the validity rule identical to the old path:
+// the normalization boundary yields null for either half, or for an all-empty
+// key, and such entries were dropped.
 function sessionKey(client, sessionId) {
-  const normalized = normalizePeriod({
-    sessions: {
-      candidate: { client, sessionId, totalTokens: 1 }
-    }
-  });
-  const session = Object.values(normalized.sessions)[0];
-  return session ? `${session.client}:${session.sessionId}` : null;
+  const name = String(client || '');
+  const id = String(sessionId || '');
+  if (!name || !id) return null;
+  const key = `${name}:${id}`;
+  return key === ':' ? null : key;
 }
 
 function clone(value) {
@@ -87,6 +109,10 @@ function normalizeSessionUsageArchive(value) {
   const source = value?.sessions && typeof value.sessions === 'object' ? value.sessions : value;
   const normalized = { version: 1, sessions: {} };
   if (!source || typeof source !== 'object') return normalized;
+  // Already canonical: the marker is only set by the branch at the end of this
+  // function, by captureSessionUsageArchive (which only ever adds entries that
+  // came out of normalizePeriod), and by resetSessionUsageArchive.
+  if (normalizedArchives.has(source)) return value;
 
   for (const [rawKey, rawEntry] of Object.entries(source)) {
     if (!rawEntry || typeof rawEntry !== 'object') continue;
@@ -124,7 +150,7 @@ function normalizeSessionUsageArchive(value) {
     normalized.sessions[`${entry.client}:${entry.sessionId}`] = entry;
   }
 
-  return normalized;
+  return markSessionArchiveNormalized(normalized);
 }
 
 function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = new Date()) {
@@ -169,7 +195,9 @@ function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = 
     }
   }
 
-  return archive;
+  // Entries added above come straight out of normalizePeriod(), so the archive is
+  // still canonical and the next pass can skip the full re-normalization.
+  return markSessionArchiveNormalized(archive);
 }
 
 function targetPeriod(summary, periodName) {
@@ -194,30 +222,64 @@ function allocateIntegerTotal(total, weightedEntries) {
   return new Map(allocations.map(({ key, value }) => [key, value]));
 }
 
-function addSessionBreakdown(period, session) {
+// Per-session contribution to a period, computed once per session object.
+//
+// Reapplying an archive recomputes every archived session on every tick, and the
+// integer re-allocation over `models` is the expensive part. Archived sessions are
+// immutable between archive writes (entries are replaced, never mutated), so a
+// WeakMap keyed by the session object can memoize the answer indefinitely; a
+// replaced entry becomes unreachable and its cache entry is collected with it.
+const sessionBreakdownCache = new WeakMap();
+
+function computeSessionContribution(session) {
+  const cached = sessionBreakdownCache.get(session);
+  if (cached) return cached;
+
   const client = session.client;
   const cacheRead = Math.max(0, Math.round(numberValue(session.cacheReadTokens)));
   const cacheWrite = Math.max(0, Math.round(numberValue(session.cacheWriteTokens)));
   const output = Math.max(0, Math.round(numberValue(session.outputTokens)));
 
-  if (cacheRead > 0) period.clientCacheReads[client] = mapNumber(period.clientCacheReads, client) + cacheRead;
-  if (cacheWrite > 0) period.clientCacheWrites[client] = mapNumber(period.clientCacheWrites, client) + cacheWrite;
-  if (output > 0) period.clientOutputs[client] = mapNumber(period.clientOutputs, client) + output;
-
   const modelTokens = Object.entries(session.models || {})
     .map(([model, tokens]) => [model, numberValue(tokens)])
     .filter(([, tokens]) => tokens > 0);
   const totalModelTokens = modelTokens.reduce((sum, [, tokens]) => sum + tokens, 0);
-  if (totalModelTokens === 0) return;
 
-  const cacheReads = allocateIntegerTotal(cacheRead, modelTokens);
-  const cacheWrites = allocateIntegerTotal(cacheWrite, modelTokens);
-  const outputs = allocateIntegerTotal(output, modelTokens);
+  let modelCacheReads = null;
+  let modelCacheWrites = null;
+  let modelOutputs = null;
+  if (totalModelTokens > 0) {
+    modelCacheReads = allocateIntegerTotal(cacheRead, modelTokens);
+    modelCacheWrites = allocateIntegerTotal(cacheWrite, modelTokens);
+    modelOutputs = allocateIntegerTotal(output, modelTokens);
+  }
 
+  const contribution = {
+    client,
+    cacheRead,
+    cacheWrite,
+    output,
+    modelTokens,
+    modelCacheReads,
+    modelCacheWrites,
+    modelOutputs
+  };
+  sessionBreakdownCache.set(session, contribution);
+  return contribution;
+}
+
+function applySessionContribution(period, contribution) {
+  const { client, cacheRead, cacheWrite, output, modelTokens } = contribution;
+  if (cacheRead > 0) period.clientCacheReads[client] = mapNumber(period.clientCacheReads, client) + cacheRead;
+  if (cacheWrite > 0) period.clientCacheWrites[client] = mapNumber(period.clientCacheWrites, client) + cacheWrite;
+  if (output > 0) period.clientOutputs[client] = mapNumber(period.clientOutputs, client) + output;
+  if (modelTokens.length === 0) return;
+
+  const { modelCacheReads, modelCacheWrites, modelOutputs } = contribution;
   for (const [model] of modelTokens) {
-    const cr = cacheReads.get(model) || 0;
-    const cw = cacheWrites.get(model) || 0;
-    const ou = outputs.get(model) || 0;
+    const cr = modelCacheReads.get(model) || 0;
+    const cw = modelCacheWrites.get(model) || 0;
+    const ou = modelOutputs.get(model) || 0;
     if (cr > 0) period.modelCacheReads[model] = mapNumber(period.modelCacheReads, model) + cr;
     if (cw > 0) period.modelCacheWrites[model] = mapNumber(period.modelCacheWrites, model) + cw;
     if (ou > 0) period.modelOutputs[model] = mapNumber(period.modelOutputs, model) + ou;
@@ -259,7 +321,7 @@ function addArchivedSession(period, session) {
     costs[model] = mapNumber(costs, model) + next;
   }
 
-  addSessionBreakdown(period, archived);
+  applySessionContribution(period, computeSessionContribution(archived));
 }
 
 function shouldApplyPeriod(periodName, entry, now) {

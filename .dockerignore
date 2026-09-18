@@ -11,3 +11,8 @@ tests
 site
 .agents
 .claude
+
+# Local-only secret material (APT signing key backup)
+.secrets
+scripts
+!scripts/prune-hub-deps.js

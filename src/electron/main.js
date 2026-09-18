@@ -3724,6 +3724,12 @@ app.whenReady().then(() => {
     exportIntervals: [60 * 1000, 5 * 60 * 1000, 15 * 60 * 1000, 60 * 60 * 1000],
     syncUploadIntervals: [0, 600000, 1200000, 1800000],
     historyIntervals: [5 * 60 * 1000, 10 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000],
+    // Lists the ordering/visibility preferences are chosen from. They come from
+    // the modules that own them so a new view or provider cannot be missing here.
+    views: SHARED_VIEW_LIST.map((view) => view.id),
+    homeModules: ['limits', 'tool', 'device', 'model', 'trends'],
+    serviceProviders: SERVICE_STATUS_PROVIDERS.map((provider) => provider.id),
+    hiddenServiceProviders: SERVICE_STATUS_PROVIDERS.map((provider) => provider.id),
     languageOptions: LANGUAGE_OPTIONS
   }));
   ipcMain.handle('transport:capabilities', () => ({

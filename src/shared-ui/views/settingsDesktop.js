@@ -123,8 +123,24 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
   appearanceRows.push(checkbox('showToolIcons', 'desktop.settings.showToolIcons', settings.showToolIcons !== false));
   appearanceRows.push(checkbox('showLiveDot', 'desktop.settings.showLiveDot', settings.showLiveDot !== false));
   appearanceRows.push(checkbox('showCompactTotalTokens', 'desktop.settings.showCompactTotalTokens', settings.showCompactTotalTokens === true));
+  // The title-bar icon is the window-title mark; Windows shows the app icon there
+  // instead, so the control is offered only where it has an effect.
+  if (!isWindows) {
+    appearanceRows.push(checkbox('titleIconOnly', 'desktop.settings.titleIconOnly', settings.titleIconOnly !== false));
+  }
   appearanceRows.push(numberField('zoomFactor', 'desktop.settings.zoom', settings.zoomFactor ?? 1, { min: 0.7, max: 1.6, step: 0.05 }));
   groups.push(group('appearance', 'desktop.settings.groupAppearance', appearanceRows.join('')));
+
+  // --- How received quotas are displayed ----------------------------------
+  // These describe presentation only; the accounts and their refresh schedule are
+  // Hub-owned, so the group is a display preference rather than a provider setup.
+  groups.push(group('limitsDisplay', 'desktop.settings.groupLimitsDisplay', [
+    checkbox('showLimitSource', 'desktop.settings.showLimitSource', settings.showLimitSource === true),
+    checkbox('maskLimitAccountEmails', 'desktop.settings.maskLimitAccountEmails', settings.maskLimitAccountEmails === true),
+    selectField('showLimitUsed', 'desktop.settings.limitBarsShow',
+      [['remaining', tr('desktop.settings.barsRemaining')], ['used', tr('desktop.settings.barsUsed')]],
+      settings.showLimitUsed === true ? 'used' : 'remaining')
+  ].join('')));
 
   // --- Startup, updates, integrations -------------------------------------
   const generalRows = [];
@@ -155,6 +171,63 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
     textField('deviceId', 'desktop.settings.deviceId', settings.deviceId || '', { placeholder: tr('desktop.settings.deviceIdHint') })
   ].join('')));
 
+  // --- View & list preferences --------------------------------------------
+  // Ordering and visibility were per-list drag/eye controls in the old widget.
+  // They are CSV preference strings on the wire, so a checkbox list is the
+  // faithful equivalent: it preserves the choice without inventing a new format.
+  const prefRows = [];
+  prefRows.push(tokenListField('viewDisplayOrder', catalog.views || [], settings.viewDisplayOrder, 'desktop.settings.viewOrder'));
+  prefRows.push(tokenListField('hiddenViews', catalog.views || [], settings.hiddenViews, 'desktop.settings.hiddenViews'));
+  prefRows.push(tokenListField('clientDisplayOrder', catalog.clients || [], settings.clientDisplayOrder, 'desktop.settings.clientOrder'));
+  prefRows.push(tokenListField('hiddenClients', catalog.clients || [], settings.hiddenClients, 'desktop.settings.hiddenClients'));
+  prefRows.push(tokenListField('pinnedClients', catalog.clients || [], settings.pinnedClients, 'desktop.settings.pinnedClients'));
+  prefRows.push(tokenListField('homeModuleOrder', catalog.homeModules || [], settings.homeModuleOrder, 'desktop.settings.homeModules'));
+  prefRows.push(tokenListField('hiddenHomeModules', catalog.homeModules || [], settings.hiddenHomeModules, 'desktop.settings.hiddenHomeModules'));
+  prefRows.push(tokenListField('homeLimitProviderOrder', catalog.limitProviders || [], settings.homeLimitProviderOrder, 'desktop.settings.homeLimitOrder'));
+  prefRows.push(tokenListField('hiddenHomeLimitProviders', catalog.limitProviders || [], settings.hiddenHomeLimitProviders, 'desktop.settings.hiddenHomeLimits'));
+  prefRows.push(checkbox('showHomeLimitBars', 'desktop.settings.showHomeLimitBars', settings.showHomeLimitBars === true));
+  prefRows.push(checkbox('showHomeLimitProviderNames', 'desktop.settings.showHomeLimitProviderNames', settings.showHomeLimitProviderNames === true));
+  prefRows.push(numberField('homeLimitAccountCount', 'desktop.settings.homeLimitAccountCount', settings.homeLimitAccountCount ?? 3, { min: 1, max: 12 }));
+  prefRows.push(tokenListField('serviceProviderDisplayOrder', catalog.serviceProviders || [], settings.serviceProviderDisplayOrder, 'desktop.settings.serviceProviderOrder'));
+  prefRows.push(tokenListField('hiddenServiceProviders', catalog.hiddenServiceProviders || [], settings.hiddenServiceProviders, 'desktop.settings.hiddenServiceProviders'));
+  prefRows.push(selectField('serviceStatusRefreshMs', 'desktop.settings.serviceStatusRefresh',
+    [0, 60000, 120000, 300000, 900000, 1800000].map((ms) => [String(ms), ms === 0 ? tr('desktop.settings.refreshOff') : `${Math.round(ms / 60000)} min`]),
+    String(settings.serviceStatusRefreshMs ?? 60000)));
+  prefRows.push(selectField('heatmapMetric', 'desktop.settings.heatmapMetric',
+    [['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')]],
+    settings.heatmapMetric || 'cost'));
+  prefRows.push(selectField('homeActiveDaysWindow', 'desktop.settings.activeDaysWindow',
+    [['all', tr('desktop.settings.activeDaysAll')], ['year', tr('desktop.settings.activeDaysYear')]],
+    settings.homeActiveDaysWindow || 'all'));
+  groups.push(group('preferences', 'desktop.settings.groupPreferences', prefRows.join('')));
+
+  // --- Currency rates & colours -------------------------------------------
+  // Both are JSON maps, so they are edited as JSON. That is a deliberate limit:
+  // a bespoke editor for each would be a larger surface than the old widget's,
+  // and the theme editor lives in the appearance group where it belongs.
+  const advancedRows = [];
+  advancedRows.push(`<div class="desktop-setting-block">
+    <span class="summary-label">${escapeHtml(tr('desktop.settings.currencyRates'))}</span>
+    <span class="row-sub">${escapeHtml(tr('desktop.settings.jsonMapHint'))}</span>
+    <textarea name="currencyRates" rows="3" spellcheck="false">${escapeHtml(JSON.stringify(settings.currencyRates || {}))}</textarea>
+  </div>`);
+  advancedRows.push(`<div class="desktop-setting-block">
+    <span class="summary-label">${escapeHtml(tr('desktop.settings.themeColors'))}</span>
+    <span class="row-sub">${escapeHtml(tr('desktop.settings.jsonMapHint'))}</span>
+    <textarea name="themeColors" rows="3" spellcheck="false">${escapeHtml(JSON.stringify(settings.themeColors || {}))}</textarea>
+  </div>`);
+  advancedRows.push(`<div class="desktop-setting-block">
+    <span class="summary-label">${escapeHtml(tr('desktop.settings.vendorColors'))}</span>
+    <span class="row-sub">${escapeHtml(tr('desktop.settings.jsonMapHint'))}</span>
+    <textarea name="vendorColors" rows="3" spellcheck="false">${escapeHtml(JSON.stringify(settings.vendorColors || {}))}</textarea>
+  </div>`);
+  advancedRows.push(`<div class="desktop-setting-block">
+    <span class="summary-label">${escapeHtml(tr('desktop.settings.customModelPricing'))}</span>
+    <span class="row-sub">${escapeHtml(tr('desktop.settings.jsonListHint'))}</span>
+    <textarea name="customModelPricing" rows="3" spellcheck="false">${escapeHtml(JSON.stringify(settings.customModelPricing || []))}</textarea>
+  </div>`);
+  groups.push(group('advanced', 'desktop.settings.groupAdvanced', advancedRows.join('')));
+
   // --- Hub connection -----------------------------------------------------
   const hubRows = [];
   hubRows.push(`<div class="mode-toggle-group" role="radiogroup">
@@ -181,11 +254,23 @@ function group(id, titleKey, body) {
 
 // Which settings are numeric, so a form read does not store "300000" as a
 // string and confuse the collector's normalizers.
-const NUMERIC_FIELDS = new Set(['collectionIntervalMs', 'historyIntervalMs', 'exportIntervalMs', 'syncUploadIntervalMs', 'zoomFactor']);
+// Preference strings stored as CSV on the wire.
+const CSV_FIELDS = Object.freeze([
+  'clients', 'viewDisplayOrder', 'hiddenViews', 'clientDisplayOrder', 'hiddenClients',
+  'pinnedClients', 'homeModuleOrder', 'hiddenHomeModules', 'homeLimitProviderOrder',
+  'hiddenHomeLimitProviders', 'serviceProviderDisplayOrder', 'hiddenServiceProviders'
+]);
+
+// Settings whose value is a JSON object or array.
+const JSON_FIELDS = Object.freeze(['currencyRates', 'themeColors', 'vendorColors', 'customModelPricing']);
+
+const NUMERIC_FIELDS = new Set(['collectionIntervalMs', 'historyIntervalMs', 'exportIntervalMs', 'syncUploadIntervalMs', 'zoomFactor', 'homeLimitAccountCount', 'serviceStatusRefreshMs']);
 const CHECKBOX_FIELDS = new Set([
   'projectsEnabled', 'historyEnabled', 'sessionUsageArchiveEnabled', 'wslScanEnabled',
   'exportAutoEnabled', 'showToolIcons', 'showLiveDot', 'showCompactTotalTokens',
-  'startAtLogin', 'automaticAppUpdates', 'discordRpcEnabled', 'allowInsecureHubHttp'
+  'titleIconOnly', 'startAtLogin', 'automaticAppUpdates', 'discordRpcEnabled',
+  'allowInsecureHubHttp', 'showLimitSource', 'maskLimitAccountEmails',
+  'showHomeLimitBars', 'showHomeLimitProviderNames'
 ]);
 
 /** Read a form back into a settings patch. */
@@ -207,15 +292,36 @@ export function readDesktopSettingsPatch(form) {
     const input = form.querySelector(`[name="${name}"]`);
     if (input) patch[name] = String(input.value || '').trim();
   }
-  for (const name of ['collectionMode', 'systemGlass', 'macosGlassStyle', 'reduceMotion']) {
+  for (const name of ['collectionMode', 'systemGlass', 'macosGlassStyle', 'reduceMotion', 'heatmapMetric', 'homeActiveDaysWindow']) {
     const input = form.querySelector(`[name="${name}"]`);
     if (input) patch[name] = String(input.value || '');
   }
+  const barsShow = form.querySelector('[name="showLimitUsed"]');
+  if (barsShow) patch.showLimitUsed = String(barsShow.value || '') === 'used';
   const hubMode = form.querySelector('[name="hubMode"]:checked');
   if (hubMode) patch.hubMode = hubMode.value;
 
-  const clients = [...form.querySelectorAll('[data-token-list="clients"]:checked')].map((input) => input.value);
-  if (form.querySelector('[data-token-list="clients"]')) patch.clients = clients.join(',');
+  // Every token list round-trips as the CSV the settings document stores. The
+  // selected order is the document order, which is what the drag controls used to
+  // produce.
+  for (const name of CSV_FIELDS) {
+    const inputs = [...form.querySelectorAll(`[data-token-list="${name}"]:checked`)];
+    if (inputs.length || form.querySelector(`[data-token-list="${name}"]`)) {
+      patch[name] = inputs.map((input) => input.value).join(',');
+    }
+  }
+
+  // JSON-valued settings are edited as JSON text; a malformed value is left
+  // untouched rather than written as a broken string.
+  for (const name of JSON_FIELDS) {
+    const input = form.querySelector(`[name="${name}"]`);
+    if (!input) continue;
+    try {
+      patch[name] = JSON.parse(String(input.value || ''));
+    } catch {
+      /* keep the stored value when the textarea does not parse */
+    }
+  }
 
   return patch;
 }

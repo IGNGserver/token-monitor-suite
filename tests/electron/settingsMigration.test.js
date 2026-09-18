@@ -118,3 +118,58 @@ test('credentials keep their existing shape', () => {
   assert.match(credentialStore, /clientSecret/, 'the Hub secret path must be unchanged');
   assert.match(main, /stripCredentialSettings|credentialSettingsForRenderer/, 'settings.json must still be written without credentials');
 });
+
+test('every retained setting that the old widget exposed has a control', () => {
+  // Preserving a key is not enough: the user's requirement was that anything
+  // configurable before is still configurable. This asserts the form field exists
+  // for the keys the plan retains as user-facing, so a key cannot quietly become
+  // JSON-only during a future refactor.
+  const view = fs.readFileSync(path.join(root, 'src', 'shared-ui', 'views', 'settingsDesktop.js'), 'utf8');
+  const uiSource = [
+    fs.readFileSync(path.join(root, 'src', 'shared-ui', 'app.js'), 'utf8'),
+    ...fs.readdirSync(path.join(root, 'src', 'shared-ui', 'views'))
+      .filter((name) => name.endsWith('.js'))
+      .map((name) => fs.readFileSync(path.join(root, 'src', 'shared-ui', 'views', name), 'utf8'))
+  ].join('\n');
+
+  // Fields the desktop settings form renders.
+  const controllable = [
+    'clients', 'collectionMode', 'collectionIntervalMs', 'projectsEnabled',
+    'historyEnabled', 'historyIntervalMs', 'sessionUsageArchiveEnabled',
+    'allTimeSince', 'exportAutoEnabled', 'exportIntervalMs',
+    'systemGlass', 'macosGlassStyle', 'reduceMotion', 'showToolIcons',
+    'showLiveDot', 'showCompactTotalTokens', 'titleIconOnly', 'zoomFactor',
+    'showLimitSource', 'maskLimitAccountEmails', 'showLimitUsed',
+    'startAtLogin', 'automaticAppUpdates', 'discordRpcEnabled',
+    'deviceId', 'hubMode', 'hubUrl', 'syncUploadIntervalMs', 'allowInsecureHubHttp'
+  ];
+  // Fields are produced by checkbox()/selectField()/textField()/numberField(),
+  // so a key appears as the first argument of one of those helpers (or as a
+  // token-list attribute) rather than as a literal name="..." in the source.
+  const missing = controllable.filter((key) => (
+    !new RegExp(`(?:checkbox|selectField|textField|numberField)\\('${key}'`).test(view)
+    && !view.includes(`data-token-list="${key}"`)
+    // hubMode is a bespoke pair of radios written as raw markup, so it is the one
+    // key that appears literally as name="hubMode" rather than via a helper.
+    && !view.includes(`name="${key}"`)
+    && !view.includes(`'${key}'`)
+  ));
+  assert.deepEqual(missing, [], `retained settings with no control: ${missing.join(', ')}`);
+
+  // Preferences the shared UI persists through its prefs bridge (view/period
+  // choices, ordering, hidden sets). These are edited by the views themselves.
+  const prefsBacked = [
+    'viewDisplayOrder', 'hiddenViews', 'homeModuleOrder', 'hiddenHomeModules',
+    'heatmapMetric', 'homeActiveDaysWindow', 'clientDisplayOrder', 'hiddenClients',
+    'pinnedClients', 'homeLimitProviderOrder', 'hiddenHomeLimitProviders',
+    'homeLimitAccountCount', 'showHomeLimitBars', 'showHomeLimitProviderNames',
+    'serviceProviderDisplayOrder', 'hiddenServiceProviders', 'serviceStatusRefreshMs',
+    'themeColors', 'vendorColors', 'currency', 'currencyRates', 'language'
+  ];
+  const orphaned = prefsBacked.filter((key) => !uiSource.includes(key));
+  assert.deepEqual(
+    orphaned,
+    [],
+    `preferences with no UI surface anywhere: ${orphaned.join(', ')}`
+  );
+});

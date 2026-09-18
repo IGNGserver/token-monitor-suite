@@ -5,13 +5,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-function appSource() {
-  return fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
-}
-
+// The UI is app.js plus its extracted view modules. Reading the whole package
+// keeps these assertions about behaviour rather than about which file a renderer
+// currently lives in.
 function viewSources() {
   const dir = path.join(__dirname, '../../src/shared-ui/views');
-  return fs.readdirSync(dir).filter((f) => f.endsWith('.js')).map((f) => fs.readFileSync(path.join(dir, f), 'utf8'));
+  return fs.readdirSync(dir)
+    .filter((name) => name.endsWith('.js'))
+    .map((name) => fs.readFileSync(path.join(dir, name), 'utf8'));
+}
+
+function uiSource() {
+  return [fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8'), ...viewSources()].join('\n');
 }
 
 const dataPath = path.join(__dirname, '../../src/shared-ui/core/data.js');
@@ -52,7 +57,7 @@ test('openrouter client icon is published for hub web', () => {
 });
 
 test('hub web app wires status, heatmap, and active-days controls', () => {
-  const app = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
+  const app = uiSource();
   assert.match(app, /data-heatmap-metric|heatmap-metric/);
   assert.match(app, /data-active-days-window|active-days-window/);
   assert.match(app, /data-device-period|deviceDetailPeriod/);
@@ -90,7 +95,7 @@ test('hub web app wires status, heatmap, and active-days controls', () => {
 test('hub web navigation exposes the new page model and compatibility routes', () => {
   // Views are extracted into src/shared-ui/views/; read the whole package so an
   // assertion does not break merely because a renderer moved to its own module.
-  const app = [appSource(), ...viewSources()].join('\n');
+  const app = uiSource();
   for (const view of ['overview', 'usage', 'devices', 'limits', 'trends', 'accounts', 'management', 'settings']) {
     assert.match(app, new RegExp(`id: '${view}'`));
   }
@@ -106,7 +111,7 @@ test('hub web navigation exposes the new page model and compatibility routes', (
 });
 
 test('hub account UI keeps the shared form system and reports OAuth failures', () => {
-  const app = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
+  const app = uiSource();
   const index = fs.readFileSync(path.join(__dirname, '../../src/hub/web/index.html'), 'utf8');
   const css = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/styles/app.css'), 'utf8');
 
@@ -409,7 +414,7 @@ test('limitRemainingTone matches desktop thresholds', () => {
 
 
 test('hub web app wires tool drill and trends stack', () => {
-  const app = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
+  const app = uiSource();
   assert.match(app, /function renderTools\(/);
   assert.match(app, /data-select-tool/);
   assert.match(app, /selectedToolId/);
@@ -545,7 +550,7 @@ test('the dashboard fetches its rates through the transport during boot', () => 
   // Both hosts serve /api/rates, so the shared UI asks for it by path like every
   // other data call. A direct fetch() would break the desktop host, which has no
   // origin to resolve against; the boundary guard enforces that separately.
-  const appSource = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
+  const appSource = uiSource();
   assert.match(appSource, /fetchJson\('\/api\/rates'\)/, 'the dashboard should read the rate feed through the transport');
   assert.match(appSource, /configureRates\(payload\.rates/, 'the fetched rates should be applied');
 });
@@ -583,7 +588,7 @@ test('the dashboard detects an idle stream and reports how old its data is', () 
   assert.match(apiSource, /onStatus\?\.\('idle-timeout'/, 'an idle stream should report a distinct status');
   assert.match(apiSource, /if \(event === 'heartbeat'\) continue;/, 'heartbeats prove liveness but not freshness');
 
-  const appSource = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
+  const appSource = uiSource();
   assert.match(appSource, /'idle-timeout': 'status\.idleTimeout'/, 'the new status needs a label');
   assert.match(appSource, /state\.dataAsOf/, 'the app should record when the data last arrived');
   assert.match(appSource, /tr\('status\.dataAsOf'\)/, 'the UI should state the data age');
@@ -593,7 +598,7 @@ test('a custom range derives the per-client model split from its sessions', () =
   // /api/usage/range returns flat clients/models maps, so the nested split the
   // Usage -> Tools view renders was empty ("No usage") for every custom range
   // while the preset periods showed it.
-  const appSource = fs.readFileSync(path.join(__dirname, '../../src/shared-ui/app.js'), 'utf8');
+  const appSource = uiSource();
   assert.match(appSource, /function deriveClientModels\(/, 'the derivation helper should exist');
   assert.match(appSource, /clientModels: payload\.clientModels \|\| deriveClientModels\(payload\.sessions, 'models'\)/);
   assert.match(appSource, /clientModelCosts: payload\.clientModelCosts \|\| deriveClientModels\(payload\.sessions, 'modelCosts'\)/);

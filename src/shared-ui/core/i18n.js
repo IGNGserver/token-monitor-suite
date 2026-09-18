@@ -1122,7 +1122,14 @@ const MESSAGES = {
     'pwa.status.insecure': 'PWA には HTTPS が必要（HTTP LAN はショートカットのみ）',
     'pwa.status.unsupported': 'このブラウザは PWA をインストールできません',
     'pwa.status.ready': 'アプリとしてインストールできます',
-    'pwa.status.hint': 'ブラウザメニュー → アプリをインストール / ホーム画面に追加'
+    'pwa.status.hint': 'ブラウザメニュー → アプリをインストール / ホーム画面に追加',
+    'accounts.agyEndpointHint': 'ハブはサーバー側から接続します。ハブが同じホストで直接動作している場合を除き、127.0.0.1 は使わないでください。',
+    'accounts.codexOauthLocalhostNotice': 'Codex OAuth の注意：認証が完了すると、ブラウザーに「このサイトにアクセスできません」(localhost:1455) と表示されることがありますが正常です。タブを閉じず、アドレスバーの URL 全体をコピーして下に貼り付けてください。',
+    'accounts.mimoServiceToken': 'サービス トークン (api-platform_serviceToken)',
+    'accounts.mimoUserId': 'ユーザー ID (userId)',
+    'accounts.mimoHint': 'Cookie ヘッダー全体、または serviceToken と userId の値を個別に貼り付けてください。',
+    'accounts.claudeRiskNotice': '注意：サーバー／クラウドのハブ環境では、Claude Web のセッション Cookie が頻繁に失効したり、Cloudflare の検証が発生したりすることがあります。',
+    'accounts.kimiKeyHelp': 'API Key は同時実行数の指標を、Web Access Token は 5 時間および週次のクォータメーターを提供します。',
   },
   ko: {
     'nav.skip': '본문으로 이동',
@@ -1398,7 +1405,14 @@ const MESSAGES = {
     'pwa.status.insecure': 'PWA 설치에는 HTTPS 필요 (HTTP LAN은 바로가기만)',
     'pwa.status.unsupported': '이 브라우저는 PWA를 설치할 수 없습니다',
     'pwa.status.ready': '앱으로 설치할 수 있습니다',
-    'pwa.status.hint': '브라우저 메뉴 → 앱 설치 / 홈 화면에 추가'
+    'pwa.status.hint': '브라우저 메뉴 → 앱 설치 / 홈 화면에 추가',
+    'accounts.agyEndpointHint': '허브는 서버에서 연결합니다. 허브가 같은 호스트에서 직접 실행되는 경우가 아니면 127.0.0.1을 사용하지 마세요.',
+    'accounts.codexOauthLocalhostNotice': 'Codex OAuth 안내: 인증이 끝나면 브라우저에 "사이트에 연결할 수 없음"(localhost:1455)이 표시될 수 있으며 이는 정상입니다. 탭을 닫지 말고 주소 표시줄의 URL 전체를 복사해 아래에 붙여넣으세요.',
+    'accounts.mimoServiceToken': '서비스 토큰(api-platform_serviceToken)',
+    'accounts.mimoUserId': '사용자 ID(userId)',
+    'accounts.mimoHint': 'Cookie 헤더 전체를 붙여넣거나 serviceToken과 userId 값을 각각 입력하세요.',
+    'accounts.claudeRiskNotice': '참고: 서버/클라우드 허브 환경에서는 Claude Web 세션 쿠키가 자주 만료되거나 Cloudflare 확인이 발생할 수 있습니다.',
+    'accounts.kimiKeyHelp': 'API Key는 동시 실행 지표를, Web Access Token은 5시간 및 주간 할당량 미터를 제공합니다.',
   }
 };
 

@@ -12,7 +12,10 @@ const {
   kimiWebToken,
   parseKimiUsage,
   parseKimiMembershipStats,
-  fetchKimiLimits
+  fetchKimiLimits,
+  KIMI_OAUTH_CLIENT_ID,
+  refreshKimiAccessToken,
+  resolveKimiWebToken
 } = require('../../src/shared/kimiLimits');
 
 test('kimiToken reads explicit key before the CodexBar-compatible environment key', () => {
@@ -482,4 +485,108 @@ test('fetchKimiLimits physically aborts a hung request within its configured bou
 
   assert.equal(provider.status, 'unavailable');
   assert.equal(signal.aborted, true);
+});
+
+// A Kimi web access token is short-lived. Without a refresh flow a Hub account
+// necessarily expires; these tests pin the renewal path and its fallbacks.
+
+test('refreshKimiAccessToken posts the CLI client id and returns the new pair', async () => {
+  let seen = null;
+  const result = await refreshKimiAccessToken('rt-1', {
+    fetch: async (url, init) => {
+      seen = { url, body: init.body };
+      return { ok: true, status: 200, json: async () => ({ access_token: 'fresh', refresh_token: 'rt-2', expires_in: 3600 }) };
+    }
+  });
+  assert.match(seen.url, /auth\.kimi\.com\/api\/oauth\/token/);
+  assert.match(seen.body, /grant_type=refresh_token/);
+  assert.match(seen.body, new RegExp(KIMI_OAUTH_CLIENT_ID));
+  assert.match(seen.body, /rt-1/);
+  assert.deepEqual(result, { accessToken: 'fresh', refreshToken: 'rt-2', expiresInSeconds: 3600 });
+});
+
+test('refreshKimiAccessToken keeps the old refresh token when none is returned', async () => {
+  const result = await refreshKimiAccessToken('rt-keep', {
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({ access_token: 'fresh' }) })
+  });
+  assert.equal(result.refreshToken, 'rt-keep');
+});
+
+test('refreshKimiAccessToken maps a rejected refresh to unauthorized', async () => {
+  for (const status of [400, 401, 403]) {
+    await assert.rejects(
+      () => refreshKimiAccessToken('rt', { fetch: async () => ({ ok: false, status, json: async () => ({}) }) }),
+      (error) => error.status === 'unauthorized'
+    );
+  }
+});
+
+test('refreshKimiAccessToken reports a server failure as unavailable', async () => {
+  await assert.rejects(
+    () => refreshKimiAccessToken('rt', { fetch: async () => ({ ok: false, status: 500, json: async () => ({}) }) }),
+    (error) => error.status === 'unavailable'
+  );
+});
+
+test('refreshKimiAccessToken rejects an empty token and a body-less success', async () => {
+  await assert.rejects(() => refreshKimiAccessToken(''), (error) => error.status === 'unauthorized');
+  await assert.rejects(
+    () => refreshKimiAccessToken('rt', { fetch: async () => ({ ok: true, status: 200, json: async () => ({}) }) }),
+    (error) => error.status === 'unavailable'
+  );
+});
+
+test('resolveKimiWebToken refreshes only when the configured token is stale', async () => {
+  let refreshes = 0;
+  const deps = (now) => ({
+    now: () => now,
+    env: {},
+    fetch: async () => {
+      refreshes += 1;
+      return { ok: true, status: 200, json: async () => ({ access_token: 'fresh' }) };
+    }
+  });
+
+  // Far from expiry: the configured token is used as-is, no network call.
+  const fresh = await resolveKimiWebToken(
+    { kimiWebAccessToken: 'current', kimiRefreshToken: 'rt', kimiExpiresAt: Date.now() + 3_600_000 },
+    deps(Date.now())
+  );
+  assert.equal(fresh, 'current');
+  assert.equal(refreshes, 0);
+
+  // Inside the 5-minute leeway: refresh.
+  const now = Date.now();
+  const renewed = await resolveKimiWebToken(
+    { kimiWebAccessToken: 'current', kimiRefreshToken: 'rt', kimiExpiresAt: now + 60_000 },
+    deps(now)
+  );
+  assert.equal(renewed, 'fresh');
+  assert.equal(refreshes, 1);
+});
+
+test('resolveKimiWebToken refreshes when no access token is configured', async () => {
+  const resolved = await resolveKimiWebToken({ kimiRefreshToken: 'rt' }, {
+    env: {},
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({ access_token: 'fresh' }) })
+  });
+  assert.equal(resolved, 'fresh');
+});
+
+test('resolveKimiWebToken falls back to the configured token when refresh fails', async () => {
+  const resolved = await resolveKimiWebToken(
+    { kimiWebAccessToken: 'still-worth-trying', kimiRefreshToken: 'rt-bad', kimiExpiresAt: 1 },
+    { env: {}, fetch: async () => { throw new Error('ECONNRESET'); } }
+  );
+  // A failed refresh must not discard a token that may still work; the usage
+  // call's own 401 is the precise signal.
+  assert.equal(resolved, 'still-worth-trying');
+});
+
+test('resolveKimiWebToken is a no-op without a refresh token', async () => {
+  const resolved = await resolveKimiWebToken({ kimiWebAccessToken: 'current' }, {
+    env: {},
+    fetch: async () => { throw new Error('must not refresh without a refresh token'); }
+  });
+  assert.equal(resolved, 'current');
 });

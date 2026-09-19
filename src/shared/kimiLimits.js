@@ -1,6 +1,12 @@
 'use strict';
 
 const { normalizeLimitProvider } = require('./limits');
+
+// Kimi's OAuth refresh endpoint and the CLI's public client id. A web access
+// token is short-lived, so without this the Hub account necessarily expires.
+const KIMI_OAUTH_TOKEN_URL = 'https://auth.kimi.com/api/oauth/token';
+const KIMI_OAUTH_CLIENT_ID = '17e5f671-d194-4dfb-9706-5516cb48c098';
+const KIMI_REFRESH_LEEWAY_MS = 5 * 60 * 1000;
 const { hashKey } = require('./hashKey');
 const { runWithProbeDeadline } = require('./probeDeadline');
 
@@ -506,12 +512,77 @@ function failureStatus(errors) {
   return 'unavailable';
 }
 
+/**
+ * Refresh a Kimi web access token. Mirrors upstream's flow: POST the refresh
+ * token to the OAuth endpoint with the CLI's client id, 5 minutes ahead of
+ * expiry (and reactively on a 401).
+ */
+function kimiStatusError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+async function refreshKimiAccessToken(refreshToken, deps = {}) {
+  const token = String(refreshToken || '').trim();
+  if (!token) throw kimiStatusError('unauthorized', 'No Kimi refresh token available');
+  const body = new URLSearchParams({
+    client_id: KIMI_OAUTH_CLIENT_ID,
+    grant_type: 'refresh_token',
+    refresh_token: token
+  }).toString();
+  const response = await (deps.fetch || fetch)(KIMI_OAUTH_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body,
+    signal: deps.signal
+  });
+  if (response.status === 400 || response.status === 401 || response.status === 403) {
+    throw kimiStatusError('unauthorized', `Kimi token refresh rejected (HTTP ${response.status})`);
+  }
+  if (!response.ok) {
+    throw kimiStatusError('unavailable', `Kimi token refresh failed (HTTP ${response.status})`);
+  }
+  const json = await response.json();
+  const accessToken = String(json?.access_token || '').trim();
+  if (!accessToken) throw kimiStatusError('unavailable', 'Kimi token refresh returned no access token');
+  return {
+    accessToken,
+    refreshToken: String(json?.refresh_token || '').trim() || token,
+    expiresInSeconds: numberOrNull(json?.expires_in)
+  };
+}
+
+/**
+ * Resolve the web token actually used for this probe, refreshing first when a
+ * refresh token is supplied and the access token looks stale (or when no access
+ * token was given at all). A failed refresh falls back to the configured token,
+ * because a 401 from the usage call itself is the more precise signal.
+ */
+async function resolveKimiWebToken(options = {}, deps = {}) {
+  const env = deps.env || process.env;
+  const configured = kimiWebToken(env, options.kimiWebAccessToken);
+  const refreshToken = String(options.kimiRefreshToken || '').trim();
+  if (!refreshToken) return configured;
+  const expiresAt = numberOrNull(options.kimiExpiresAt);
+  const now = (deps.now || Date.now)();
+  const stale = !configured
+    || (expiresAt !== null && now + KIMI_REFRESH_LEEWAY_MS > expiresAt);
+  if (!stale) return configured;
+  try {
+    const refreshed = await refreshKimiAccessToken(refreshToken, deps);
+    return refreshed.accessToken;
+  } catch (_) {
+    return configured;
+  }
+}
+
 async function fetchKimiLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
   const key = kimiToken(env, options.kimiApiKey);
-  const webToken = kimiWebToken(env, options.kimiWebAccessToken);
+  const webToken = await resolveKimiWebToken(options, { ...deps, env });
   if (!webToken && !key) {
     return normalizeLimitProvider({
       provider: 'kimi',
@@ -563,6 +634,10 @@ module.exports = {
   KIMI_MEMBERSHIP_STATS_URL,
   kimiToken,
   kimiWebToken,
+  KIMI_OAUTH_CLIENT_ID,
+  KIMI_OAUTH_TOKEN_URL,
+  refreshKimiAccessToken,
+  resolveKimiWebToken,
   parseKimiUsage,
   parseKimiWebUsage,
   parseKimiMembershipStats,

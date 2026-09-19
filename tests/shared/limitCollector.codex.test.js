@@ -1409,3 +1409,29 @@ test('Codex reads CLI RPC allowances from extra rate limit ids', () => {
   assert.equal(provider.windows[2].label, 'Luna Reserve Weekly');
   assert.equal(provider.windows[2].remainingPercent, 100);
 });
+
+// `spend_control.reached` is the hard monthly spend stop. It is a separate field
+// from the limit's remaining percentage, so it must surface even when the limit
+// object is absent — otherwise a reached cap renders as a healthy card.
+test('Codex surfaces spend_control.reached alongside the individual limit', () => {
+  const provider = mapCodexRateLimitsToProvider({
+    spend_control: { reached: true },
+    individual_limit: { remaining_percent: 20, resets_at: '2026-07-01T00:00:00Z' }
+  });
+  const spend = provider.windows.find((window) => window.label === 'Spend limit Monthly');
+  assert.ok(spend, 'expected a spend-limit window');
+  assert.equal(spend.usedPercent, 80);
+  assert.match(spend.detail, /spend limit reached/);
+});
+
+test('Codex surfaces a reached spend control even without a limit object', () => {
+  const provider = mapCodexRateLimitsToProvider({ spend_control: { reached: true } });
+  const spend = provider.windows.find((window) => window.label === 'Spend limit Monthly');
+  assert.ok(spend, 'a reached cap must not be invisible');
+  assert.equal(spend.detail, 'spend limit reached');
+});
+
+test('Codex omits the spend window when neither a limit nor a reached flag exists', () => {
+  const provider = mapCodexRateLimitsToProvider({ spend_control: { reached: false } });
+  assert.equal(provider.windows.filter((window) => window.label === 'Spend limit Monthly').length, 0);
+});

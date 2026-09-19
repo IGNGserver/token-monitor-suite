@@ -138,15 +138,89 @@ export function renderAccounts() {
   let simpleFieldsHtml;
   switch (currentProvider) {
     case 'claude':
+      // OAuth is listed first and is the better path: the usage endpoint accepts
+      // the OAuth token and the collector renews it from the refresh token, so the
+      // account keeps working. The web cookie is Cloudflare-gated and short-lived.
       simpleFieldsHtml = `
-        <label class="field field-wide"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="sessionKey=... / cookie" ${isEditing ? '' : 'required'} /></label>
+        <label class="field field-wide"><span>${tr('accounts.accessToken')}</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.claudeAccessTokenPlaceholder'))}" /></label>
+        <label class="field field-wide"><span>${tr('accounts.claudeRefreshToken')}</span><input name="refreshToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.claudeRefreshTokenPlaceholder'))}" /></label>
+        <label class="field field-wide"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="sessionKey=... / cookie" /></label>
         <p class="muted tiny notice warn" style="margin-top:4px">${escapeHtml(tr('accounts.claudeRiskNotice'))}</p>
       `;
       break;
-    case 'commandcode':
+    // ollama/sakana take a session cookie. Sakana has no usage API at all: its
+    // billing console page is scraped, so a cookie is the only credential it
+    // accepts.
     case 'ollama':
+    case 'sakana':
       simpleFieldsHtml = `
         <label class="field field-wide"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="sessionKey=... / cookie" ${isEditing ? '' : 'required'} /></label>
+      `;
+      break;
+    case 'commandcode':
+      // The API key is listed first because it is the better credential: the
+      // `cmd` CLI's own, minted by `cmd login` into ~/.commandcode/auth.json, and
+      // it does not expire the way a session cookie does. The cookie stays
+      // available for accounts configured before the key path existed.
+      simpleFieldsHtml = `
+        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.commandcodeKeyPlaceholder'))}" /></label>
+        <label class="field field-wide"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="sessionKey=... / cookie" /></label>
+        <p class="muted tiny" style="grid-column:1 / -1;margin-top:2px">${escapeHtml(tr('accounts.commandcodeCredentialHelp'))}</p>
+      `;
+      break;
+    case 'gemini':
+      // Gemini Code Assist uses an OAuth access/refresh pair (Standard/Enterprise
+      // only; the consumer tiers were retired on 2026-06-18).
+      simpleFieldsHtml = `
+        <label class="field field-wide"><span>${tr('accounts.accessToken')}</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.geminiAccessTokenPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
+        <label class="field field-wide"><span>${tr('accounts.claudeRefreshToken')}</span><input name="refreshToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.geminiRefreshTokenPlaceholder'))}" /></label>
+        <p class="muted tiny notice warn" style="margin-top:4px">${escapeHtml(tr('accounts.geminiRetiredNotice'))}</p>
+      `;
+      break;
+    case 'kilocode':
+      // Kilo Code authenticates with a Bearer API key (or the CLI login token).
+      simpleFieldsHtml = `
+        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.kiloKeyPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
+      `;
+      break;
+    case 'cline':
+      // ClinePass authenticates with a Bearer API key from app.cline.bot.
+      simpleFieldsHtml = `
+        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.clineKeyPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
+      `;
+      break;
+    case 'droid':
+      // Droid (Factory) takes a WorkOS access token; the refresh token is
+      // optional and lets the Hub renew instead of expiring every ~7 days.
+      simpleFieldsHtml = `
+        <label class="field field-wide"><span>${tr('accounts.accessToken')}</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.droidTokenPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
+        <label class="field field-wide"><span>${tr('accounts.claudeRefreshToken')}</span><input name="refreshToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.droidRefreshTokenPlaceholder'))}" /></label>
+      `;
+      break;
+    case 'warp':
+      // Warp takes a `wk-` API key (Settings → Platform → API keys). A raw Cookie
+      // header value is accepted too, so the same field serves both.
+      simpleFieldsHtml = `
+        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.warpKeyPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
+      `;
+      break;
+    case 'grok':
+      // Grok bills through a bearer token; ~/.grok/auth.json stores it under `key`.
+      simpleFieldsHtml = `
+        <label class="field field-wide"><span>${tr('accounts.accessToken')}</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.grokTokenPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
+      `;
+      break;
+    case 'cursor':
+      // Cursor's quota endpoints take the WorkosCursorSessionToken cookie value.
+      simpleFieldsHtml = `
+        <label class="field field-wide"><span>WorkosCursorSessionToken</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.cursorTokenPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
+      `;
+      break;
+    case 'amp':
+      // Amp authenticates with the API key its own CLI stores in
+      // ~/.local/share/amp/secrets.json under `apiKey@https://ampcode.com/`.
+      simpleFieldsHtml = `
+        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.ampApiKeyPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
       `;
       break;
     case 'codex':
@@ -215,6 +289,7 @@ export function renderAccounts() {
       simpleFieldsHtml = `
         <label class="field"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." /></label>
         <label class="field"><span>Web Access Token</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="Access token" /></label>
+        <label class="field field-wide"><span>${tr('accounts.claudeRefreshToken')}</span><input name="refreshToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.kimiRefreshTokenPlaceholder'))}" /></label>
         <p class="muted tiny" style="grid-column:1 / -1;margin-top:2px">${escapeHtml(tr('accounts.kimiKeyHelp'))}</p>
       `;
       break;

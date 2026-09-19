@@ -125,9 +125,37 @@ export function formatLimitBadge(card) {
     return `<span class="badge">${escapeHtml(tr('accounts.statusDisabled'))}</span>`;
   }
   if (status === 'unauthorized') {
-    return `<span class="badge warn">${escapeHtml(tr('accounts.statusError'))}</span>`;
+    // Distinguish a retired plan from a stale credential: both need user action,
+    // but only one is fixed by re-pasting. `region:'retired'` is set by the
+    // Gemini adapter when Google reports the tier as no longer served.
+    const retired = String(card.region || '').toLowerCase() === 'retired';
+    return `<span class="badge warn">${escapeHtml(tr(retired ? 'limits.statusRetired' : 'limits.statusNeedsCredentials'))}</span>`;
+  }
+  if (status === 'notconfigured') {
+    return `<span class="badge">${escapeHtml(tr('limits.statusNotConfigured'))}</span>`;
   }
   return `<span class="badge warn">${escapeHtml(card.status || tr('accounts.statusError'))}</span>`;
+}
+
+/**
+ * One actionable line under a card that is not producing numbers. The point is
+ * to name the fix ("update the credential") rather than echo the status, because
+ * a bare "Error" leaves the user unable to tell an expired cookie from an
+ * outage.
+ */
+export function formatLimitHint(card) {
+  const status = String(card.status || '').toLowerCase();
+  if (card.stale) return tr('limits.hintStale');
+  if (status === 'ok' || status === 'disabled') return '';
+  if (status === 'unauthorized') {
+    return String(card.region || '').toLowerCase() === 'retired'
+      ? tr('limits.hintRetired')
+      : tr('limits.hintNeedsCredentials');
+  }
+  if (status === 'notconfigured') return tr('limits.hintNotConfigured');
+  if (status === 'sourceratelimited' || status === 'ratelimited') return tr('limits.hintRateLimited');
+  if (status === 'unavailable' || status === 'error') return tr('limits.hintUnavailable');
+  return '';
 }
 
 export function renderLimitCards(cards, { compact = false } = {}) {
@@ -154,6 +182,10 @@ export function renderLimitCards(cards, { compact = false } = {}) {
             ${formatLimitBadge(card)}
           </div>
           ${renderLimitCardWindows(card)}
+          ${(() => {
+            const hint = formatLimitHint(card);
+            return hint ? `<p class="muted tiny limit-card-hint">${escapeHtml(hint)}</p>` : '';
+          })()}
           <div class="limit-card-foot" title="${escapeHtml(card.updatedAt ? formatReset(card.updatedAt, appState().locale) : '')}">
             <span>${tr('limits.lastFetched', { time: formatRelative(card.updatedAt, appState().locale) })}</span>
           </div>

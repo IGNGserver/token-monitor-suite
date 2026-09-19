@@ -584,6 +584,30 @@ test('every tracked client is labelled and coloured on the dashboard', () => {
   assert.deepEqual(missingProviders, [], `providers with no label: ${missingProviders.join(', ')}`);
 });
 
+test('every hub-authority provider is addable from the accounts UI', () => {
+  // A provider can be fully implemented (fetcher, capability entry, credential
+  // store path) and still be unreachable if it is missing from the accounts
+  // dropdown. That is exactly how `amp` and `sakana` shipped: LIMIT_PROVIDER_IDS
+  // grew but HUB_ACCOUNT_PROVIDERS did not, so neither could be added from the
+  // Hub even though both declared authority:'hub'.
+  const capabilities = require('../../src/shared/limitProviderSources.js')
+    .LIMIT_PROVIDER_SOURCE_CAPABILITIES;
+  const expected = Object.entries(capabilities)
+    .filter(([, capability]) => capability.authority === 'hub' && capability.manual === true)
+    .map(([id]) => id)
+    .sort();
+
+  const block = source.match(/HUB_ACCOUNT_PROVIDERS = \[([\s\S]*?)\n\];/)[1];
+  const addable = [...block.matchAll(/id:\s*'([a-z0-9-]+)'/g)].map((match) => match[1]).sort();
+
+  assert.deepEqual(addable, expected, 'HUB_ACCOUNT_PROVIDERS must match the hub-authority provider set');
+  // Every addable provider must also carry a label for the dropdown.
+  const providerBlock = source.match(/const PROVIDER_LABELS = \{([\s\S]*?)\n\};/)[1];
+  const labels = new Set([...providerBlock.matchAll(/^\s*'?([a-z0-9-]+)'?:\s*'/gm)].map((match) => match[1]));
+  const unlabelled = addable.filter((id) => !labels.has(id));
+  assert.deepEqual(unlabelled, [], `addable providers with no label: ${unlabelled.join(', ')}`);
+});
+
 test('the dashboard detects an idle stream and reports how old its data is', () => {
   // A half-open socket leaves reader.read() pending forever, so the badge used to
   // read "live" while the numbers were arbitrarily old. The widget solved this

@@ -1552,6 +1552,7 @@ async function saveAccountFromForm(form) {
     const accountId = String(values.get('accountId') || '').trim();
     const serviceToken = String(values.get('serviceToken') || '').trim();
     const userId = String(values.get('userId') || '').trim();
+    const refreshToken = String(values.get('refreshToken') || '').trim();
 
     const credObj = {};
     if (apiKey) credObj.apiKey = apiKey;
@@ -1565,6 +1566,7 @@ async function saveAccountFromForm(form) {
       }
     }
     if (accessToken) credObj.accessToken = accessToken;
+    if (refreshToken) credObj.refreshToken = refreshToken;
     if (accessKeyId) credObj.accessKeyId = accessKeyId;
     if (secretAccessKey) credObj.secretAccessKey = secretAccessKey;
     if (region) credObj.region = region;

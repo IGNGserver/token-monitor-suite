@@ -96,3 +96,43 @@ test('fetchCursorLimits includes team pool when Cursor reports pooled usage', as
   assert.equal(pool.limit, 281220);
   assert.equal(pool.remaining, 153968.65);
 });
+
+// Cursor's quota probe is plain HTTP, so the Hub only needs the token. These
+// tests pin that an explicitly supplied token is used and that local credential
+// discovery is not consulted when one is present.
+
+test('fetchCursorLimits uses a Hub-supplied session token instead of local credentials', async () => {
+  let localReads = 0;
+  const result = await fetchCursorLimits({ cursorSessionToken: 'hub-token' }, {
+    readActiveAccount: () => { localReads += 1; return null; },
+    probe: async (token) => {
+      assert.equal(token, 'hub-token');
+      return { ok: true, usage: { planPercent: 30, billingCycleEnd: '2026-07-01T00:00:00Z' } };
+    }
+  });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.windows.length, 1);
+  assert.equal(result.windows[0].usedPercent, 30);
+  // The local store must never be consulted once a Hub token is supplied.
+  assert.equal(localReads, 0);
+});
+
+test('fetchCursorLimits carries the Hub account label onto the row', async () => {
+  const result = await fetchCursorLimits({
+    cursorSessionToken: 'hub-token',
+    cursorAccountLabel: 'work cursor'
+  }, {
+    readActiveAccount: () => null,
+    probe: async () => ({ ok: true, usage: { planPercent: 5 } })
+  });
+  assert.equal(result.accountLabel, 'work cursor');
+});
+
+test('fetchCursorLimits reports notConfigured when neither a Hub token nor a local account exists', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => null,
+    probe: async () => { throw new Error('probe must not run without a token'); }
+  });
+  assert.equal(result.status, 'notConfigured');
+  assert.equal(result.windows.length, 0);
+});

@@ -733,3 +733,38 @@ test('fetchGrokLimits returns notConfigured when real ~/.grok/auth.json has no u
   );
   assert.equal(r.status, 'notConfigured');
 });
+
+// The Hub has no ~/.grok and no env, so a Grok account there is only reachable
+// when the bearer token arrives in `options` AND the explicit-config gate accepts
+// it. Before this gate existed, probeLimitProvider returned an empty array and
+// the account silently showed nothing.
+test('probeLimitProvider reaches the Grok fetcher for a Hub-supplied bearer token', async () => {
+  const { probeLimitProvider } = require('../../src/shared/limitCollector');
+  const seen = [];
+  const rows = await probeLimitProvider('grok', {
+    limitProviders: 'grok',
+    limitProviderAuthority: 'hub',
+    suppressAutoDetectedAccounts: true,
+    grokBearerToken: 'hub-grok-token'
+  }, {}, {
+    fetch: async (url, init) => {
+      seen.push(init.headers.Authorization || init.headers.authorization);
+      return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({}), text: async () => '' };
+    }
+  });
+  // One row (not an empty array) proves the gate let the provider through.
+  assert.equal(rows.length, 1);
+  assert.ok(seen.some((h) => h === 'Bearer hub-grok-token'), 'expected the Hub token on the wire');
+});
+
+test('probeLimitProvider returns no rows for Grok without a Hub token', async () => {
+  const { probeLimitProvider } = require('../../src/shared/limitCollector');
+  const rows = await probeLimitProvider('grok', {
+    limitProviders: 'grok',
+    limitProviderAuthority: 'hub',
+    suppressAutoDetectedAccounts: true
+  }, {}, {
+    fetch: async () => { throw new Error('grok must not be probed without credentials'); }
+  });
+  assert.deepEqual(rows, []);
+});

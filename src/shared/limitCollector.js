@@ -51,6 +51,11 @@ const qoderLimits = require('./qoderLimits');
 const { qoderCookie, fetchQoderLimits } = qoderLimits;
 const commandcodeLimits = require('./commandcodeLimits');
 const ampLimits = require('./ampLimits');
+const warpLimits = require('./warpLimits');
+const factoryLimits = require('./factoryLimits');
+const clineLimits = require('./clineLimits');
+const kiloLimits = require('./kiloLimits');
+const geminiLimits = require('./geminiLimits');
 const sakanaLimits = require('./sakanaLimits');
 const { commandcodeCookie, fetchCommandcodeLimits } = commandcodeLimits;
 const ollamaLimits = require('./ollamaLimits');
@@ -135,11 +140,18 @@ function hasEnabledProfileCredential(profiles, predicate) {
 // provider cannot accidentally re-introduce an env/app/browser account.
 function hasExplicitLimitProviderConfig(provider, options = {}) {
   switch (provider) {
-    case 'claude': return Boolean(options.claudeWebCookie);
+    case 'claude': return Boolean(options.claudeWebCookie || options.claudeAccessToken);
     case 'codex': return Boolean(options.codexAuthJson || options.codexAccessToken)
       || normalizeCodexManagedAccounts(options.codexManagedAccounts || options.managedAccounts)
         .some((account) => account.enabled !== false);
-    case 'cursor': return options.cursorManualAccountConfigured === true;
+    case 'cursor': return Boolean(options.cursorSessionToken) || options.cursorManualAccountConfigured === true;
+    case 'grok': return Boolean(options.grokBearerToken);
+    case 'warp': return warpLimits.hasWarpCredentials(options);
+    case 'cline': return clineLimits.hasClineCredentials(options);
+    case 'kilocode': return kiloLimits.hasKiloCredentials(options);
+    case 'gemini': return geminiLimits.hasGeminiCredentials(options);
+    case 'droid': return factoryLimits.hasFactoryCredentials(options);
+    // Grok's billing call takes the bearer token its CLI keeps in ~/.grok/auth.json.
     case 'antigravity': return Boolean(options.antigravityAccessToken || options.antigravityEndpoint || options.antigravityCsrfToken);
     case 'opencode': return Boolean(options.opencodeCookie)
       || hasEnabledProfileCredential(options.opencodeProfiles, (profile) => profile.cookie || profile.apiKey);
@@ -153,7 +165,9 @@ function hasExplicitLimitProviderConfig(provider, options = {}) {
     case 'zaiteam': return Boolean(options.zaiTeamApiKey && options.zaiTeamOrganizationId && options.zaiTeamProjectId);
     case 'volcengine': return Boolean(options.volcengineAccessKeyId && options.volcengineSecretAccessKey);
     case 'qoder': return Boolean(options.qoderCookie);
-    case 'commandcode': return Boolean(options.commandcodeCookie);
+    // Two credentials, two channels: an API key (the `cmd` CLI's own, and the
+    // one we want people on) or a pasted browser session cookie.
+    case 'commandcode': return Boolean(options.commandcodeApiKey) || Boolean(options.commandcodeCookie);
     case 'amp': return ampLimits.hasAmpCredentials(options);
     case 'sakana': return sakanaLimits.hasSakanaCredentials(options);
     case 'ollama': return Boolean(options.ollamaCookie);
@@ -462,7 +476,25 @@ function claudeCredentialsFromOauth(oauth, meta = {}) {
   };
 }
 
-async function readClaudeCredentials(deps = {}) {
+async function readClaudeCredentials(deps = {}, options = {}) {
+  // Hub-supplied OAuth first. On the Hub there is no ~/.claude, no Keychain and
+  // (because probing nulls `env`) no CLAUDE_CODE_OAUTH_TOKEN, so the only way to
+  // use the OAuth usage endpoint there is for the credential to arrive in
+  // `options`. Checked before everything else so an explicitly configured Hub
+  // account can never be shadowed by an ambient credential on a dev machine.
+  if (options.claudeAccessToken) {
+    return {
+      source: 'hub',
+      accessToken: String(options.claudeAccessToken),
+      refreshToken: options.claudeRefreshToken ? String(options.claudeRefreshToken) : null,
+      expiresAt: normalizeExpiresAt(options.claudeExpiresAt),
+      identity: `hub:${options.claudeAccountLabel || ''}:${options.claudeAccessToken.slice(-8)}`,
+      // A Hub account's label is the user's own name for it; normalizeAccountLabel
+      // downstream already trims and sanitizes, so only the type is enforced here.
+      accountLabel: String(options.claudeAccountLabel || '').trim().slice(0, 128)
+    };
+  }
+
   const env = deps.env || process.env;
   if (env.CLAUDE_CODE_OAUTH_TOKEN) {
     return {
@@ -1615,7 +1647,7 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
   }
   let oauthIdentity = null;
   try {
-    let credentials = await readClaudeCredentials(deps);
+    let credentials = await readClaudeCredentials(deps, options);
     oauthIdentity = claudeCachedIdentity(
       claudeOauthIdentityFingerprint(credentials),
       deps,
@@ -2238,19 +2270,35 @@ function codexNamedQuotaWindows(planSnapshot, payload = {}) {
     push('Code review', '', review.primary_window || review.primary, review.secondary_window || review.secondary);
   }
   const individualLimit = payload.individual_limit || payload.individualLimit || null;
+  // `spend_control.reached` is a separate signal from the limit's own remaining
+  // percentage: it is the hard stop the plan enforces once the month's spend cap
+  // is hit, so it is carried onto the window as an explicit exhausted marker
+  // rather than being inferred from a rounded percentage.
+  const spendControl = payload.spend_control || payload.spendControl || null;
+  const spendReached = spendControl && typeof spendControl === 'object'
+    && (spendControl.reached === true || spendControl.reached === 'true');
   if (individualLimit && typeof individualLimit === 'object') {
     const remainingPercent = codexNumericValue(individualLimit.remaining_percent ?? individualLimit.remainingPercent);
     const resetsAt = individualLimit.resets_at ?? individualLimit.resetsAt;
-    if (remainingPercent !== null || resetsAt !== undefined) {
+    if (remainingPercent !== null || resetsAt !== undefined || spendReached) {
       windows.push({
         kind: 'named',
         label: 'Spend limit Monthly',
         ...(remainingPercent !== null ? { usedPercent: Math.max(0, Math.min(100, 100 - remainingPercent)) } : {}),
         ...(resetsAt !== undefined ? { resetsAt } : {}),
         windowMinutes: 30 * 24 * 60,
-        detail: 'individual limit'
+        detail: spendReached ? 'individual limit · spend limit reached' : 'individual limit'
       });
     }
+  } else if (spendReached) {
+    // The cap can be reported without the limit object; still surface the stop so
+    // a reached spend control is never silently invisible.
+    windows.push({
+      kind: 'named',
+      label: 'Spend limit Monthly',
+      windowMinutes: 30 * 24 * 60,
+      detail: 'spend limit reached'
+    });
   }
   return windows;
 }
@@ -4291,6 +4339,11 @@ function providerFetchers(deps = {}) {
     commandcode: (providerOptions, probeDeps) => commandcodeLimits.fetchCommandcodeLimits(providerOptions, probeDeps),
     amp: (providerOptions, probeDeps) => ampLimits.fetchAmpLimits(providerOptions, probeDeps),
     sakana: (providerOptions, probeDeps) => sakanaLimits.fetchSakanaLimits(providerOptions, probeDeps),
+    warp: (providerOptions, probeDeps) => warpLimits.fetchWarpLimits(providerOptions, probeDeps),
+    droid: (providerOptions, probeDeps) => factoryLimits.fetchFactoryLimits(providerOptions, probeDeps),
+    cline: (providerOptions, probeDeps) => clineLimits.fetchClineLimits(providerOptions, probeDeps),
+    kilocode: (providerOptions, probeDeps) => kiloLimits.fetchKiloLimits(providerOptions, probeDeps),
+    gemini: (providerOptions, probeDeps) => geminiLimits.fetchGeminiLimits(providerOptions, probeDeps),
     qoder: (providerOptions, probeDeps) => qoderLimits.fetchQoderLimits(providerOptions, probeDeps),
     ollama: (providerOptions, probeDeps) => ollamaLimits.fetchOllamaLimits(providerOptions, probeDeps),
     kimi: (providerOptions, probeDeps) => kimiLimits.fetchKimiLimits(providerOptions, probeDeps),
@@ -4490,7 +4543,17 @@ async function fetchCursorLimits(options = {}, deps = {}) {
   const readActiveAccount = deps.readActiveAccount || cursorAuth.readActiveAccount;
   const probe = deps.probe || cursorProbe.probe;
 
-  const account = readActiveAccount();
+  // Cursor's usage endpoints are plain HTTP (`cursor.com/api/usage-summary` with a
+  // `WorkosCursorSessionToken` cookie), so a Hub account only needs that token —
+  // there is no local dependency in the probe itself. Prefer an explicitly
+  // supplied token so the Hub never falls back to a dev machine's local cursor.
+  const account = options.cursorSessionToken
+    ? {
+      id: 'hub',
+      sessionToken: String(options.cursorSessionToken),
+      label: String(options.cursorAccountLabel || '').trim().slice(0, 128) || null
+    }
+    : readActiveAccount();
   if (!account) {
     return {
       provider: 'cursor',

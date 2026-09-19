@@ -435,3 +435,87 @@ test('Claude OAuth usage ignores non-Fable scoped weekly limits', () => {
   const labels = provider.windows.filter((window) => window.kind === 'weekly').map((window) => window.label);
   assert.deepEqual(labels, ['']);
 });
+
+// The Hub has no ~/.claude, no Keychain, and (because probing nulls `env`) no
+// CLAUDE_CODE_OAUTH_TOKEN. OAuth there is only reachable if the credential
+// arrives in `options`, which is what these two tests pin.
+
+test('Claude uses a Hub-supplied OAuth access token without touching local files', async () => {
+  let readFileCalls = 0;
+  const provider = await fetchClaudeLimits({
+    claudeAccessToken: 'hub-access-token',
+    claudeAccountLabel: 'work'
+  }, {
+    platform: 'linux',
+    now: () => Date.parse('2026-06-11T00:00:00Z'),
+    env: Object.create(null),
+    readFile: async () => { readFileCalls += 1; throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
+    stat: async () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
+    fetch: async (url, init) => {
+      // The collector also calls the profile endpoint; only the usage call
+      // carries the quota windows.
+      assert.equal(init.headers.authorization, 'Bearer hub-access-token');
+      if (/\/api\/oauth\/profile/.test(String(url))) {
+        return { ok: true, json: async () => ({ account: { email: 'hub@example.com' } }) };
+      }
+      assert.match(String(url), /api\.anthropic\.com\/api\/oauth\/usage/);
+      return {
+        ok: true,
+        json: async () => ({
+          five_hour: { utilization: 25, resets_at: '2026-06-11T08:00:00Z' },
+          seven_day: { utilization: 40, resets_at: '2026-06-18T10:00:00Z' }
+        })
+      };
+    }
+  });
+
+  assert.equal(provider.source, 'oauth');
+  assert.equal(provider.windows[0].usedPercent, 25);
+  assert.equal(provider.windows[1].usedPercent, 40);
+  // The Hub path must not fall through to local credential discovery.
+  assert.equal(readFileCalls, 0);
+});
+
+test('a Hub OAuth access token takes precedence over an ambient env token', async () => {
+  const seen = [];
+  await fetchClaudeLimits({ claudeAccessToken: 'hub-token' }, {
+    platform: 'linux',
+    now: () => Date.parse('2026-06-11T00:00:00Z'),
+    // A dev machine may still have the env var set; the explicit Hub account wins.
+    env: { CLAUDE_CODE_OAUTH_TOKEN: 'ambient-token' },
+    fetch: async (url, init) => {
+      seen.push(init.headers.authorization);
+      return { ok: true, json: async () => ({ five_hour: { utilization: 1 }, seven_day: { utilization: 2 } }) };
+    }
+  });
+  // Both the usage and profile calls must use the Hub token, never the ambient one.
+  assert.ok(seen.length > 0, 'expected at least one call');
+  assert.deepEqual([...new Set(seen)], ['Bearer hub-token']);
+});
+
+test('a Hub refresh token is carried so the collector can renew the access token', async () => {
+  const provider = await fetchClaudeLimits({
+    claudeAccessToken: 'expired-token',
+    claudeRefreshToken: 'hub-refresh-token',
+    // Already expired, so the proactive refresh path must engage on non-darwin.
+    claudeExpiresAt: '2026-06-10T00:00:00Z'
+  }, {
+    platform: 'linux',
+    now: () => Date.parse('2026-06-11T00:00:00Z'),
+    env: Object.create(null),
+    fetch: async (url, init) => {
+      if (/oauth\/token/.test(String(url))) {
+        assert.match(String(init.body), /grant_type=refresh_token/);
+        assert.match(String(init.body), /hub-refresh-token/);
+        return {
+          ok: true,
+          json: async () => ({ access_token: 'renewed-token', refresh_token: 'rotated-token', expires_in: 3600 })
+        };
+      }
+      assert.equal(init.headers.authorization, 'Bearer renewed-token');
+      return { ok: true, json: async () => ({ five_hour: { utilization: 5 }, seven_day: { utilization: 6 } }) };
+    }
+  });
+  assert.equal(provider.source, 'oauth');
+  assert.equal(provider.windows.length, 2);
+});

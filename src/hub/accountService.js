@@ -202,7 +202,65 @@ function providerOptions(account, credential) {
     opencodeLocalLimitsEnabled: false
   };
   switch (account.provider) {
-    case 'claude': return { ...options, claudeWebCookie: cookie };
+    // Claude accepts either a web session cookie (fragile: Cloudflare-gated and
+    // short-lived) or an OAuth access/refresh pair. OAuth is strongly preferred
+    // because the collector already implements refresh_token renewal, so an
+    // account configured this way keeps working without the user re-pasting.
+    // Gemini Code Assist uses an OAuth access/refresh pair, like Codex.
+    case 'gemini': return {
+      ...options,
+      geminiAccessToken: String(accessToken || '').trim(),
+      geminiRefreshToken: field(credential, 'refreshToken', 'refresh_token'),
+      geminiAccountLabel: cleanText(account.label, MAX_ACCOUNT_LABEL_LENGTH)
+    };
+    // Kilo Code bills through its own app tRPC endpoint with a Bearer key.
+    case 'kilocode': return {
+      ...options,
+      kiloApiKey: String(apiKey || accessToken || '').trim(),
+      kiloAccountLabel: cleanText(account.label, MAX_ACCOUNT_LABEL_LENGTH)
+    };
+    // ClinePass takes a Bearer API key from app.cline.bot.
+    case 'cline': return {
+      ...options,
+      clineApiKey: String(apiKey || accessToken || '').trim(),
+      clineAccountLabel: cleanText(account.label, MAX_ACCOUNT_LABEL_LENGTH)
+    };
+    // Droid (Factory) takes a WorkOS access token, optionally paired with a
+    // refresh token so the Hub can renew it instead of expiring every ~7 days.
+    case 'droid': return {
+      ...options,
+      factoryApiKey: String(accessToken || apiKey || '').trim(),
+      factoryRefreshToken: field(credential, 'refreshToken', 'refresh_token'),
+      factoryAccountLabel: cleanText(account.label, MAX_ACCOUNT_LABEL_LENGTH)
+    };
+    // Warp bills over GraphQL: a `wk-` API key, or a raw Cookie header.
+    case 'warp': return {
+      ...options,
+      warpApiKey: String(apiKey || cookie || accessToken || '').trim(),
+      warpAccountLabel: cleanText(account.label, MAX_ACCOUNT_LABEL_LENGTH)
+    };
+    // Grok bills with a bearer token (the value its CLI stores under
+    // ~/.grok/auth.json as `key`).
+    case 'grok': return {
+      ...options,
+      grokBearerToken: String(accessToken || apiKey || cookie || '').trim(),
+      grokAccountLabel: cleanText(account.label, MAX_ACCOUNT_LABEL_LENGTH)
+    };
+    // Cursor needs only the pasted WorkosCursorSessionToken; the probe is HTTP-only.
+    case 'cursor': return {
+      ...options,
+      cursorSessionToken: String(cookie || accessToken || '').trim(),
+      cursorManualAccountConfigured: true,
+      cursorAccountLabel: cleanText(account.label, MAX_ACCOUNT_LABEL_LENGTH)
+    };
+    case 'claude': return {
+      ...options,
+      claudeWebCookie: cookie,
+      claudeAccessToken: accessToken,
+      claudeRefreshToken: field(credential, 'refreshToken', 'refresh_token'),
+      claudeExpiresAt: field(credential, 'expiresAt', 'expires_at'),
+      claudeAccountLabel: cleanText(account.label, MAX_ACCOUNT_LABEL_LENGTH)
+    };
     case 'codex': {
       const authJson = credential.authJson || (credential.tokens ? credential : null);
       const codexAccessToken = accessToken || field(credential, 'access_token');
@@ -286,9 +344,26 @@ function providerOptions(account, credential) {
       };
     case 'qoder':
       return { ...options, qoderCookie: cookie, qoderSite: field(credential, 'site') || 'global', qoderCookieMode: 'manual' };
-    case 'commandcode': return { ...options, commandcodeCookie: cookie };
+    // The API key is the `cmd` CLI's own credential and the better one (it does
+    // not expire like a session cookie); the pasted cookie stays supported for
+    // accounts configured before it existed. The collector dispatches on which
+    // one is present, so both are forwarded and neither is guessed at.
+    case 'commandcode': return {
+      ...options,
+      commandcodeApiKey: String(apiKey || '').trim(),
+      commandcodeCookie: cookie
+    };
     case 'ollama': return { ...options, ollamaCookie: cookie };
-    case 'kimi': return { ...options, kimiApiKey: apiKey, kimiWebAccessToken: accessToken };
+    // Kimi accepts an API key (concurrency metrics) AND a web access token (the
+    // 5-hour/weekly meters). The web token is short-lived, so a refresh token is
+    // passed through to let the collector renew it instead of expiring.
+    case 'kimi': return {
+      ...options,
+      kimiApiKey: apiKey,
+      kimiWebAccessToken: accessToken,
+      kimiRefreshToken: field(credential, 'refreshToken', 'refresh_token'),
+      kimiExpiresAt: field(credential, 'expiresAt', 'expires_at')
+    };
     case 'thirdparty': {
       const profile = credential.profile && typeof credential.profile === 'object'
         ? credential.profile

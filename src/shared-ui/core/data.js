@@ -9,13 +9,13 @@ export const CLIENT_LABELS = {
   openclaw: 'OpenClaw',
   antigravity: 'Antigravity',
   cline: 'Cline',
+  kilocode: 'Kilo Code',
   kimi: 'Kimi',
   qwen: 'Qwen',
   grok: 'Grok',
   copilot: 'GitHub Copilot',
   pi: 'Pi',
   zed: 'Zed',
-  kilocode: 'Kilo Code',
   micode: 'MiMo Code',
   zcode: 'ZCode',
   kiro: 'Kiro',
@@ -161,11 +161,16 @@ export const PROVIDER_LABELS = {
   volcengine: 'Volcengine',
   qoder: 'Qoder',
   commandcode: 'Command Code',
+  kilocode: 'Kilo Code',
+  gemini: 'Gemini',
   kimi: 'Kimi',
   ollama: 'Ollama',
   openrouter: 'OpenRouter',
   amp: 'Amp',
   sakana: 'Sakana (Fugu)',
+  warp: 'Warp / Oz',
+  cline: 'Cline',
+  droid: 'Droid (Factory)',
   thirdparty: 'Third-party'
 };
 
@@ -185,6 +190,19 @@ export const HUB_ACCOUNT_PROVIDERS = [
   { id: 'volcengine', label: 'Volcengine' },
   { id: 'qoder', label: 'Qoder' },
   { id: 'commandcode', label: 'Command Code' },
+  // Must list every provider whose LIMIT_PROVIDER_SOURCE_CAPABILITIES entry says
+  // authority:'hub' + manual:true — a provider that is implemented but missing
+  // here is unreachable from the accounts UI, which is exactly how amp/sakana
+  // shipped unusable. tests/hub/webDataHelpers.test.js asserts the two agree.
+  { id: 'cursor', label: 'Cursor' },
+  { id: 'grok', label: 'Grok / xAI' },
+  { id: 'warp', label: 'Warp / Oz' },
+  { id: 'cline', label: 'Cline' },
+  { id: 'kilocode', label: 'Kilo Code' },
+  { id: 'gemini', label: 'Gemini' },
+  { id: 'droid', label: 'Droid (Factory)' },
+  { id: 'amp', label: 'Amp' },
+  { id: 'sakana', label: 'Sakana (Fugu)' },
   { id: 'ollama', label: 'Ollama' },
   { id: 'thirdparty', label: 'Third-party' }
 ];

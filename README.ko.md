@@ -16,7 +16,6 @@
     <img src="https://img.shields.io/badge/Windows-10%2B-0078D4?style=flat-square" alt="Windows 10 이상" />
     <img src="https://img.shields.io/badge/macOS-12%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 12 or later" />
     <img src="https://img.shields.io/badge/Linux-x64-64748b?style=flat-square&logo=linux&logoColor=white" alt="Linux x64" />
-    <a href="https://discord.gg/HmdNVVvw5P"><img src="https://img.shields.io/discord/1344259784219689031?color=5865F2&label=Discord&logo=discord&logoColor=white&style=flat-square" alt="Discord"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-A855F7?style=flat-square" alt="라이선스: MIT" /></a>
 </p>
 
@@ -26,7 +25,7 @@
 
 ## Token Monitor란?
 
-Claude Code, Codex, Cursor, GitHub Copilot 등 58개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 위젯입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다.
+Claude Code, Codex, Cursor, GitHub Copilot 등 59개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 앱입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다.
 
 ## 지원 도구
 
@@ -35,6 +34,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | Logo | 도구 | 데이터 경로 | 토큰 사용량 | AI 도구 한도 | 세션 상세 |
 |:---:|------|-----------|:---:|:---:|:---:|
 | <img src=".github/assets/tools-icon/claude.png" width="28" alt="Claude Code" /> | Claude Code | `~/.claude/projects/`, `~/.claude/transcripts/` | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/claude-desktop.png" width="28" alt="Claude Desktop" /> | Claude Desktop | `<platform-app-data>/Claude/` 및 `Claude-3p/`(Local Agent / Cowork 트랜스크립트) | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/codex.png" width="28" alt="Codex" /> | Codex | `~/.codex/` (`sessions/`, `archived_sessions/`) | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/` (`opencode*.db`, `storage/message/`) | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `~/.hermes/state.db` | ✅ | — | — |
@@ -56,9 +56,9 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code 확장 로그 | ✅ | — | — |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/` (기본 `~/.dsh/sessions/`, `session.jsonl[.zstd]` 및 버전이 붙은 `session.v<N>.jsonl[.zstd]`) | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/` (기본 `~/.dsh/sessions/`, `session.jsonl[.zstd]` 및 버전이 붙은 `session.v<N>.jsonl[.zstd]`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`(중국판 전용); Qoder dashboard cookie (Qoder usage API로 big-model credits 조회) | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/gemini.png" width="28" alt="Gemini CLI" /> | Gemini CLI | `~/.gemini/tmp/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/roocode.png" width="28" alt="Roo Code" /> | Roo Code | VS Code globalStorage tasks (`.../rooveterinaryinc.roo-cline/tasks/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/amp.png" width="28" alt="Amp" /> | Amp | `~/.local/share/amp/threads/` | ✅ | ✅ | — |
@@ -108,7 +108,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 
 Qoder CN의 설정 디렉터리를 옮겼다면 Qoder CN 자체의 `QODERCN_CONFIG_DIR`을 설정하세요. `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`을 지정하지 않으면 그 아래의 `projects`를 감시합니다.
 
-Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이스에서 읽습니다. Settings → tools에서 활성화합니다(옵트인, 기본 꺼짐). 레거시 데이터베이스는 플랫폼별로 자동 감지됩니다: macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`, Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`, Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — `TOKEN_MONITOR_QODER_CN_DB_PATH`로 재정의할 수 있습니다. Qoder CN 0.1.x는 플랫폼 애플리케이션 지원 디렉터리의 `com.qoder.app.stable/main.sqlite`에도 대화 메시지를 저장하며, 필요하면 `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH`로 재정의할 수 있습니다. 또한 `~/.qoder-cn/projects/**/*.jsonl`에 transcript를 기록할 수 있고, 이 디렉터리는 실시간 업데이트를 위해 감시되며 `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`로 변경할 수 있습니다.
+Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이스에서 읽습니다. 설정 → 수집 → 추적 도구에서 활성화합니다(옵트인, 기본 꺼짐). 레거시 데이터베이스는 플랫폼별로 자동 감지됩니다: macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`, Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`, Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — `TOKEN_MONITOR_QODER_CN_DB_PATH`로 재정의할 수 있습니다. Qoder CN 0.1.x는 플랫폼 애플리케이션 지원 디렉터리의 `com.qoder.app.stable/main.sqlite`에도 대화 메시지를 저장하며, 필요하면 `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH`로 재정의할 수 있습니다. 또한 `~/.qoder-cn/projects/**/*.jsonl`에 transcript를 기록할 수 있고, 이 디렉터리는 실시간 업데이트를 위해 감시되며 `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`로 변경할 수 있습니다.
 
 고급 로컬 통합입니다: 읽기에는 PATH의 `sqlite3` CLI 또는 플래그 없는 `node:sqlite`를 갖춘 Node 런타임(Node ≥ 23.4, Electron에서는 CLI가 필요할 수 있음)이 필요합니다. 읽기 실패는 로그에 기록되며, 완전한 기존 스냅샷이 있으면 0 사용량으로 덮어쓰지 않고 유지합니다. Main SQLite와 Transcript 행은 CJK 문자 수 / 1.5와 기타 문자 수 / 4를 섞은 방식으로 추정합니다. 로컬 기록에는 제공자 청구 필드, 시스템 프롬프트와 도구 schema가 없으므로 이 사용량과 비용에는 `estimated`가 표시되며 정확한 청구 Token이 아닙니다. 비용은 매핑된 각 모델의 models.dev 카탈로그 요금에서 추정됩니다. Qoder가 데이터베이스 스키마를 변경하면 어댑터가 작동하지 않을 수 있습니다.
 
@@ -141,14 +141,14 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 
 ## Token Monitor를 쓰는 이유
 
-대부분의 사용량 모니터는 실행 중인 그 기기에서만 유용합니다. Token Monitor는 멀티 디바이스 작업을 위해 만들어졌습니다. 각 기기가 로컬 로그를 감시하고 hub로 요약을 보내면, 연결된 모든 위젯이 토큰 변화를 거의 실시간으로 볼 수 있습니다.
+대부분의 사용량 모니터는 실행 중인 그 기기에서만 유용합니다. Token Monitor는 멀티 디바이스 작업을 위해 만들어졌습니다. 각 기기가 로컬 로그를 감시하고 hub로 요약을 보내면, 연결된 모든 클라이언트가 토큰 변화를 거의 실시간으로 볼 수 있습니다.
 
 ## 기능
 
 ### 사용량 추적
 
-- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 51개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
-- **세션별 상세** — Claude Code, Codex, OpenCode 세션에서 프롬프트별 토큰, 응답별 토큰 분할·사용 도구까지 확장 (로컬 transcript/DB를 필요할 때만 읽으며 동기화하지 않음)
+- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 52개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
+- **세션별 상세** — Claude Code, Claude Desktop, Codex, OpenCode, Reasonix 세션에서
 - **캐시 히트 통계** — 도구·모델 클릭 시 입력 토큰(캐시 hit/miss), 출력 토큰, 히트율 상세
 - **비용과 통화** — 토큰 수와 함께 비용 표시. USD, TWD, HKD, CNY 지원, 환율은 매일 자동 갱신, 설정에서 수동 덮어쓰기 가능
 - **WSL 사용량 (Windows)** — 실행 중인 WSL 배포판의 파일 기반 사용량을 약 5분마다 자동 감지해 합산합니다. OpenCode와 Hermes 같은 SQLite 기반 도구는 [WSL 내부 헤드리스 에이전트](docs/wsl-sqlite-setup.md)가 필요할 수 있습니다
@@ -158,8 +158,8 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 - **AI 도구 한도 감지** — Claude Code, Codex, Cursor, OpenRouter, 서드파티 API, GLM, Kimi 등 26개 이상 공급자의 session/weekly/billing/credits, 여러 OpenRouter/서드파티 프로필, DeepSeek 선불 잔액과 사용액
 - **Hub 계정 한도 관리** — 공급자별 여러 계정을 수동으로 추가하고 자격 증명은 Hub에만 보관. Hub가 한도를 갱신해 연결된 모든 기기에 배포
 - **삭제된 세션 사용량 유지** — 많은 도구가 오래된 세션을 정리합니다(Claude Code는 기본적으로 30일 후 트랜스크립트 삭제). 켜면 Token Monitor가 관측한 일별 도구/모델 사용량을 로컬에 보관해, 원본 파일이 사라져도 히트맵과 추세를 유지합니다(아래 [세션 데이터 보존 기간](#세션-데이터-보존-기간) 참고)
-- **사용 추세 & 대시보드** — 홈 화면 활동 히트맵·추세 차트, 연속 일수·기기 전체 도구/모델별 누적 사용(막대·K선) 전용 대시보드 창
-- **상태 보기** (선택) — Claude, OpenAI, Cursor, DeepSeek 상태 페이지 수동/주기 확인
+- **사용 추세** — 홈 화면 활동 히트맵·추세 차트, 그리고 추세 보기의 연속 일수와 기기 전체 도구/모델별 누적 사용(막대·K선)
+- **서비스 상태 패널** — 한도 보기의 ‘한도 상태’에서 Claude, OpenAI, Cursor, DeepSeek 상태 페이지를 수동/주기 확인
 - **데이터 내보내기** — 도구 무관 CSV + JSON으로 수동 내보내기 또는 폴더 자동 기록 (스프레드시트, Obsidian, Grafana, 스크립트용); [docs/export.md](docs/export.md) 참고
 - **구독 기록** — 각 AI 계정의 실제 비용을 직접 기록합니다. 요금제 라벨의 툴팁에 요금, 다음 갱신일 또는 종료일, 구독 기간, 이번 달 사용량 비용이 지불액의 몇 배인지가 표시되며, 정기 요금제와 충전 내역 모두 지원합니다
 
@@ -168,19 +168,15 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 - **멀티 디바이스 실시간 동기화** — Server-Sent Events. 한 기기의 변경이 수 초 내 다른 기기에 반영
 - **로컬 우선** — 단일 기기는 서버 불필요
 - **자체 호스트 동기화** — Docker Compose Hub
-- **iOS 위젯** — Widgy와 Scriptable 클라이언트가 자체 호스트 Hub API를 사용
 - **프라이버시 우선** — 프롬프트, 응답, 소스 코드, 파일 내용은 모두 기기에만 보관
 
 ### 인터페이스와 표시
 
 - **분류 보기** — 도구, 기기, 모델, 세션, 프로젝트, 계정 한도별
-- **메뉴 막대(macOS) / 시스템 트레이(Windows)** — 비용, 토큰, 또는 소진에 가장 가까운 공급자 한도 %를 아이콘 옆에 표시
-- **플로팅 버블** — 드래그 가능한 미니 창, 클릭/호버 미리보기
-- **메뉴 막대 레이아웃 편집** — 메뉴 막대와 플로팅 버블은 내장 프리셋을 쓰거나 '사용자 지정…'으로 직접 배치. AI 도구 아이콘, 한도 바, 백분율, 초기화 시간, 비용, 사용자 텍스트를 추가하고 실시간 미리보기와 함께 드래그로 정렬, 항목마다 AI 도구·계정·한도 기간·글꼴 지정
-- **외관** — 테마(라이트 포함), 도구별 색, 글래스 투명도·블러, 투명 창
-- **실험적 네이티브 macOS 위젯** — macOS 14 이상에서만 Small, Medium, Large 크기와 개요, 할당량, 모델, 활동, 추세 페이지를 제공합니다. 현재는 소스 코드 미리보기이며 정식 Release에 포함되었다는 의미는 아닙니다
+- **하나의 UI, 두 개의 호스트** — 데스크톱 앱과 Hub 웹 대시보드가 같은 UI를 렌더링하므로, 앱을 설치하지 않은 기기에서도 브라우저에서 전체 대시보드를 열 수 있습니다
+- **외관** — 테마(라이트 포함), 도구별 색, 네이티브 창 배경 효과
 - **도구 목록 커스터마이즈** — 추적은 유지한 채 숨기기, 고정, 순서 변경
-- **전역 단축키** — 어디서든 창 표시/숨김
+- **데스크톱 설정** — 추적 도구, 수집 주기, 세션 아카이브, 데이터 내보내기, 사용자 지정 모델 가격, 로그인 시 시작, Discord Rich Presence
 - **Discord Rich Presence** — 오늘 토큰·비용·주요 클라이언트 (옵트인)
 
 ## 설치
@@ -190,10 +186,20 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 - **macOS (Apple Silicon)** — `.dmg`, 서명 및 notarize 완료
 - **macOS (Intel)** — x64 `.dmg`, 서명 및 notarize 완료
 - **Windows 10/11** — 설치용 및 휴대용 `.exe`, [서명됨](docs/code-signing.md)
-- **Linux x64** — `.AppImage`
+- **Linux x64** — `.AppImage`, 또는 `.deb` 패키지
+- **Linux x64(자동 업데이트)** — APT 저장소를 추가하면 패키지 관리자가 업데이트를 담당합니다 (설치 전 같은 디렉터리의 `token-monitor-archive-keyring-fingerprint.txt`로 키 지문을 확인하세요):
+  ```bash
+  curl -fsSL https://igngserver.github.io/token-monitor-suite/apt/token-monitor-archive-keyring.asc \
+    | gpg --dearmor \
+    | sudo tee /usr/share/keyrings/token-monitor-archive-keyring.gpg >/dev/null
+  curl -fsSL https://igngserver.github.io/token-monitor-suite/apt/token-monitor.sources \
+    | sudo tee /etc/apt/sources.list.d/token-monitor.sources >/dev/null
+  sudo apt update && sudo apt install token-monitor
+  ```
+- **Android** — `Token-Monitor-Android-<version>.apk`. Docker Compose Hub의 데이터를 보는 읽기 전용 클라이언트
 - **GUI 없는 서버** — `Token-Monitor-Headless-<version>.tar.gz`; Node.js 22.13+ 및 `npm ci --omit=dev`로 설치
 
-패키지 빌드는 GitHub Releases를 자동 확인합니다. 새 버전이 있으면 화면에 업데이트 표시가 나타나며, 지원되는 플랫폼에서는 설정 → 일반에서도 설치할 수 있습니다.
+패키지 빌드는 GitHub Releases를 자동 확인합니다. 새 버전이 있으면 화면에 업데이트 표시가 나타나며, 지원되는 플랫폼에서는 설정 → 시작 및 업데이트에서도 설치할 수 있습니다.
 
 ### 첫 실행
 
@@ -201,7 +207,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 
 ## 멀티 디바이스 동기화
 
-멀티 디바이스 동기화를 사용하려면 모든 기기(위젯이 없는 headless agent 포함)를 같은 Docker Compose Hub에 연결합니다. 각 기기에서 위젯을 열고 설정 → 멀티 디바이스 동기화에서 **Hub에 연결**을 선택하세요. 위젯이 없는 기기에서만 `npm run agent`를 실행하면 됩니다. GUI가 없는 환경에서는 [Headless Agent 가이드](docs/headless-agent.md)와 `Token-Monitor-Headless-<version>.tar.gz`를 사용하세요.
+멀티 디바이스 동기화를 사용하려면 모든 기기(앱이 없는 headless agent 포함)를 같은 Docker Compose Hub에 연결합니다. 각 기기에서 앱을 열고 설정 → 허브 연결에서 **허브에 연결**을 선택하세요. 앱이 없는 기기에서만 `npm run agent`를 실행하면 됩니다. GUI가 없는 환경에서는 [Headless Agent 가이드](docs/headless-agent.md)와 `Token-Monitor-Headless-<version>.tar.gz`를 사용하세요.
 
 이 1인용 프로젝트에서는 `TOKEN_MONITOR_SECRET`가 모든 기기에서 사용하는 유일한 Hub 키입니다. 읽기, 업로드, 수동으로 추가한 quota 계정을 포함한 관리자 작업을 모두 허용합니다. 이전의 분리된 admin/viewer/device 자격 증명은 호환 모드로만 남아 있습니다. 원격 연결은 기본적으로 HTTPS가 필요합니다. 데스크톱/agent의 HTTP는 신뢰할 수 있는 LAN을 명시적으로 허용한 경우에만 사용할 수 있고, Android 릴리스 빌드는 항상 HTTPS를 요구합니다.
 
@@ -209,7 +215,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 
 #### 옵션 A — 로컬 전용 (기본값)
 
-단일 기기에서는 위젯의 로컬 모드를 사용합니다. 이 기기의 로컬 데이터를 직접 읽으며 Hub나 agent가 필요하지 않습니다.
+단일 기기에서는 앱의 로컬 모드를 사용합니다. 이 기기의 로컬 데이터를 직접 읽으며 Hub나 agent가 필요하지 않습니다.
 
 #### 옵션 B — Docker Compose Hub에 연결
 
@@ -221,7 +227,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-각 위젯에서 설정 → 멀티 디바이스 동기화로 이동해 **Hub에 연결**을 선택하고 Hub URL과 같은 Hub 키를 입력합니다. 위젯이 없는 기기에서는 같은 URL과 키로 `npm run agent`를 실행하면 됩니다.
+각 앱에서 설정 → 허브 연결로 이동해 **허브에 연결**을 선택하고 Hub URL과 같은 Hub 키를 입력합니다. 앱이 없는 기기에서는 같은 URL과 키로 `npm run agent`를 실행하면 됩니다.
 
 저장소 루트의 Docker Compose 스택이 유일하게 지원되는 Hub 배포 방식입니다. HTTP API, 대시보드, PWA, 장치 업로드와 SSE 스트림을 제공합니다.
 
@@ -254,15 +260,15 @@ npm run pack         # 설치 없이 앱 디렉터리만 (로컬 테스트)
 
 ```text
 모드 A — 로컬 (기본, 설정 없음)
-    위젯 (Electron) ──▶ tokscale ──▶ ~/.claude, ~/.codex, $HERMES_HOME
+    데스크톱 앱 (Electron) ──▶ tokscale ──▶ ~/.claude, ~/.codex, $HERMES_HOME
 
 모드 B — 동기화 (옵트인, 멀티 디바이스)
     기기 A agent ──▶
-    기기 B agent ──▶  hub  ──▶  아무 기기의 위젯
+    기기 B agent ──▶  hub  ──▶  아무 기기의 데스크톱 앱 또는 브라우저
     기기 C agent ──▶
 ```
 
-위젯은 **설정 → 멀티 디바이스 동기화**에 따라 로컬/동기화를 선택합니다. Docker Compose Hub가 각 기기의 정규화된 요약을 받고 SSE로 집계 통계를 연결된 클라이언트에 푸시하므로 한 기기의 변경이 수 초 내 다른 기기에 반영됩니다.
+데스크톱 앱은 **설정 → 허브 연결**에 따라 로컬/동기화를 선택합니다. Docker Compose Hub가 각 기기의 정규화된 요약을 받고 SSE로 집계 통계를 연결된 클라이언트에 푸시하므로 한 기기의 변경이 수 초 내 다른 기기에 반영됩니다.
 
 ## 세션 데이터 보존 기간
 
@@ -299,16 +305,6 @@ Token Monitor 설정은 두 곳에 있으며, 일상 사용에는 앞의 것만 
 ## 프라이버시
 
 Token Monitor는 사용 로그를 로컬에서 처리하며 프로젝트 관리자에게 분석 또는 원격 측정 데이터를 보내지 않습니다. 네트워크 접근은 문서화되었거나 사용자가 활성화한 기능에만 사용됩니다. 업데이트, 제공자 연동, Discord Rich Presence 및 선택적 다중 기기 동기화에서 사용하는 데이터는 [개인정보 처리방침](docs/privacy.md)을 참고하세요.
-
-## Star 기록
-
-<a href="https://github.com/IGNGserver/token-monitor-suite/tree/star-history">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/IGNGserver/token-monitor-suite/star-history/star-history-dark.svg" />
-   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/IGNGserver/token-monitor-suite/star-history/star-history.svg" />
-   <img alt="Star History Chart" src="https://raw.githubusercontent.com/IGNGserver/token-monitor-suite/star-history/star-history.svg" />
- </picture>
-</a>
 
 ## 기여하기
 

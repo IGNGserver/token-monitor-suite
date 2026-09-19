@@ -16,7 +16,6 @@
     <img src="https://img.shields.io/badge/Windows-10%2B-0078D4?style=flat-square" alt="Windows 10 or later" />
     <img src="https://img.shields.io/badge/macOS-12%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 12 or later" />
     <img src="https://img.shields.io/badge/Linux-x64-64748b?style=flat-square&logo=linux&logoColor=white" alt="Linux x64" />
-    <a href="https://discord.gg/HmdNVVvw5P"><img src="https://img.shields.io/discord/1344259784219689031?color=5865F2&label=Discord&logo=discord&logoColor=white&style=flat-square" alt="Discord"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-A855F7?style=flat-square" alt="License: MIT" /></a>
 </p>
 
@@ -26,7 +25,7 @@
 
 ## What is Token Monitor?
 
-A desktop app that shows live token usage and AI Tool Limits across 58+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project.
+A desktop app that shows live token usage and AI Tool Limits across 59+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project.
 
 ## Supported Tools
 
@@ -35,6 +34,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | Logo | Tool | Data path | Token Usage | AI Tool Limits | Session Details |
 |:---:|------|-----------|:---:|:---:|:---:|
 | <img src=".github/assets/tools-icon/claude.png" width="28" alt="Claude Code" /> | Claude Code | `~/.claude/projects/`, `~/.claude/transcripts/` | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/claude-desktop.png" width="28" alt="Claude Desktop" /> | Claude Desktop | `<platform-app-data>/Claude/` and `Claude-3p/` (Local Agent / Cowork transcripts) | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/codex.png" width="28" alt="Codex" /> | Codex | `~/.codex/` (`sessions/`, `archived_sessions/`) | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/` (`opencode*.db`, `storage/message/`) | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `~/.hermes/state.db` | ✅ | — | — |
@@ -56,9 +56,9 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code extension logs | ✅ | — | — |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/` (default `~/.dsh/sessions/`; `session.jsonl[.zstd]` and versioned `session.v<N>.jsonl[.zstd]`) | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/` (default `~/.dsh/sessions/`; `session.jsonl[.zstd]` and versioned `session.v<N>.jsonl[.zstd]`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db` (CN only); Qoder dashboard cookie (big-model credits via Qoder usage API) | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/gemini.png" width="28" alt="Gemini CLI" /> | Gemini CLI | `~/.gemini/tmp/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/roocode.png" width="28" alt="Roo Code" /> | Roo Code | VS Code globalStorage tasks (`.../rooveterinaryinc.roo-cline/tasks/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/amp.png" width="28" alt="Amp" /> | Amp | `~/.local/share/amp/threads/` | ✅ | ✅ | — |
@@ -108,7 +108,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 
 Set Qoder CN's own `QODERCN_CONFIG_DIR` when its profile is relocated; Token Monitor then watches `<that-dir>/projects` unless `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` is set.
 
-Qoder CN token usage is read from the app's local SQLite database, not an API — enable it in Settings → tools (opt-in, off by default). The legacy database is auto-detected per platform: macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`, Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`, Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — overridable with `TOKEN_MONITOR_QODER_CN_DB_PATH`. Qoder CN 0.1.x also stores conversation messages in `com.qoder.app.stable/main.sqlite` under the platform application-support directory; override it with `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH` when needed. It may additionally write `~/.qoder-cn/projects/**/*.jsonl`; that transcript root is watched for live updates and can be changed with `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`.
+Qoder CN token usage is read from the app's local SQLite database, not an API — enable it under Settings → Collection → Tracked tools (opt-in, off by default). The legacy database is auto-detected per platform: macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`, Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`, Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — overridable with `TOKEN_MONITOR_QODER_CN_DB_PATH`. Qoder CN 0.1.x also stores conversation messages in `com.qoder.app.stable/main.sqlite` under the platform application-support directory; override it with `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH` when needed. It may additionally write `~/.qoder-cn/projects/**/*.jsonl`; that transcript root is watched for live updates and can be changed with `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`.
 
 This is an advanced local integration: reading needs a `sqlite3` CLI on PATH or a Node runtime with unflagged `node:sqlite` (Node ≥ 23.4; the Electron app may need the CLI). Read failures are logged, and an existing complete snapshot is retained instead of being replaced with zero usage. Main-database and transcript rows use a blended estimate of CJK characters / 1.5 and other characters / 4; request input is the cumulative session context and output is that request's stored content. Provider billing fields, system prompts, and tool schemas are not available in these local records, so those totals and costs are marked `estimated` and are not exact provider token billing. Costs are estimated from the models.dev catalog for each mapped model; the adapter may break if Qoder changes its database schema.
 
@@ -147,8 +147,8 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Tracking usage
 
-- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 51+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
-- **Per-session detail** — open a Claude Code, Codex, or OpenCode session to see tokens per prompt, expandable to each reply's exact token split and tools used (read on-demand from local transcripts or databases, never synced)
+- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 52+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
+- **Per-session detail** — open a Claude Code, Claude Desktop, Codex, OpenCode, or Reasonix session to see tokens per prompt, expandable to each reply's exact token split and tools used (read on-demand from local transcripts or databases, never synced)
 - **Cache hit statistics** — click any tool or model to expand a detailed breakdown of input tokens (cache hit vs miss), output tokens, and hit-rate percentages
 - **Cost & currency** — cost alongside token counts, shown in USD, TWD, HKD, or CNY; exchange rates auto-update daily and can be manually overridden in Settings
 - **WSL usage (Windows)** — file-based usage from a running WSL distro is detected automatically and merged about every 5 minutes; SQLite-backed tools such as OpenCode and Hermes may require a [headless agent inside WSL](docs/wsl-sqlite-setup.md)
@@ -158,8 +158,8 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **AI Tool Limits detection** — provider-specific session, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 26+ providers, including multiple OpenRouter/third-party profiles and DeepSeek prepaid balance/spend
 - **Hub-managed account quotas** — add multiple provider accounts manually, keep their credentials in the Hub, refresh quotas centrally, and distribute the results to every connected device
 - **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
-- **Usage Trends & Dashboard** — a home-screen activity heatmap and trend chart, plus a dedicated dashboard window with streaks and stacked per-tool/per-model history (bar and K-line views) across all your devices
-- **Optional Status view** — Claude, OpenAI, Cursor, and DeepSeek status pages, with manual or interval re-checks
+- **Usage Trends** — a home-screen activity heatmap and trend chart, plus the Trends view with streaks and stacked per-tool/per-model history (bar and K-line views) across all your devices
+- **Service status panel** — Claude, OpenAI, Cursor, and DeepSeek status pages on the Limits view's Health tab, with manual or interval re-checks
 - **Data export** — export usage as tool-agnostic CSV + JSON, manually or auto-written to a folder, for spreadsheets, Obsidian, Grafana, or scripts; see [docs/export.md](docs/export.md)
 - **Subscription records** — record by hand what each AI account actually costs; the plan label's tooltip then reports the price, the next renewal or end date, time subscribed, and the month's usage cost as a multiple of what the plan costs, for recurring plans and top-up ledgers alike
 
@@ -168,7 +168,6 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **Real-time multi-device sync** — Server-Sent Events push an update on one device to the others within seconds
 - **Local-first** — no servers needed for single-device use
 - **Self-hosted sync backend** — Docker Compose Hub
-- **iOS widget support** — Widgy and Scriptable clients can use the self-hosted Hub API
 - **Privacy-first** — prompts, responses, source code, and file contents stay on your machine
 
 ### Interface & surfaces
@@ -187,10 +186,20 @@ Download from [GitHub Releases](https://github.com/IGNGserver/token-monitor-suit
 - **macOS (Apple Silicon)** — `.dmg`, signed and notarized
 - **macOS (Intel)** — x64 `.dmg`, signed and notarized
 - **Windows 10/11** — setup and portable `.exe`, [code-signed](docs/code-signing.md)
-- **Linux x64** — `.AppImage`
+- **Linux x64** — `.AppImage`, or the `.deb` package
+- **Linux x64, kept up to date** — add the APT repository so the package manager upgrades the app (verify the key fingerprint against `token-monitor-archive-keyring-fingerprint.txt` next to it):
+  ```bash
+  curl -fsSL https://igngserver.github.io/token-monitor-suite/apt/token-monitor-archive-keyring.asc \
+    | gpg --dearmor \
+    | sudo tee /usr/share/keyrings/token-monitor-archive-keyring.gpg >/dev/null
+  curl -fsSL https://igngserver.github.io/token-monitor-suite/apt/token-monitor.sources \
+    | sudo tee /etc/apt/sources.list.d/token-monitor.sources >/dev/null
+  sudo apt update && sudo apt install token-monitor
+  ```
+- **Android** — `Token-Monitor-Android-<version>.apk`, a read-only client for a Docker Compose Hub
 - **No-GUI/server** — `Token-Monitor-Headless-<version>.tar.gz`; install with Node.js 22.13+ and `npm ci --omit=dev`
 
-Packaged builds check GitHub Releases automatically. When an update is available, the app shows an update indicator; supported platforms can also install from Settings → General.
+Packaged builds check GitHub Releases automatically. When an update is available, the app shows an update indicator; supported platforms can also install from Settings → Startup & updates.
 
 ### First run
 
@@ -307,16 +316,6 @@ Token Monitor is developed and tested primarily in the environments below. **Pla
 
 Token Monitor processes usage logs locally and sends no analytics or telemetry to the project maintainer. Network access occurs only for documented or user-enabled features. See the [privacy policy](docs/privacy.md) for the data used by updates, provider integrations, Discord Rich Presence, and optional multi-device sync.
 
-## Star History
-
-<a href="https://github.com/IGNGserver/token-monitor-suite/tree/star-history">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/IGNGserver/token-monitor-suite/star-history/star-history-dark.svg" />
-   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/IGNGserver/token-monitor-suite/star-history/star-history.svg" />
-   <img alt="Star History Chart" src="https://raw.githubusercontent.com/IGNGserver/token-monitor-suite/star-history/star-history.svg" />
- </picture>
-</a>
-
 ## Contributing
 
 Issues and PRs are welcome. Project conventions, architecture notes, and the command reference live in [AGENTS.md](AGENTS.md) — written for coding agents, but it doubles as the contributor guide.
@@ -328,14 +327,14 @@ Issues and PRs are welcome. Project conventions, architecture notes, and the com
 - [Token Monitor](https://github.com/Javis603/token-monitor) by [@Javis](https://github.com/Javis603) for the initial desktop architecture and inspiration.
 - **[Code signing policy](docs/code-signing.md):** Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
 
-## Token Monitor Suite
+## One codebase, four surfaces
 
-This repository is an independent suite providing full cross-platform coverage and deployment surfaces:
+- **Desktop app** (Electron) — collects this device's usage locally, and syncs it when you connect it to a Hub.
+- **Docker Compose Hub** — MySQL-backed ingest, aggregation, SSE streaming, and the same dashboard as a web app / PWA, served from the Hub itself.
+- **Headless agent** — the collector without a GUI, for machines that only report usage.
+- **Android client** — reads synced usage and account limits from a Docker Compose Hub.
 
-- **Claude Desktop Local Agent / Cowork** usage and session details.
-- **Android client** for viewing synced usage from the MySQL-backed Docker Compose Hub.
-- **MySQL Hub** with the Docker Compose deployment for ingest, stats, history, and SSE surfaces.
-- The project release stream and package metadata live at [IGNGserver/token-monitor-suite](https://github.com/IGNGserver/token-monitor-suite).
+The desktop app and the Hub dashboard render the identical UI from `src/shared-ui/`, so a screen you configure once behaves the same on both.
 
 ## License
 

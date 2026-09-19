@@ -1,5 +1,7 @@
 # Tokscale 能力对齐与客户端补全计划
 
+> **快照说明**：本文第二、三、五部分中的计数是 2026-09-19 对齐工作**开始之前**的状态（当时 `KNOWN_CLIENTS` 26 项、额度 provider 20 个、客户端缺口 30 个）。这些工作已在 `642180f` 及后续提交中落地，当前实际值为：`DEFAULT_CLIENTS` 52 个 id、`KNOWN_CLIENTS` 54 个、`LIMIT_PROVIDER_IDS` 27 个、`src/shared/*Limits.js` 22 个、`src/shared-ui/icons/clients/*.svg` 66 个。落地后的对账见[第七部分](#七实施结果已落地)。文中「tokscale `usage` 仅 11 家」指的是上游 README 表格的行数，其**权威注册表实为 13 家**（`amp antigravity claude codex copilot grok kimi minimax minimax-token-plan opencode-go sakana warp zai`），本文的结论不受影响：13 家全部已在本项目覆盖范围内，且本项目另有 14 家上游没有。
+
 本文档记录一次系统性的**上游能力盘点**：把本项目（Token Monitor）现有的采集逻辑与 `tokscale` 4.17.0 逐项对比，找出①本项目自研但 tokscale 已支持、②本项目实现落后于 tokscale、③tokscale 已支持但本项目尚未接入的客户端，并给出可执行的开发清单。
 
 对比基线：本项目 `tokscale@4.17.0`（已在本轮升级），上游仓库 `junhoyeo/tokscale` `main` 分支与 4.17.0 发布二进制。文中所有「tokscale 支持/不支持」的判断，均以**实际运行 4.17.0 二进制**或**上游 Rust 源码/README** 为依据，而非推测。
@@ -24,7 +26,7 @@
 | 客户端覆盖 | 本项目已覆盖 **25** 个 tokscale 客户端 id，尚有 **30** 个未接入 |
 | 自研逻辑可回收 | **3 个模块**可下线（`promaUsage` 除外，见下）；其中 1 个已被 tokscale 原生支持 |
 | 落后于上游之处 | `sessionDetail` 的会话明细读取范围落后于 tokscale 的 `--group-by session,model` |
-| 我方反而更强 | **额度（Limits）**：本项目 20 个 provider，tokscale `usage` 仅 **11** 个 |
+| 我方反而更强 | **额度（Limits）**：本项目当时 20 个 provider（现 27 个），tokscale `usage` 注册表仅 **13** 个 |
 | 无需改动 | `history`/`timeMetrics`、`--home` WSL 扫描：已是正确复用 |
 
 **一句话**：客户端覆盖是最大的缺口（30 个）；自研代码的回收空间比预期小，因为 tokscale 的 `usage`（额度）覆盖面远小于本项目，且三个本地适配器（`proma`/`claude-desktop`/`qodercn`）上游根本没有对应实现。
@@ -90,14 +92,14 @@ mimo, zai, zaiteam, kiro, qoder, deepseek, openrouter, minimax, volcengine,
 ollama, thirdparty
 ```
 
-而 tokscale README 明列的 `usage`（Subscription Usage）**仅支持 11 个 provider**：
+而 tokscale 的 `usage`（Subscription Usage）**注册表只有 13 个 provider**（上游 README 的表格只列了其中 11 行，漏掉 Antigravity 与 Warp/Oz）：
 
 ```
 Claude, Codex, Z.ai, Amp, GitHub Copilot, Grok Build, Kimi, MiniMax,
 MiniMax Token Plan, OpenCode Go, Sakana(Fugu)
 ```
 
-**结论**：改用 tokscale `usage` 会导致**额度覆盖从 20 个倒退到 11 个**，并丢失 `commandcode`（本轮刚验证过的 cookie 路由）、`openrouter`、`volcengine`、`ollama`、`qoder`、`zaiteam`、`mimo`、`kiro`、`deepseek`、`thirdparty` 等。**明确不做此替换。**
+**结论**：改用 tokscale `usage` 会导致**额度覆盖从 20 个倒退到 13 个**，并丢失 `commandcode`（本轮刚验证过的 cookie 路由）、`openrouter`、`volcengine`、`ollama`、`qoder`、`zaiteam`、`mimo`、`kiro`、`deepseek`、`thirdparty` 等。**明确不做此替换。**
 
 > 可选的局部收益：tokscale 支持而我们没有的 `Amp`、`MiniMax Token Plan`、`Sakana(Fugu)` 三家，可作为**独立新增 provider** 接入（见任务 T6），而不是替换现有实现。
 
@@ -174,7 +176,7 @@ MiniMax Token Plan, OpenCode Go, Sakana(Fugu)
 
 | 本项目模块 | 不建议改用 tokscale 的理由 |
 |---|---|
-| `limitCollector.js` + 20 个 `*Limits.js` | tokscale `usage` 仅 11 家，改则覆盖倒退 9 家（详见 2.5） |
+| `limitCollector.js` + 20 个 `*Limits.js` | tokscale `usage` 注册表仅 13 家，改则覆盖倒退 7 家（详见 2.5） |
 | `promaUsage.js` / `claudeDesktopUsage.js` / `qoderCnUsage.js` | 上游无对应客户端 id 与解析实现 |
 | `antigravityProbe.js` / `cursorProbe.js` | 上游有 `antigravity sync` / `cursor sync`，但本项目需要**进程探测**（识别 IDE/CLI 是否在运行）用于状态展示，这是 tokscale 不提供的能力。可复用 tokscale 的 **sync 结果**，但 probe 本身保留 |
 | `wslUsage.js` | 上游无 WSL 概念；这是本项目平台特性 |
@@ -270,7 +272,7 @@ tokscale --help | grep -o 'possible values:.*'
 # 每个 id 的实际扫描路径 + 消息数 + headless 支持
 tokscale clients --json
 
-# 额度（仅 11 家 provider）
+# 额度（注册表仅 13 家 provider）
 tokscale usage --json
 
 # 会话时长指标
@@ -308,7 +310,7 @@ tokscale graph --no-spinner
 | 项 | 原因 |
 |---|---|
 | **9router / synthetic** | 在 `--client` 枚举中但 `tokscale clients` **无扫描路径**，属提交/聚合型客户端；接入会造出「永远 missing」的假客户端 |
-| 用 tokscale `usage` 替换自研额度 | tokscale `usage` 仅 11 家，本项目 22 家；替换会导致覆盖倒退（详见 §2.5） |
+| 用 tokscale `usage` 替换自研额度 | tokscale `usage` 注册表仅 13 家，本项目当时 20 家（现 27 家）；替换会导致覆盖倒退（详见 §2.5） |
 
 ### 新增/修改的关键文件
 

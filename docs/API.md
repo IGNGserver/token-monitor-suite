@@ -9,12 +9,12 @@ For pricing refreshes, the Hub invokes `tokscale pricing <model> --json` first. 
 
 For the single-user deployment, configure one key:
 
-- `TOKEN_MONITOR_SECRET`: shared by the Hub and every widget/agent. It grants read, ingest, and every administrative mutation, including manually managed Hub accounts.
+- `TOKEN_MONITOR_SECRET`: shared by the Hub and every desktop app / agent. It grants read, ingest, and every administrative mutation, including manually managed Hub accounts.
 
 The Hub still accepts the following optional split variables for older deployments:
 
 - `TOKEN_MONITOR_ADMIN_SECRET`: read, ingest, and every administrative mutation. When this is set, `TOKEN_MONITOR_SECRET` keeps its legacy scoped meaning.
-- `TOKEN_MONITOR_VIEWER_SECRET`: read-only dashboard/API access. This is the only credential accepted through `?secret=` for header-limited widgets.
+- `TOKEN_MONITOR_VIEWER_SECRET`: read-only dashboard/API access. This is the only credential accepted through `?secret=` for header-limited clients.
 - `TOKEN_MONITOR_INGEST_CREDENTIALS`: JSON object mapping the exact `deviceId` to a device token, for example `{"workstation":"...","laptop":"..."}`. A device token can read shared stats and ingest only its bound identity.
 - `TOKEN_MONITOR_ALLOW_LEGACY_INGEST` and `TOKEN_MONITOR_ALLOW_LEGACY_ADMIN`: temporary elevation flags for the legacy `TOKEN_MONITOR_SECRET` path.
 - `TOKEN_MONITOR_HUB_CREDENTIAL_KEY`: optional legacy override for encrypting manually added Hub account credentials at rest. When empty, the Hub derives this key from `TOKEN_MONITOR_SECRET`; changing the effective key makes existing account credentials unreadable and requires manual re-login.
@@ -60,7 +60,10 @@ Example response:
     "pricing": true,
     "deviceDelete": true,
     "deviceRename": true,
-    "publicStats": false
+    "publicStats": false,
+    "hubAccounts": true,
+    "centralLimits": true,
+    "limitsAuthority": "hub"
   },
   "deviceCount": 2,
   "secretRequired": true,
@@ -224,15 +227,15 @@ The MySQL Node hub stores each change between a device's cumulative all-time sna
 
 Authenticated stats expose `projectsIncomplete: true` when a device omitted its rollup, disabled project tracking while contributing usage, or could not preserve exact all-time attribution after its tracked-client list changed. Affected device entries expose `allTimeProjectsOmitted`, `allTimeProjectsIncomplete`, or `projectsEnabled: false` as the reason.
 
-`trackedClients` is optional but recommended for agents and widgets. When it is present, the hub treats omitted clients as intentionally not collected in this payload and preserves their previous usage for that device. This keeps "tracking" as "collect future data" rather than "hide existing history".
+`trackedClients` is optional but recommended for agents and the desktop app. When it is present, the hub treats omitted clients as intentionally not collected in this payload and preserves their previous usage for that device. This keeps "tracking" as "collect future data" rather than "hide existing history".
 
-Current agents and widgets include `osName` and, when known, `osVersion` so device details can show a user-facing operating-system release. macOS uses the product version from Electron or `sw_vers`; Windows uses the product family and display version from the registry; Linux uses the distribution name and version from `os-release`. Detection failures fall back to an explicitly labelled Windows build or Linux kernel release. The hub continues to accept older payloads without these fields.
+Current agents and the desktop app include `osName` and, when known, `osVersion` so device details can show a user-facing operating-system release. macOS uses the product version from Electron or `sw_vers`; Windows uses the product family and display version from the registry; Linux uses the distribution name and version from `os-release`. Detection failures fall back to an explicitly labelled Windows build or Linux kernel release. The hub continues to accept older payloads without these fields.
 
-`syncUploadIntervalMs` is optional. A remote-hub widget or headless agent includes `0` for live uploads or the selected fixed interval in milliseconds (`600000`, `1200000`, or `1800000`). The hub uses a positive interval to keep the device and its limits fresh for at least twice the upload interval; omitted or `0` values retain the configured `staleAfterMs` behavior. Local collection remains independent of upload cadence.
+`syncUploadIntervalMs` is optional. A remote-hub desktop app or headless agent includes `0` for live uploads or the selected fixed interval in milliseconds (`600000`, `1200000`, or `1800000`). The hub uses a positive interval to keep the device and its limits fresh for at least twice the upload interval; omitted or `0` values retain the configured `staleAfterMs` behavior. Local collection remains independent of upload cadence.
 
-`periodWindows` is optional. Agents and widgets stamp each snapshot with the UTC instant its `today`/`month` windows end, computed in the device's own local time (`endsAt` = next local midnight / next local month start; `key` is the device-local day/month for reference). The hub uses it to expire a device's `today`/`month` from both the aggregate and the per-device view once `now >= endsAt`, so a device that goes offline before re-posting does not keep contributing or displaying a stale day/month snapshot (`allTime` never expires). Payloads without `periodWindows` fall back to a UTC day/month comparison against `updatedAt`.
+`periodWindows` is optional. Agents and the desktop app stamp each snapshot with the UTC instant its `today`/`month` windows end, computed in the device's own local time (`endsAt` = next local midnight / next local month start; `key` is the device-local day/month for reference). The hub uses it to expire a device's `today`/`month` from both the aggregate and the per-device view once `now >= endsAt`, so a device that goes offline before re-posting does not keep contributing or displaying a stale day/month snapshot (`allTime` never expires). Payloads without `periodWindows` fall back to a UTC day/month comparison against `updatedAt`.
 
-`limits` is optional for mixed-version compatibility but is ignored by current device ingest. AI Tool Limits are owned and refreshed by the Hub account service; current agents and widgets do not probe local provider accounts or upload credentials. Raw OAuth credentials, access tokens, refresh tokens, and provider response bodies must never be sent.
+`limits` is optional for mixed-version compatibility but is ignored by current device ingest. AI Tool Limits are owned and refreshed by the Hub account service; current agents and the desktop app do not probe local provider accounts or upload credentials. Raw OAuth credentials, access tokens, refresh tokens, and provider response bodies must never be sent.
 
 `limits.providers[].provider` is one of `claude`, `codex`, `opencode`, `cursor`, `antigravity`, `kimi`, `grok`, `copilot`, `commandcode`, `mimo`, `zai`, `zaiteam`, `kiro`, `qoder`, `deepseek`, `openrouter`, `minimax`, `volcengine`, `ollama`, or `thirdparty`.
 `limits.providers[].accountKey` is a stable hashed account identifier (`sha256:…`) used to dedupe the same account across devices. `accountEmail` is the account email when available, and `accountName` is a sanitized display/profile name. Codex may additionally send `workspaceKind: "personal"` when the workspace has no provider-supplied name, allowing account-management UI to localize the Personal label without persisting translated text. `accountLabel` is the legacy provider-defined short label retained for mixed-version compatibility: older OpenCode renderers use it as the profile name, while existing providers may use it for the plan. `planLabel` is the explicit plan label (for example `Plus`, `Go`, or `Zen`) when identity and plan must be carried separately; readers fall back to `accountLabel` for payloads produced before `planLabel` existed. These fields MAY be sent to the authenticated hub so devices can identify each account and its plan. Hub ingest requires an admin, explicitly elevated legacy, or device-bound credential; the **public** stats endpoints (`publicLimits`) strip `accountKey`, `accountEmail`, `accountName`, `accountLabel`, `planLabel`, and `workspaceKind` so neither account identity nor plan labels are exposed publicly.
@@ -246,7 +249,7 @@ Qoder CN local usage is opt-in as the `qodercn` client. Its legacy SQLite adapte
 
 ## `GET /api/stats`
 
-Returns aggregate stats for the widget.
+Returns aggregate stats for the dashboard and desktop client.
 
 Response includes:
 
@@ -256,9 +259,9 @@ Response includes:
 - `periods.allTime`
 - `periods.*.clientModels` and `periods.*.clientModelCosts` for preserving model breakdowns when a tracked tool is disabled
 - `periods.*.projects` for workspace-level tokens, cost, and client attribution; the same canonical folder label aggregates across devices
-- `periods.today.sessions` / `periods.month.sessions` keyed by `client:sessionId` for session-level usage when tokscale exposes session groups; widgets may use `lastUsedAt` for recent-first sorting and optional `projectId` / `projectLabel` for workspace-level aggregation. Absolute workspace paths stay on the collecting device and are never part of the wire shape. Synchronized clients omit the unbounded `allTime.sessions` collection and may bound `today` / `month` detail when required by the ingest limit while preserving all aggregate totals and breakdowns.
+- `periods.today.sessions` / `periods.month.sessions` keyed by `client:sessionId` for session-level usage when tokscale exposes session groups; clients may use `lastUsedAt` for recent-first sorting and optional `projectId` / `projectLabel` for workspace-level aggregation. Absolute workspace paths stay on the collecting device and are never part of the wire shape. Synchronized clients omit the unbounded `allTime.sessions` collection and may bound `today` / `month` detail when required by the ingest limit while preserving all aggregate totals and breakdowns.
 - `sessionDetailsOmitted`, when one or more synchronized devices omitted session rows to stay within the ingest limit; the aggregate contains summed `today` / `month` counts and each affected device reports its own counts
-- `periodProjectsOmitted`, when a daily or monthly project rollup was itself too large to fit; the aggregate and affected devices expose omitted project counts and the widget marks that period's project breakdown incomplete
+- `periodProjectsOmitted`, when a daily or monthly project rollup was itself too large to fit; the aggregate and affected devices expose omitted project counts and the client marks that period's project breakdown incomplete
 - `projectsIncomplete` plus the corresponding `devices[].allTimeProjectsOmitted`, `devices[].allTimeProjectsIncomplete`, or `devices[].projectsEnabled` diagnostic
 - `historyPreview.daily[].activeTimeMs`, `historyPreview.monthly[].activeTimeMs`, and `historyPreview.summary.activeTimeMs` when tokscale graph exposes session active-time metrics
 - `limits.providers` aggregated by provider account
@@ -268,6 +271,62 @@ Response includes:
 The top-level `limits` object is the Hub-owned account snapshot. Public
 stats omit account identifiers. The Hub does not merge device-reported quota
 rows because the device protocol does not accept them as authoritative.
+
+## `GET /api/stats/stream`
+
+Requires read scope. Server-Sent Events: the Hub pushes a full aggregate after
+every change, so a client never polls to stay live.
+
+- The first frame is `event: snapshot`, carrying the same `stats` payload as
+  `GET /api/stats`.
+- Later frames are `event: stats` with
+  `{ type: "stats", reason, stats, at }`. `reason` is one of `ingest`,
+  `account-update`, `subscriptions`, `delete`, `rename`, or the generic
+  `update`.
+- A `: hb` comment line is written on a fixed 30-second cadence purely to keep
+  the connection alive; it never queries MySQL.
+- Streams are bounded. At capacity the Hub answers `503` with
+  `{"error":"too_many_streams"}` and a `Retry-After: 30` header rather than
+  evicting an existing viewer.
+
+The response sets `x-accel-buffering: no` and `no-cache, no-transform` so
+proxies do not coalesce frames. Behind a reverse proxy, buffer-free delivery
+also requires the proxy not to buffer responses (see `TOKEN_MONITOR_TRUST_PROXY`
+in [hub-compose.md](hub-compose.md)).
+
+## `GET /api/history`
+
+Requires read scope. Returns the cross-device history rollup used by the Trends
+view: `aggregateHistory()` over every stored device record, so it is the same
+shape the desktop app serves locally through its own transport. Only devices
+that report the optional `history` field contribute — collection is controlled by
+`TOKEN_MONITOR_HISTORY_ENABLED` / Settings → Collection.
+
+## `GET /api/subscriptions` / `PUT /api/subscriptions`
+
+`GET` requires read scope and returns `{ ok, version, subscriptions, updatedAt }`: the
+manually recorded plan ledger (plan name, amount, currency, billing cadence,
+dates, and the account each record is bound to). Values are typed by the user,
+never read from a provider, and stored once per Hub rather than per device.
+
+`PUT` requires the admin scope and replaces the whole ledger:
+
+```json
+{ "subscriptions": [ ... ], "baseUpdatedAt": "2026-05-18T00:00:00.000Z" }
+```
+
+`baseUpdatedAt` makes the write compare-and-swap. When it is older than the
+stored revision the Hub answers `409 {"error":"stale_write"}` with the current
+document, so two open dashboards cannot silently overwrite each other. An
+unknown currency returns `400 {"error":"bad_request"}` and an oversized body
+returns `413 {"error":"payload_too_large"}`.
+
+## `GET /api/rates`
+
+No authentication. Returns the display exchange rates the UI uses to render
+costs outside USD: `{ ok, rates, date, source }`. `date` is the day the block was
+fetched (rates refresh daily), and `source` reports whether the numbers came from
+the live provider or the built-in fallback.
 
 ## Hub account management
 
@@ -309,6 +368,35 @@ Performs an immediate Hub-side quota refresh and returns the sanitized account.
 ### `DELETE /api/accounts/:id`
 
 Deletes the account, its encrypted credential, and its stored quota snapshot.
+
+### `POST /api/accounts/oauth/start`
+
+Requires the admin scope. Begins the Hub-side OAuth sign-in for a provider whose
+flow can be completed without a device-local login (`codex`, `antigravity`).
+
+Body: `{"provider":"codex"}`.
+
+Returns `{"ok":true,"sessionId","authUrl","provider"}`. The caller opens
+`authUrl` in a browser, completes the provider sign-in, and pastes what the
+provider hands back into the exchange call below. The session carries the PKCE
+verifier and `state` in memory only and expires after 10 minutes.
+
+### `POST /api/accounts/oauth/exchange`
+
+Requires the admin scope. Exchanges the authorization result for a credential,
+stores it encrypted, and adds the account in one step.
+
+Body: `{"sessionId","redirectUrl","name"?,"label"?}`.
+
+`redirectUrl` is deliberately permissive, because providers hand the user one of
+three shapes: a full callback URL, a schemeless URL or bare query string, or a
+bare authorization code (Google's Antigravity page shows a code with a copy
+button and never puts it in the address bar). Missing `sessionId` or
+`redirectUrl` returns `400 {"error":"invalid_params"}`; an unusable paste returns
+`400 {"error":"code_missing"}` with a hint naming the accepted shapes.
+
+`name` defaults to a generated `<provider>-<stamp>`; the response is the same
+redacted account record as `POST /api/accounts`.
 
 ## `GET /api/devices`
 

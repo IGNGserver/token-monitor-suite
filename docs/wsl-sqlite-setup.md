@@ -6,14 +6,14 @@
 
 On Windows, Token Monitor normally scans supported tools inside every running WSL distribution through `\\wsl$` and merges their usage about every five minutes. File-based sources such as Codex JSONL sessions work well with this path.
 
-SQLite-backed tools such as OpenCode, Hermes, and ZCode store current usage in SQLite databases. A Windows process can discover those databases through `\\wsl$` while SQLite still cannot reliably coordinate locks or an active WAL across the WSL 9P boundary. Token Monitor may therefore show the tool under **Settings → Collection → WSL detection** with no usage.
+SQLite-backed tools such as OpenCode, Hermes, and ZCode store current usage in SQLite databases. A Windows process can discover those databases through `\\wsl$` while SQLite still cannot reliably coordinate locks or an active WAL across the WSL 9P boundary. Token Monitor's built-in scan therefore reports the distro as reached — the **WSL status** block on the Devices view — while those tools contribute no usage.
 
 Do not copy a live `.db` file as a workaround. Recent transactions may still be in `-wal`, and copying the database and sidecars separately does not guarantee a consistent snapshot.
 
 The reliable setup is:
 
 ```text
-WSL headless agent → Windows Docker Compose Hub → Token Monitor widget
+WSL headless agent → Windows Docker Compose Hub → Token Monitor desktop app
 ```
 
 The agent runs the Linux tokscale binary next to the database, then sends only the normalized usage summary to the hub.
@@ -44,7 +44,7 @@ cd token-monitor-suite
 npm ci --omit=dev
 ```
 
-Create `token-monitor/.env`:
+Create `.env` at the project root:
 
 ```env
 TOKEN_MONITOR_HUB_URL=http://WINDOWS_HOST_IP:17321
@@ -54,7 +54,7 @@ TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode
 TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1
 ```
 
-`TOKEN_MONITOR_DEVICE_ID` must differ from the Windows widget device ID. The hub treats matching IDs as the same device, so a duplicate ID would make the latest post replace the previous record.
+`TOKEN_MONITOR_DEVICE_ID` must differ from the Windows desktop app device ID. The hub treats matching IDs as the same device, so a duplicate ID would make the latest post replace the previous record.
 
 `YOUR_HUB_SECRET` must be the same single key configured on the Hub. The
 insecure-HTTP opt-in is only for a trusted LAN/VPN. Prefer an HTTPS Hub when
@@ -65,7 +65,7 @@ available.
 The hub adds device totals; it does not deduplicate the same session across devices. Choose one of these configurations:
 
 - Recommended: keep Windows WSL scanning enabled and restrict the WSL agent to SQLite-backed tools that Windows cannot read reliably, for example `TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode`.
-- Alternative: let the WSL agent collect every WSL tool, then turn off **Settings → Collection → Scan tools inside WSL** in the Windows widget.
+- Alternative: let the WSL agent collect every WSL tool, then turn off **Settings → Collection → Scan usage from running WSL distros** in the Windows desktop app.
 
 Do not let both collectors report the same Codex, Claude Code, or other file-based sessions.
 
@@ -87,7 +87,7 @@ For unattended use, run that command from your normal WSL service manager or log
 
 ## Troubleshooting
 
-- **No second device:** verify the hub URL, the device token bound to `wsl-agent`, the insecure-HTTP opt-in when applicable, and Windows firewall access to the hub port.
+- **No second device:** verify the hub URL, that `TOKEN_MONITOR_SECRET` matches the Hub's single key, the insecure-HTTP opt-in when applicable, and Windows firewall access to the hub port.
 - **Request goes through a proxy:** add the Windows host IP to `NO_PROXY` and `no_proxy`, or unset the proxy variables for the agent process.
-- **Totals are doubled:** narrow `TOKEN_MONITOR_CLIENTS`, or disable the Windows widget's built-in WSL scan when the agent owns all WSL tools.
-- **WSL detection still says no data:** the Windows-side status describes its own `\\wsl$` scan. The WSL agent appears as a separate synced device and is the authoritative source for these SQLite-backed tools.
+- **Totals are doubled:** narrow `TOKEN_MONITOR_CLIENTS`, or disable the Windows desktop app's built-in WSL scan when the agent owns all WSL tools.
+- **The WSL status block still reports no usage for a tool:** that status describes the Windows-side `\\wsl$` scan only. The WSL agent appears as a separate synced device and is the authoritative source for these SQLite-backed tools.

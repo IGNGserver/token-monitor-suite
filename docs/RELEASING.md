@@ -1,14 +1,14 @@
 # 发布说明
 
-`.github/workflows/release.yml` 使用 `v<版本号>` tag 构建并创建 GitHub Release。项目版本格式为：
+`.github/workflows/release.yml` 使用 `v<版本号>` tag 构建并创建 GitHub Release。项目版本格式为标准 SemVer：
 
 ```text
-<上游 SemVer>-rev.<本项目修订号>
+<major>.<minor>.<patch>[-rev.<正整数>]
 ```
 
-例如 `0.37.23-rev.1` 表示功能与上游 `0.37.23` 对齐，是本项目针对该上游版本的第一个修订版。上游版本不变时递增 `rev.N`；上游版本变化时重新从 `rev.1` 开始。版本号必须通过 `npm run verify:release-version` 校验。
+`-rev.N` 是可选的本地维护修订号，用于在不改变 SemVer 主体的情况下发布增量修复。版本字符串必须通过 `npm run verify:release-version` 校验。
 
-发布类型和版本字符串是两个独立概念：版本号始终保留 `-rev.N`，GitHub Release 是否标记为 prerelease 由发布流程决定。普通的“发布 release”按 prerelease 处理；只有明确要求“发布正式版 release”时，才选择正式版。
+发布类型和版本字符串是两个独立概念：是否带 `-rev.N` 由本次发布的性质决定，GitHub Release 是否标记为 prerelease 由发布流程决定。普通的“发布 release”按 prerelease 处理；只有明确要求“发布正式版 release”时，才选择正式版。正式版还会更新 Docker 镜像的 `latest` 标签，版本化标签则始终发布。
 
 ## 首次配置 Android 签名
 
@@ -25,30 +25,30 @@ Android 正式包必须使用长期保存的签名密钥。不要把 keystore �
 
 ## 发布新版本
 
-1. 在根项目和锁文件中同步版本号，例如 `0.37.23-rev.1`，然后运行：
+1. 在根项目和锁文件中同步版本号，例如 `0.47.0`，然后运行：
 
    ```bash
    npm run verify:release-version
    ```
 
 2. 提交并推送代码。
-3. 创建并推送同名版本 tag。tag 不包含 `fork`，例如：
+3. 创建并推送同名版本 tag，例如：
 
    ```bash
-   git tag v0.37.23-rev.1
-   git push origin v0.37.23-rev.1
+   git tag v0.47.0
+   git push origin v0.47.0
    ```
 
    推送 tag 会自动创建 prerelease。
 4. 如果要创建正式版，进入 GitHub Actions 手动运行 `Release`，填写同一个版本号，并将 `release_type` 选择为 `release`。只有这个明确操作会创建正式版 Release。
 5. GitHub Actions 会构建 Windows 安装包、Linux AppImage、Debian `.deb` 包、Android release APK 和 Hub 镜像。Release 资产文件名中的 `<version>` 会保留完整版本号，例如：
 
-   - `Token-Monitor-Setup-0.37.23-rev.1.exe`
-   - `Token-Monitor-0.37.23-rev.1.AppImage`
-   - `Token-Monitor-0.37.23-rev.1.deb`
-   - `Token-Monitor-Android-0.37.23-rev.1.apk`
+   - `Token-Monitor-Setup-0.47.0.exe`
+   - `Token-Monitor-0.47.0.AppImage`
+   - `Token-Monitor-0.47.0.deb`
+   - `Token-Monitor-Android-0.47.0.apk`
 
-Android 的 `versionName` 与桌面版本一致，`versionCode` 会同时编码上游三段版本和 `rev.N`，因此同一上游版本的 Android 更新也能保持递增。
+Android 的 `versionName` 与桌面版本一致；`versionCode` 由同一版本字符串推导（`major*10000 + minor*100 + patch`，再乘以 10000 加上 `rev.N`，无修订号时该位为 0），因此带或不带 `-rev.N` 的发布都能保持单调递增。
 
 已安装的 Debian 版本通过应用内更新使用系统 `dpkg`/`apt` 完成升级，首次安装新版本时会按系统策略请求管理员权限；也可以手动执行 `sudo apt install ./Token-Monitor-<version>.deb`。
 
@@ -106,7 +106,7 @@ apt-cache policy token-monitor
 本地验证 compose 包（不推镜像）：
 
 ```bash
-node scripts/package-hub-compose.js 0.37.23-rev.1
+node scripts/package-hub-compose.js 0.47.0
 ```
 
 本地从源码构建（不经过 GHCR）：

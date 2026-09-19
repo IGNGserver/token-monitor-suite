@@ -8,7 +8,7 @@ Token Monitor makes network requests only for documented or user-enabled feature
 
 - Packaged builds check GitHub Releases for updates.
 - Exchange-rate and service-status views fetch their public data sources.
-- Enabled AI Tool Limits integrations contact the corresponding provider. Credentials are sent only to that provider.
+- Quota accounts you add to the Hub contact their provider when the Hub refreshes them. A credential you pasted or an OAuth sign-in you completed is sent only to that provider; the desktop app itself does not probe provider accounts or upload local credentials.
 - Discord Rich Presence sends the selected activity details to Discord when explicitly enabled.
 - Multi-device sync sends data to the hub URL configured by the operator.
 
@@ -18,7 +18,7 @@ These requests are processed under the privacy policy of the service receiving t
 
 Multi-device sync is optional and has no Token Monitor-operated default server. The operator chooses and controls a Docker Compose Hub deployment and its infrastructure.
 
-When enabled, sync can send device identifiers and metadata; aggregate token and cost totals; client, model, session, and project attribution; retained usage history; and normalized provider-limit status. Project attribution can include an opaque project identifier and workspace-folder label, but never an absolute workspace path. Provider limits can include a hashed account identifier, account email, and plan label so the authenticated hub can distinguish accounts.
+When enabled, sync can send device identifiers and metadata; aggregate token and cost totals; client, model, session, and project attribution; and retained usage history. Project attribution can include an opaque project identifier and workspace-folder label, but never an absolute workspace path. Devices do not upload provider quota: the Hub refreshes the accounts you added there — keeping a hashed account identifier, account email, and plan label so it can distinguish accounts — and pushes the normalized limit status back down to connected clients.
 
 Sync also carries manually recorded subscription metadata when any exists: the plan name, amount, currency, billing cadence, dates you entered, and the account each record is bound to. These are values you typed in, never read from a provider, and they are stored once per hub rather than per device. The public stats endpoints never expose them.
 

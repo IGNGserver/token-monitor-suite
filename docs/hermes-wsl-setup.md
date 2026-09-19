@@ -80,13 +80,13 @@ TOKEN_MONITOR_SECRET=与_Hub_相同的密钥
 # 仅限可信 LAN/VPN 中暂时使用明文 HTTP；能用 HTTPS 时应删除
 TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1
 
-# 设备 ID —— 必须与 Windows widget 不同！
+# 设备 ID —— 必须与 Windows 桌面端不同！
 # 如果两台设备 ID 相同，后推送的数据会覆盖前者
 TOKEN_MONITOR_DEVICE_ID=hermes-wsl
 ```
 
 > **💡 提示：** Windows 端和 WSL 端的设备 ID 不能相同。
-> Windows widget 通常使用主机名（如 `DESKTOP-XXX`），WSL agent 建议设为 `hermes-wsl` 或 `wsl-agent` 以避免冲突。
+> Windows 桌面端通常使用主机名（如 `DESKTOP-XXX`），WSL agent 建议设为 `hermes-wsl` 或 `wsl-agent` 以避免冲突。
 > 单密钥模式下，Hub 不需要为每个设备单独创建令牌；所有设备使用同一个 Hub 密钥。
 
 ### 第四步：运行 Agent 验证
@@ -165,7 +165,7 @@ systemctl --user enable --now token-monitor-agent.timer
 
 ### 1. 设备 ID 冲突
 
-WSL agent 和 Windows widget 默认使用相同的主机名作为设备 ID。如果两者相同：
+WSL agent 和 Windows 桌面端默认使用相同的主机名作为设备 ID。如果两者相同：
 - **后推送的数据会覆盖前者**，导致数据丢失
 - 务必在 `.env` 中设置 `TOKEN_MONITOR_DEVICE_ID=hermes-wsl` 或其他不重复的 ID
 
@@ -178,7 +178,7 @@ WSL agent 和 Windows widget 默认使用相同的主机名作为设备 ID。如
 
 ### 3. WSL 工具的重复计算（重要）
 
-Windows widget 内建的 WSL 扫描本来就会隔着 `\\wsl$` 读到 WSL 里走 JSONL 的工具（Codex、Claude 等）。如果 WSL agent 又上报同样的工具，由于用的是不同 deviceId，hub 会把两份相加（不去重），导致这些工具被算两次。Hermes 不受影响——它是 SQLite，隔着 `\\wsl$` 读不到，只有 WSL 内的 agent 读得到。
+Windows 桌面端内建的 WSL 扫描本来就会隔着 `\\wsl$` 读到 WSL 里走 JSONL 的工具（Codex、Claude 等）。如果 WSL agent 又上报同样的工具，由于用的是不同 deviceId，hub 会把两份相加（不去重），导致这些工具被算两次。Hermes 不受影响——它是 SQLite，隔着 `\\wsl$` 读不到，只有 WSL 内的 agent 读得到。
 
 **建议**：把 WSL agent 的 `TOKEN_MONITOR_CLIENTS` 只填 Windows 侧读不到的工具（比如就填 `hermes`），让 Windows 侧继续负责 Codex 那类 JSONL 工具，两边不重叠就不会重复。
 
@@ -189,7 +189,7 @@ Windows widget 内建的 WSL 扫描本来就会隔着 `\\wsl$` 读到 WSL 里走
 ## 工作原理
 
 ```
-Windows widget 开启 hub 后：
+Windows 桌面端开启 hub 后：
   1. 启动本地的 collector，扫描 Windows 端的 Codex、Cursor 等数据
   2. 将本地数据推送到嵌入式 hub
   3. 在 `http://<ip>:17321/api/devices` 上等待外部 agent 的数据
@@ -199,7 +199,7 @@ WSL agent 运行时：
      - `~/.hermes/state.db` → Hermes ✅（原生 Linux SQLite 访问）
      - `~/.codex/sessions/` → Codex ✅
   2. 将数据 POST 到 Windows hub 的 `/api/ingest` 接口
-  3. hub 合并多台设备的数据后，通过 SSE 推送给 widget 展示
+  3. hub 合并多台设备的数据后，通过 SSE 推送给桌面端展示
 ```
 
 ## 故障排除
@@ -208,5 +208,5 @@ WSL agent 运行时：
 |:---|:---|:---|
 | agent 报 `ConnectTimeoutError` | HTTP 代理拦截 | 设置 `NO_PROXY` 或取消代理变量 |
 | hub 有多个设备但 Codex 数据丢失 | 设备 ID 冲突 | 给 WSL agent 设置不同的 `TOKEN_MONITOR_DEVICE_ID` |
-| agent 可以推送但 widget 没更新 | 第一次推送还没触发 | 等 5 分钟让 widget 的 collector 跑一次，或右键刷新 |
+| agent 可以推送但桌面端没更新 | 第一次推送还没触发 | 等 5 分钟让桌面端的 collector 跑一次，或在设置里手动刷新 |
 | `\\wsl$` 路径无法访问 | WSL 发行版未运行 | 确保 WSL 发行版在运行（`wsl -l -v`） |

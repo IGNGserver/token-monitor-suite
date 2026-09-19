@@ -20,6 +20,13 @@ const probeDeps = suppressAutoDetectedAccounts
 
 --- 
 
+> **落地状态（复核于当前工作树）**：本文的 §二 与 §五 是**改进提案**，其中 T1–T12 已全部实现，
+> 只有 T13（Alibaba Coding Plan）与 P3 的 T14–T18 仍未接入。当前实际值：
+> `LIMIT_PROVIDER_IDS` **27** 个、`HUB_ACCOUNT_PROVIDERS` **26** 个（仅 `kiro` 因需要 spawn
+> 本地 CLI 而保持排除）、`src/shared/*Limits.js` **22** 个文件。上游 tokscale 4.17 的 `usage`
+> 注册表 13 家现已**全部**被本项目覆盖。§三 的候选清单与 §四 的「不做」结论仍然有效，但
+> **§五 不得再被当作待办清单阅读**；各条目的落地位置见该节表格。
+
 ## 目录
 
 1. [现状总览](#一现状总览)
@@ -35,16 +42,16 @@ const probeDeps = suppressAutoDetectedAccounts
 
 ### 1.1 覆盖情况
 
-| 维度 | 数量 |
-|---|---|
-| harness（客户端）总数 | 54 |
-| 已注册额度 provider（`LIMIT_PROVIDER_IDS`） | 22 |
-| 其中**可从 Hub UI 添加**（`HUB_ACCOUNT_PROVIDERS`） | 17 |
-| **已实现但 Hub UI 无法添加** | 5（cursor, grok, kiro, **amp**, **sakana**） |
+| 维度 | 当时 | 现在 |
+|---|---|---|
+| harness（客户端）总数 | 54 | 54（`DEFAULT_CLIENTS` 52） |
+| 已注册额度 provider（`LIMIT_PROVIDER_IDS`） | 22 | 27 |
+| 其中**可从 Hub UI 添加**（`HUB_ACCOUNT_PROVIDERS`） | 17 | 26 |
+| **已实现但 Hub UI 无法添加** | 5（cursor, grok, kiro, amp, sakana） | 1（仅 kiro，见 §2.4） |
 
-> ⚠️ **发现一处回归**：上一轮新增的 `amp` / `sakana` 已在 `limitProviderSources.js` 声明 `authority: 'hub'`、`manual: true`，但**没有加入 `HUB_ACCOUNT_PROVIDERS`**，导致它们在额度页无法被添加。这是必须优先修的 bug（见 T1）。
+> ✅ **该回归已修复**：`amp` / `sakana` 现已进入 `HUB_ACCOUNT_PROVIDERS`，与 `limitProviderSources.js` 声明的 `authority: 'hub'` 一致。
 
-### 1.2 现有 22 个 provider 的鉴权形态
+### 1.2 provider 的鉴权形态（当时 22 个，现 27 个）
 
 按 Hub 录入的凭据类型分类（这是判断「是否易失效」的最重要维度）：
 
@@ -66,9 +73,7 @@ claude, codex, zai, amp, antigravity, copilot, grok, kimi,
 minimax, minimax-token-plan, warp, sakana, opencode-go
 ```
 
-**本项目 22 家 ⊃ 上游 13 家**，多出 9 家（cursor, kiro, qoder, commandcode, mimo, deepseek, openrouter, volcengine, ollama, thirdparty）——额度覆盖面我们**领先上游**，所以**不应**用 tokscale 替换（详见 §四）。
-
-上游仅有、我们**没有**的额度 provider 只有一家：**`warp`**（见 T3）。
+上游 13 家与本项目并非严格包含关系：`minimax-token-plan` 与 `opencode-go` 在上游是独立 id，在本项目分别并入 `minimax` 与 `opencode`；除去这一命名差异，当时未覆盖的只有 **`warp`** 一家（见 T3），**现已接入**，因此上游 13 家现已全部覆盖。反向差集当时是 10 家、现在是 16 家（cursor, cline, kilocode, commandcode, mimo, zaiteam, kiro, qoder, gemini, droid, deepseek, openrouter, volcengine, ollama, thirdparty 等）——额度覆盖面我们**领先上游**，所以**不应**用 tokscale 替换（详见 §四）。
 
 > ⚠️ 重要澄清：tokscale 二进制里那串长 provider 名（"Claude Code Codex CLI Cursor IDE Gemini CLI Amp Droid … 9router"）是**客户端扫描枚举**（`crates/tokscale-core/src/clients.rs`，53 项），**不是** `usage` 注册表。Cursor / Gemini / DeepSeek / kiro / Trae / Augment / Devin / Cline / Zed / Qoder / Volcengine / OpenRouter / Ollama / MiMo / Command Code 都**没有** tokscale 的额度实现。
 
@@ -76,7 +81,7 @@ minimax, minimax-token-plan, warp, sakana, opencode-go
 
 ## 二、第一部分：现有实现的问题与改进
 
-### 2.1 Claude —— 已实现 OAuth 却只暴露 Cookie（最高优先级）
+### 2.1 Claude —— 已实现 OAuth 却只暴露 Cookie（最高优先级）✅ 已落地
 
 **问题**：这是最典型的「机制不好」案例。
 
@@ -109,7 +114,7 @@ claude: ['claudeWebCookie'],                                     // ← 只声�
 - 凭据来源 `~/.claude/.credentials.json` 的 `claudeAiOauth.accessToken`（或 macOS Keychain `"Claude Code-credentials"`）
 - ⚠️ 注意：上游**刻意移除了** refresh（issue #1001），而我们**已有** refresh——这是我们相对上游的优势，应保留。
 
-### 2.2 Cursor —— HTTP-only 却被判为「不支持」
+### 2.2 Cursor —— HTTP-only 却被判为「不支持」✅ 已落地
 
 **问题**：`cursorProbe.js` **完全没有本地依赖**（实测 `grep -cE "keychain|sqlite|spawn|execFile"` = **0**），它只做 HTTP：
 
@@ -125,7 +130,7 @@ GET https://cursor.com/api/usage?user=<sub>
 
 **改进**：新增 `cursorSessionToken` 录入项，`fetchCursorLimits` 支持 `options.cursorSessionToken` 优先于本地文件。
 
-### 2.3 Grok —— 同样已支持 Bearer 却未在 Hub 放行
+### 2.3 Grok —— 同样已支持 Bearer 却未在 Hub 放行 ✅ 已落地
 
 **问题**：`grokLimits.js:80` 明确支持 `options.grokBearerToken`：
 
@@ -148,7 +153,7 @@ if (options && options.grokBearerToken) {
 
 **结论**：这与 Hub 架构根本冲突（Hub 容器里没有也不该有 kiro-cli）。**维持 `unsupported` 是正确的**，但应在 UI 上明确告知用户「Kiro 额度仅桌面端可用」，而不是静默缺失。
 
-### 2.5 Kimi —— 缺 refresh，且 API Key 与 Web Token 的语义未在 UI 说明
+### 2.5 Kimi —— 缺 refresh，且 API Key 与 Web Token 的语义未在 UI 说明 ✅ refresh 已落地
 
 **问题 1（缺 refresh）**：上游 `usage/kimi.rs` 实现了 refresh：
 ```
@@ -167,7 +172,7 @@ POST https://auth.kimi.com/api/oauth/token
 
 **改进**：(a) 实现 refresh_token 续期（上游有现成实现）；(b) UI 明确「Web Token 才能获得 5 小时/每周窗口」。
 
-### 2.6 Codex —— 数据基本齐全，仅一处表达差异（**经复核后修正**）
+### 2.6 Codex —— 数据基本齐全，仅一处表达差异（**经复核后修正**）✅ `spend_control.reached` 已读取
 
 > 初稿曾判定我们「缺 `credit_status` / `spend_control`」，**复核后确认该判断有误**。实际差异是**表达方式**而非能力缺失。
 
@@ -266,33 +271,33 @@ POST https://auth.kimi.com/api/oauth/token
 
 ## 五、第四部分：任务清单与优先级
 
-### P0 — 修 bug 与打通已有能力（后端逻辑几乎已存在）
+### P0 — 修 bug 与打通已有能力（后端逻辑几乎已存在）✅ 全部落地
 
 | # | 任务 | 说明 | 预估 |
 |---|---|---|---|
-| **T1** | **修 `amp`/`sakana` 无法从 Hub 添加** | 加入 `HUB_ACCOUNT_PROVIDERS`；`limitProviderSources` 已声明 `authority:'hub'`，仅 UI 列表缺失 | 小 |
-| **T2** | **Claude 接入 OAuth** | Hub 侧新增 `claudeAccessToken` + `claudeRefreshToken` 录入；`hasExplicitLimitProviderConfig` 与 `accountService.providerOptions` 放行；复用**已有**的 `refreshClaudeCredentials` | 中（收益最高） |
-| **T3** | **Warp 额度接入** | 直调 `app.warp.dev/graphql/v2` 的 `GetRequestLimitInfo`（不走 sync 缓存）；`wk-` API Key；上游唯一有而我们缺的 provider | 中 |
-| **T4** | **Cursor 接入 Hub** | 新增 `cursorSessionToken`；`fetchCursorLimits` 支持 `options` 传入 | 小 |
-| **T5** | **Grok 接入 Hub** | 加 `case 'grok'` 门槛 + `grokBearerToken` 录入（代码已支持该 option） | 小 |
+| **T1** ✅ | **修 `amp`/`sakana` 无法从 Hub 添加** | 加入 `HUB_ACCOUNT_PROVIDERS`；`limitProviderSources` 已声明 `authority:'hub'`，仅 UI 列表缺失 | 小 |
+| **T2** ✅ | **Claude 接入 OAuth** | Hub 侧新增 `claudeAccessToken` + `claudeRefreshToken` 录入；`hasExplicitLimitProviderConfig` 与 `accountService.providerOptions` 放行；复用**已有**的 `refreshClaudeCredentials` | 中（收益最高） |
+| **T3** ✅ | **Warp 额度接入**（`src/shared/warpLimits.js`） | 直调 `app.warp.dev/graphql/v2` 的 `GetRequestLimitInfo`（不走 sync 缓存）；`wk-` API Key；上游唯一有而我们缺的 provider | 中 |
+| **T4** ✅ | **Cursor 接入 Hub** | 新增 `cursorSessionToken`；`fetchCursorLimits` 支持 `options` 传入 | 小 |
+| **T5** ✅ | **Grok 接入 Hub** | 加 `case 'grok'` 门槛 + `grokBearerToken` 录入（代码已支持该 option） | 小 |
 
-### P1 — 补数据完整性
+### P1 — 补数据完整性 ✅ 全部落地
 
 | # | 任务 | 说明 |
 |---|---|---|
-| **T6** | Codex 补 `spend_control.reached` | **仅此一项缺失**（经复核：credits / individual_limit 我方已有，只是折叠进 windows）；触顶时给出明确提示 |
-| **T7** | Kimi 实现 refresh_token 续期 | 上游 `auth.kimi.com/api/oauth/token`，`client_id=17e5f671-...`；解决 Web Token 必然过期的问题 |
-| **T8** | UI 凭据失效提示 | 把 `unauthorized` 渲染为「凭据已失效，请更新」+ 获取步骤链接 |
+| **T6** ✅ | Codex 补 `spend_control.reached` | **仅此一项缺失**（经复核：credits / individual_limit 我方已有，只是折叠进 windows）；触顶时给出明确提示 |
+| **T7** ✅ | Kimi 实现 refresh_token 续期（`refreshKimiAccessToken`） | 上游 `auth.kimi.com/api/oauth/token`，`client_id=17e5f671-...`；解决 Web Token 必然过期的问题 |
+| **T8** ✅ | UI 凭据失效提示 | 把 `unauthorized` 渲染为「凭据已失效，请更新」+ 获取步骤链接 |
 
-### P2 — 新增 provider
+### P2 — 新增 provider（T9–T12 已落地，T13 未接入）
 
 | # | 任务 | provider | 凭据 |
 |---|---|---|---|
-| **T9** | Droid / Factory | `api.factory.ai/api/billing/limits` | `FACTORY_API_KEY` |
-| **T10** | Cline / ClinePass | `api.cline.bot/api/v1/users/me/plan/usage-limits` | Cline API Key |
-| **T11** | Kilo Code | `app.kilo.ai/api/trpc/...`（+ `api.kilo.ai/api/profile/balance` 回退） | `KILO_API_KEY` |
-| **T12** | Gemini（企业版，含弃用降级） | `cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota` | OAuth refresh token |
-| **T13** | Alibaba Coding Plan | `modelstudio.console.../codingPlan...` | Cookie 或 API Key |
+| **T9** ✅ | Droid / Factory（`factoryLimits.js`） | `api.factory.ai/api/billing/limits` | `FACTORY_API_KEY` |
+| **T10** ✅ | Cline / ClinePass（`clineLimits.js`） | `api.cline.bot/api/v1/users/me/plan/usage-limits` | Cline API Key |
+| **T11** ✅ | Kilo Code（`kiloLimits.js`，id `kilocode`） | `app.kilo.ai/api/trpc/...`（+ `api.kilo.ai/api/profile/balance` 回退） | `KILO_API_KEY` |
+| **T12** ✅ | Gemini（企业版，含弃用降级）（`geminiLimits.js`） | `cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota` | OAuth refresh token |
+| **T13** ⬜ 未接入 | Alibaba Coding Plan | `modelstudio.console.../codingPlan...` | Cookie 或 API Key |
 
 ### P3 — 按需评估
 

@@ -1,7 +1,7 @@
 # Token Monitor Headless Agent
 
 The headless agent collects the same local usage snapshot as the Electron
-widget's **Connect to a hub** mode and sends the same normalized payload to the
+desktop app's **Connect to a hub** mode and sends the same normalized payload to the
 same Docker Compose Hub. It has no window, tray, renderer, or local quota
 account probing.
 
@@ -33,7 +33,7 @@ TOKEN_MONITOR_DEVICE_ID=server-agent
 For a trusted LAN/VPN without HTTPS, also set
 `TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1`. The device ID should be unique per
 installation. If it changes later, the agent attempts the same Hub-side
-baseline migration as the widget before posting the next snapshot.
+baseline migration as the desktop app before posting the next snapshot.
 
 ## Run and verify
 
@@ -49,10 +49,10 @@ Then keep the collector running:
 npm run agent
 ```
 
-The agent and the widget share the collector, summary transformation, payload
+The agent and the desktop app share the collector, summary transformation, payload
 serialization, upload queue, retry/backoff, request timeout, device identity,
 and history/archive rules. The only intentional difference is presentation:
-the widget may display local status and Hub updates; the agent logs status and
+the desktop app may display local status and Hub updates; the agent logs status and
 posts snapshots without a GUI.
 
 ## Collection controls

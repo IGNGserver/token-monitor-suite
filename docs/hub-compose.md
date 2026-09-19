@@ -12,7 +12,7 @@ This is the only supported Hub deployment. Pull the published Hub image from Git
 ```bash
 cp .env.example .env
 # edit .env: TOKEN_MONITOR_SECRET, MYSQL_PASSWORD, MYSQL_ROOT_PASSWORD
-# optional: TOKEN_MONITOR_VERSION=0.34.2  (default: latest)
+# optional: TOKEN_MONITOR_VERSION=0.47.0  (default: latest)
 
 docker compose pull
 docker compose up -d
@@ -27,8 +27,8 @@ Open `http://<server>:17321` for the web dashboard (same port as the API).
 | Value | Meaning |
 |---|---|
 | `latest` (default) | Newest formal release image |
-| `0.34.2` | Pin a specific release (recommended for production) |
-| `v0.34.2` | Same image, tag with `v` prefix |
+| `0.47.0` | Pin a specific release (recommended for production) |
+| `v0.47.0` | Same image, tag with `v` prefix |
 
 Image: `ghcr.io/igngserver/token-monitor-hub`
 
@@ -40,8 +40,8 @@ docker compose pull
 docker compose up -d
 
 # or pin
-# TOKEN_MONITOR_VERSION=0.34.2 docker compose pull
-# TOKEN_MONITOR_VERSION=0.34.2 docker compose up -d
+# TOKEN_MONITOR_VERSION=0.47.0 docker compose pull
+# TOKEN_MONITOR_VERSION=0.47.0 docker compose up -d
 ```
 
 Do **not** run `docker compose down -v` — that deletes the MySQL data volume.

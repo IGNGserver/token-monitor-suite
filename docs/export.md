@@ -7,13 +7,13 @@ you connect whatever consumer you like.
 
 ## How to export
 
-In **Settings → Collection → Data export**:
+In **Settings → Data export**:
 
 - **Export data…** — pick a folder; Token Monitor writes the file set below into
   it once, right now.
 - **Auto-export to a folder** — turn this on and choose a folder, and Token
   Monitor rewrites the file set whenever usage updates, at a frequency you choose
-  (30 seconds to 60 minutes; default every minute) and skipped entirely when
+  (1, 5, 15, or 60 minutes; default every minute) and skipped entirely when
   nothing changed, so an idle machine never re-uploads unchanged files through
   iCloud / Obsidian Sync. Point it at a folder inside your Obsidian vault (or any
   synced folder) to keep a dashboard always current, hands-free.
@@ -69,7 +69,7 @@ date,tool,tokens,cost_usd
 ```json
 {
   "generatedAt": "2026-07-03T14:30:00.000Z",
-  "app": { "name": "token-monitor", "version": "0.19.0" },
+  "app": { "name": "token-monitor", "version": "0.47.0" },
   "snapshot": { "today": { … }, "month": { … }, "allTime": { … } },
   "daily":   [ { "date": "2026-07-03", "tokens": 12, "cost": 2, "perClient": { … }, "perModel": { … } } ],
   "monthly": [ { "month": "2026-07", "tokens": 17, "cost": 3, "perClient": { … }, "perModel": { … } } ]

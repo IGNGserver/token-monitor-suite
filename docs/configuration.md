@@ -2,14 +2,14 @@
 
 Token Monitor has two configuration surfaces:
 
-- **Widget (GUI)** — everything the desktop app does, configured from the `⚙` settings panel. This is the only surface most people need.
+- **Desktop app (GUI)** — everything the desktop app does, configured from Settings. This is the only surface most people need.
 - **`.env`** — for the headless agent and the Docker Compose Hub, which have no UI.
 
-The widget reads `.env` values as *first-run defaults*; once you change a setting in the GUI, the saved value takes over. The agent and Docker Compose Hub follow the precedence **CLI flag → env var (real or `.env`) → built-in default**.
+The desktop app reads `.env` values as *first-run defaults*; once you change a setting in the GUI, the saved value takes over. The agent and Docker Compose Hub follow the precedence **CLI flag → env var (real or `.env`) → built-in default**.
 
 ---
 
-## Widget (GUI)
+## Desktop app (GUI)
 
 Open **Settings** from the sidebar or the app menu. The desktop app and the Hub
 web dashboard share one interface, so the shared preferences below are also
@@ -20,19 +20,23 @@ Shared preferences (both hosts):
 | Group | What it controls |
 |---|---|
 | Language & currency | Interface language and the display currency (USD, TWD, HKD, or CNY; daily auto rate or a manual override). |
-| Display | Theme (light / dark / system), which views appear and in what order, per-vendor tool colors. |
-| AI Tool Limits | How received quota windows are shown: source, masked account e-mails, remaining vs used bars. Accounts and credentials live on the Hub — the device does not discover local developer-tool accounts. |
+| Theme | Light / dark / system, applied to whichever host renders the page. |
+| Home limits | How many accounts the home screen's limit block shows. |
 | Accounts / Management | Hub-owned quota accounts (including OAuth sign-in), subscriptions, and model pricing. |
+| Connection & PWA | The web host's own panel: current origin, authorized role, live stream state, advertised capabilities, and the install prompt. |
 
 Device-local groups (desktop app only):
 
 | Group | What it controls |
 |---|---|
-| Collection | Tracked tools (and hide / pin / drag-reorder for the main list), collection mode and interval, project metadata, trend history, **Keep usage from deleted sessions**, `allTimeSince`, and — on Windows — the built-in WSL scan toggle. |
-| Data export | Automatic export folder and interval, plus export-now. |
-| Window & appearance | Native window backdrop (and macOS glass style), motion, tool icons, live indicator, compact token total, zoom. |
-| Startup & updates | Start at login (with the Linux AppImage caveat), automatic update downloads, Discord Rich Presence, open the data folder. |
+| Collection | Tracked tools, collection mode (`live` / `smart` / `interval`) and interval, project metadata, trend history and its interval, **Keep usage from deleted sessions**, `allTimeSince`, and — on Windows — the built-in WSL scan toggle. |
+| Data export | Automatic export toggle, export folder, export interval, and export-now. |
+| Window & appearance | Native window backdrop (plus the macOS glass style choice), motion, tool icons, live indicator, compact token total, title icon, and zoom. |
+| Limit display | Presentation of received quota windows only: show source, mask account e-mails, remaining vs used bars. Accounts and credentials live on the Hub — the device does not discover local developer-tool accounts. |
+| Startup & updates | Start at login (with the Linux AppImage caveat), automatic update downloads, check-for-updates now, Discord Rich Presence, and open the data folder. |
 | Device identity | The device ID this machine reports to the Hub. |
+| View & list preferences | Per-list visibility and order for views, tools, home modules, home limit providers, and service providers; the home limit bar count; the service-status refresh cadence; the heatmap metric; and the active-days window. |
+| Currency & advanced | The exchange-rate override map and the theme colour map, both edited as JSON. |
 | Hub connection | **Local only** (no Hub) or **Connect to a hub** (Docker Compose Hub URL, upload interval, and the trusted-LAN HTTP opt-in). |
 
 ### Central Hub accounts and quotas
@@ -100,8 +104,8 @@ rejected by default; prefer HTTPS whenever possible. In the single-user mode,
 all devices intentionally use the same Hub key. Split admin/viewer/device
 credentials remain available only for legacy deployments.
 
-The collection and upload controls above are shared by the widget's Hub client
-mode and the headless agent. A widget's saved GUI value overrides its first-run
+The collection and upload controls above are shared by the desktop app's Hub client
+mode and the headless agent. A saved GUI value overrides the first-run
 `.env` default; the headless agent uses CLI flags first, then environment, then
 the shared built-in default. `smart` is useful on machines where a periodic,
 activity-aware scan is preferable to continuous file watching.
@@ -109,8 +113,12 @@ activity-aware scan is preferable to continuous file watching.
 Provider credentials for quota accounts are entered manually in the Hub and
 are not read from a device's local developer-tool installation. Proxy settings
 used by a Hub-side provider probe remain environment configuration. **`.env.example`
-is the complete, authoritative list** — start from it rather than copying keys
-by hand, since it stays in sync with the code.
+is the authoritative operator-facing list** — start from it rather than copying keys
+by hand, since it stays in sync with the code. It deliberately does not carry the
+lower-level Hub runtime knobs (bind host and port, TLS paths, staleness window,
+stats TTL, account concurrency, probe deadline, trusted-proxy) that the supported
+deployment passes in `docker-compose.yml`, nor per-provider CLI/timeout overrides;
+those are read from the environment but are not meant to be configured by hand.
 
 `qoder` quota accounts are manual Hub accounts. `qodercn` is a separate local
 usage integration: it reads local Qoder CN usage from its legacy SQLite database
@@ -126,12 +134,26 @@ overhead.
 
 For a target-machine Qoder CN check, run `QODERCN_VERSION=0.1.x npm run evidence:qodercn -- --require-version --require-data`. The command prints only platform/version, source presence, bounded read diagnostics, row counts, model names, and period totals; it never prints source paths, transcript content, cookies, account IDs, or session IDs. Use `--version-file <path>` when the installed app exposes its version in a local manifest. A result of `NOT RUN` means the machine has no readable source or no non-zero usage yet; a result of `FAIL` requires investigation before claiming the real-environment acceptance as complete.
 
-For a trusted LAN/VPN Hub that still uses non-loopback HTTP, keep the default blocked state until the user explicitly enables the trusted-LAN option in the widget (or sets `TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1` for the agent). Upgrading an old HTTP profile does not silently enable cleartext transport; the widget continues local collection while Hub read/write/stream status reports the blocked transport.
+For a trusted LAN/VPN Hub that still uses non-loopback HTTP, keep the default blocked state until the user explicitly enables the trusted-LAN option in the app (or sets `TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1` for the agent). Upgrading an old HTTP profile does not silently enable cleartext transport; the app continues local collection while Hub read/write/stream status reports the blocked transport.
 
-The widget reads these as first-run defaults; the agent and Docker Compose Hub take a CLI flag over an env var over the built-in default.
+The desktop app reads these as first-run defaults; the agent and Docker Compose Hub take a CLI flag over an env var over the built-in default.
 
 One-shot run (collect once and exit — useful for cron / launchd):
 
 ```bash
 npm run agent -- --clients=claude,codex,opencode --once
 ```
+
+---
+
+## Further reading
+
+- [Hub deployment with Docker Compose](hub-compose.md) — the only supported Hub deployment.
+- [Headless agent](headless-agent.md) — running the collector without the desktop app.
+- [Hub HTTP API](API.md) — the device ↔ Hub wire contract and every endpoint.
+- [Data export](export.md) — the tool-agnostic CSV + JSON format.
+- [GitHub Copilot OTel](github-copilot-otel.md) — what the Copilot integration reads from the editor's OTel output.
+- [Upstream tokscale usage providers](upstream-tokscale-usage-providers.md) — what the bundled tokscale actually scans, verified against its source.
+- [Tokscale alignment plan](TOKSCALE_ALIGNMENT_PLAN.md) — why this project's client coverage matches tokscale's, and where it still differs.
+- [Limits provider expansion research](LIMITS_PROVIDER_EXPANSION_RESEARCH.md) — per-provider quota endpoints and how each account-limit surface was chosen.
+- [Provider accounts and limits analysis](PROVIDER_ACCOUNTS_AND_LIMITS_ANALYSIS.md) — the Hub-owned account model and the current quota surfaces.

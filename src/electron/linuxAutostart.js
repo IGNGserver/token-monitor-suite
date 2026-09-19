@@ -9,6 +9,9 @@ const os = require('os');
 const path = require('path');
 
 const DESKTOP_FILE_NAME = 'token-monitor.desktop';
+// Written by builds that could start hidden in the tray. Nothing starts hidden
+// now, but `isAutostartEnabled` still recognises the marker so an existing
+// autostart entry is not silently reported as off after an update.
 const STARTED_AT_LOGIN_ARG = '--started-at-login';
 
 function launchPath({ env = process.env, appPath = '' } = {}) {
@@ -34,8 +37,8 @@ function quoteExecArgument(value) {
   return `"${quoted.replace(/\\/g, '\\\\')}"`;
 }
 
-function desktopFileContents(executablePath, { startedAtLogin = false } = {}) {
-  const exec = `${quoteExecArgument(executablePath)}${startedAtLogin ? ` ${STARTED_AT_LOGIN_ARG}` : ''}`;
+function desktopFileContents(executablePath) {
+  const exec = quoteExecArgument(executablePath);
   return [
     '[Desktop Entry]',
     'Type=Application',
@@ -67,18 +70,12 @@ function setAutostartEnabled(enabled, options = {}) {
     if (enabled) {
       if (!appPath) return false;
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, desktopFileContents(appPath, {
-        startedAtLogin: Boolean(options.startedAtLogin)
-      }), 'utf8');
+      fs.writeFileSync(filePath, desktopFileContents(appPath), 'utf8');
     } else {
       fs.rmSync(filePath, { force: true });
     }
   } catch (_) { /* fall through to report the actual on-disk state */ }
   return isAutostartEnabled({ env, appPath });
-}
-
-function startedAtLoginFromArgs(argv = process.argv) {
-  return Array.isArray(argv) && argv.some((arg) => String(arg) === STARTED_AT_LOGIN_ARG);
 }
 
 module.exports = {
@@ -87,6 +84,5 @@ module.exports = {
   desktopFileContents,
   isAutostartEnabled,
   setAutostartEnabled,
-  startedAtLoginFromArgs,
   STARTED_AT_LOGIN_ARG
 };

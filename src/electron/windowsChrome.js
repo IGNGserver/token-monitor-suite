@@ -1,18 +1,17 @@
 'use strict';
 
-// Windows-only cosmetic chrome fixes for the frameless widget — things macOS
-// gets natively but Electron can't express on win32, so we reach for the
-// documented DWM APIs through koffi:
+// Windows-only cosmetic chrome fixes — things macOS gets natively but Electron
+// can't express on win32, so we reach for the documented DWM APIs through koffi:
 //
 //   1. DWMWA_WINDOW_CORNER_PREFERENCE = ROUND — round the corners with the OS's
 //      anti-aliased mask. This is load-bearing for the transparent (glass-off)
 //      window: Electron's default roundedCorners does NOT cleanly round a
-//      transparent frameless window, and neither CSS clip-path nor border-radius
+//      transparent window, and neither CSS clip-path nor border-radius
 //      anti-aliases its corners on Windows (the bottom looks truncated and the
 //      top-right looks malformed). The acrylic (glass-on, non-transparent)
 //      window rounds fine on its own, but applying ROUND to it too is harmless.
 //   2. DWMWA_BORDER_COLOR = NONE — clear the 1px system border DWM draws around
-//      every frameless window; on a dark widget it reads as a pale hairline.
+//      every borderless window; on a dark surface it reads as a pale hairline.
 //
 // macOS / Linux: every entry point no-ops. koffi and dwmapi.dll are loaded
 // lazily and guarded, so a missing binary or any DWM failure never breaks
@@ -53,8 +52,8 @@ function setUintAttribute(api, hwnd, attribute, value) {
   api.DwmSetWindowAttribute(hwnd, attribute, buf, 4);
 }
 
-// The collapsed floating bubble can be dragged anywhere, so it keeps the same
-// anti-aliased DWM rounding as the expanded widget.
+// Applied to the one application window, so its corners use the OS anti-aliased
+// mask rather than a CSS approximation.
 function applyWindowsChrome(win, { round = false } = {}) {
   if (process.platform !== 'win32') return;
   if (!win || win.isDestroyed?.()) return;

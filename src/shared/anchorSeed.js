@@ -5,7 +5,7 @@ const { mergePeriods } = require('./usage');
 const { filterReasonixSyntheticSessions } = require('./reasonixSessionGuard');
 
 // The collector persists every full scan to collector-anchor.json so it can
-// derive month/allTime from a `--today` scan after a restart. A widget cold
+// derive month/allTime from a `--today` scan after a restart. A cold desktop-app
 // start reuses that same file for a second purpose: putting real numbers on
 // screen immediately instead of zeros for the length of the first full scan
 // (today + month + `--since allTimeSince`, run serially to avoid the CPU spike

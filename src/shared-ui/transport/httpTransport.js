@@ -10,7 +10,7 @@ const STORAGE_SECRET_SESSION = 'token-monitor.hub.secret.session';
 const STORAGE_PREFS = 'token-monitor.hub.prefs';
 
 // A half-open socket leaves reader.read() pending forever, so the UI would keep
-// showing stale numbers under a "live" badge. The widget solved this with an idle
+// showing stale numbers under a "live" badge. The desktop client solved this with an idle
 // watchdog plus a request deadline; mirror that here.
 const SSE_IDLE_TIMEOUT_MS = 90_000;
 const SSE_CONNECT_TIMEOUT_MS = 15_000;

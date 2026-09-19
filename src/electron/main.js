@@ -202,7 +202,7 @@ const SSE_RETRY_MAX_MS = 30 * 1000;
 const SYNC_REST_POLL_MS = 60 * 1000;
 const SYNC_RECOVERY_TIMEOUT_MS = 20 * 1000;
 const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
-// The shared UI exposes eight views. The widget had nine breakdown-oriented ids,
+// The shared UI exposes eight views. The widget-era client had nine breakdown-oriented ids,
 // so an upgraded profile's saved order/hidden set is translated rather than
 // dropped: tool/model/project/session are now tabs of `usage`, and status is the
 // health tab of `limits`.
@@ -793,7 +793,7 @@ function readSettings() {
     if (!saved.secret && defaults.secret) delete saved.secret;
     const merged = { ...defaults, ...saved, ...storedCredentials };
     // Migrate older configs that predate hubMode: infer from hubUrl. Legacy
-    // Host mode is intentionally mapped to local because the widget no longer
+    // Host mode is intentionally mapped to local because the app no longer
     // embeds or exposes a Hub server.
     if (saved.hubMode === undefined) {
       merged.hubMode = (saved.hubUrl && String(saved.hubUrl).trim()) ? 'client' : 'local';
@@ -962,13 +962,10 @@ function currentLoginItemState() {
   catch (_) { return false; }
 }
 
-function applyLoginItem(startAtLogin, startedAtLogin = settings?.startInTray) {
+function applyLoginItem(startAtLogin) {
   if (!loginItemEnabledHere()) return false;
   if (process.platform === 'linux') {
-    return linuxAutostart.setAutostartEnabled(Boolean(startAtLogin), {
-      ...linuxAutostartOptions(),
-      startedAtLogin: Boolean(startedAtLogin)
-    });
+    return linuxAutostart.setAutostartEnabled(Boolean(startAtLogin), linuxAutostartOptions());
   }
   app.setLoginItemSettings({ openAtLogin: Boolean(startAtLogin) });
   return currentLoginItemState();
@@ -1494,8 +1491,8 @@ function injectLocalDeviceStatus(stats) {
 
 // Coalesce stats pushes.
 //
-// Each push rebuilt the tray menu, re-rasterized the generated tray icon, cloned
-// the record three times and serialized a ~1.3 MB structured-clone IPC message,
+// Each push cloned the record three times and serialized a ~1.3 MB
+// structured-clone IPC message,
 // and the producer runs on every collector tick (watch ticks re-arm every 1.5s).
 // Nothing here needs sub-frame latency, so keep only the newest payload and flush
 // on a short trailing timer. The history-revision comparison is computed across
@@ -2817,7 +2814,6 @@ function loadWindowFile(target, options = {}) {
   const reveal = () => {
     if (revealed) return;
     revealed = true;
-    if (settings?.trayMode) return; // stay hidden until tray click
     revealWindow(target, { inactive: options.inactive === true });
   };
   const waitForContent = options.waitForContent === true;
@@ -2868,7 +2864,7 @@ function createWindow(boundsOverride, options = {}) {
   const nativeWindowsBackdrop = windowsSurface.nativeBackdrop;
   const bounds = boundsOverride || restoredBounds() || DEFAULT_WINDOW;
   // A normal application window: framed, resizable, minimizable, and present in
-  // the taskbar/Dock. The widget's borderless always-on-top chrome is gone, so
+  // the taskbar/Dock. The widget-era build's borderless always-on-top chrome is gone, so
   // `frame: false`, `transparent`, `skipTaskbar` and the fixed collapsed size
   // have no remaining caller. macOS keeps an inset title bar so the traffic
   // lights sit on the app's own toolbar, which is the platform convention for a
@@ -2918,7 +2914,7 @@ function createWindow(boundsOverride, options = {}) {
   });
   win.on('resized', persistBoundsSoon);
   win.on('moved', persistBoundsSoon);
-  // Closing is quitting. The widget used to hide into a tray popover or an
+  // Closing is quitting. The widget-era build used to hide into a tray popover or an
   // accessory-mode window; a normal app closes when the user closes it, and the
   // collector lifecycle is tied to the process either way.
   win.on('close', (event) => {
@@ -3166,7 +3162,7 @@ async function fetchCustomRangeStats(rangeInput) {
     // Hub modes prefer /api/usage/range so multi-device totals match mobile/web.
     // When hub history/events are empty (common before graph history is warm) or
     // the hub call fails, fall back to a local tokscale scan so the desktop
-    // widget still shows the same data as the Day tab.
+    // app still shows the same data as the Day tab.
     if (mode !== 'local') {
       let hubError = null;
       try {
@@ -3308,18 +3304,6 @@ app.whenReady().then(() => {
       }
     });
   });
-  // Login-item launches can start directly in the tray when requested. Linux
-  // carries an explicit marker in the XDG desktop entry because Electron's
-  // login-item API is only available on macOS and Windows.
-  if (settings.startAtLogin && settings.startInTray) {
-    if (process.platform === 'linux') {
-      if (linuxAutostart.startedAtLoginFromArgs()) settings.trayMode = true;
-    } else {
-      try {
-        if (app.getLoginItemSettings().wasOpenedAtLogin) settings.trayMode = true;
-      } catch (_) { /* unsupported on this platform */ }
-    }
-  }
   createWindow();
   syncLoginItemSettingFromOs();
   cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
@@ -3375,7 +3359,6 @@ app.whenReady().then(() => {
     const previousDiscordRpcEnabled = settings.discordRpcEnabled;
     const previousCurrency = settings.currency;
     const previousStartAtLogin = settings.startAtLogin;
-    const previousStartInTray = settings.startInTray;
     const previousAutomaticAppUpdates = settings.automaticAppUpdates;
     const previousCustomModelPricing = JSON.stringify(settings.customModelPricing || []);
     const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
@@ -3423,7 +3406,6 @@ app.whenReady().then(() => {
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
       showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, false),
-      floatingBubbleEnabled: parseBoolean(patch.floatingBubbleEnabled ?? settings.floatingBubbleEnabled, false),
       discordRpcEnabled: patch.discordRpcEnabled ?? settings.discordRpcEnabled ?? false,
       limitProviderOrder: patch.limitProviderOrder !== undefined ? migrateLimitProviderOrder(patch.limitProviderOrder) : settings.limitProviderOrder,
       clientDisplayOrder: patch.clientDisplayOrder !== undefined ? migrateClientDisplayOrder(patch.clientDisplayOrder) : (settings.clientDisplayOrder || ''),
@@ -3477,10 +3459,8 @@ app.whenReady().then(() => {
       regenerateTokscalePricing();
       refreshAfterPricingChange();
     }
-    const loginItemConfigurationChanged = settings.startAtLogin !== previousStartAtLogin
-      || (process.platform === 'linux' && settings.startAtLogin && settings.startInTray !== previousStartInTray);
-    if (loginItemConfigurationChanged) {
-      settings.startAtLogin = applyLoginItem(settings.startAtLogin, settings.startInTray);
+    if (settings.startAtLogin !== previousStartAtLogin) {
+      settings.startAtLogin = applyLoginItem(settings.startAtLogin);
       saveSettings({ throwOnError: true });
     }
     if (settings.automaticAppUpdates && !previousAutomaticAppUpdates) {
@@ -3741,7 +3721,7 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 app.on('before-quit', () => {
   quitRequested = true;
   // Deliver a queued push before tearing down so the final numbers reach the
-  // renderer/tray instead of being dropped with the timer.
+  // renderer instead of being dropped with the timer.
   flushPendingPush();
   if (rateRefreshTimer) clearInterval(rateRefreshTimer);
   if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);

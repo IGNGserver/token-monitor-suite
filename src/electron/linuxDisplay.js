@@ -30,7 +30,7 @@ function chooseLinuxOzonePlatform({ platform = process.platform, env = process.e
   // Respect an explicit choice. Users may need native Wayland on systems where
   // XWayland is unavailable, or X11 for Electron features that need coordinates.
   if (hasSwitch(argv, 'ozone-platform', commandLine)) return null;
-  // This window is a positioned, frameless widget. XWayland is the compatible
+  // This window restores saved bounds, so it needs positioning APIs. XWayland is the compatible
   // backend when a Wayland session exposes an X display; native Wayland cannot
   // provide the positioning APIs this app relies on.
   return env.DISPLAY ? 'x11' : null;

@@ -6,7 +6,7 @@
 ### Added
 - **Hub Web information architecture:** Replaced the legacy navigation with Overview, Usage, Devices, Limits, Trends, Accounts, Management, and Settings pages while preserving old URLs.
 - **Usage detail:** Added tool/model/project/session tabs with input, output, cache, uncached-token, cost, and expandable breakdown views.
-- **Headless agent package:** Added a release archive for machines that collect usage without the Electron widget.
+- **Headless agent package:** Added a release archive for machines that collect usage without the desktop app.
 ### Improved
 - **Trends and device visibility:** Added 7/30/90/365/all trend ranges, activity summaries, device runtime/status details, and explicit custom-range scope notices.
 - **Shared sync runtime:** Unified upload scheduling, retry/backoff, device identity, and summary/archive handling between Electron and the headless agent.

@@ -1,6 +1,6 @@
 // Display formatting for the Hub dashboard.
 //
-// Rates are configurable rather than frozen in at module load: the widget shows
+// Rates are configurable rather than frozen in at module load: the app shows
 // costs in the operator's currency using live exchange rates, so a hardcoded copy
 // here meant the same USD figure rendered as different CNY/TWD/HKD numbers in the
 // two clients. The Hub publishes its fetched rates on /api/rates and the app calls

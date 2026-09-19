@@ -4,8 +4,8 @@
 //
 // A normal desktop application is expected to have a menu bar: on macOS the
 // first menu carries About/Services/Hide/Quit, and every platform expects
-// standard Edit and View roles so clipboard shortcuts and zoom work. The widget
-// had no menu at all because it also hid from the Dock and the taskbar.
+// standard Edit and View roles so clipboard shortcuts and zoom work. The
+// widget-era build had no menu at all because it also hid from the Dock and the taskbar.
 
 const { Menu, app, shell } = require('electron');
 

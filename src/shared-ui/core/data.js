@@ -219,7 +219,7 @@ const ICON_ALIASES = {
   thirdparty: 'openrouter',
   // Without these the dashboard requested /icons/clients/<id>.svg for ids the
   // server does not ship and the request 404s on every re-render (sendJson sets
-  // cache-control: no-store). The desktop widget already aliases them the same way.
+  // cache-control: no-store). The desktop client already aliases them the same way.
   kimi: 'moonshot',
   zcode: 'zai',
   'claude-desktop': 'claude',
@@ -404,7 +404,9 @@ export function agentRuntimeLabel(runtime) {
   const raw = String(runtime || '').trim();
   if (!raw) return '';
   const value = raw.toLowerCase();
-  if (value === 'widget' || value.includes('electron') || value.includes('widget')) return 'widget';
+  // The wire value stays `electron-widget` so an older Hub keeps recognising
+  // it; only the label this client renders was renamed.
+  if (value === 'widget' || value.includes('electron') || value.includes('widget')) return 'desktop';
   if (value.includes('headless') || value === 'agent') return 'headless-agent';
   if (value.includes('embedded')) return 'legacy';
   return raw;
@@ -670,7 +672,7 @@ export function limitCards(stats, locale = 'en') {
         ? Number(window.remainingPercent)
         : (Number.isFinite(Number(window.usedPercent)) ? 100 - Number(window.usedPercent) : null);
       // Windows whose unit is an amount (Codex credits) report `remaining` as a
-      // count without any percentage, matching how the widget renders them.
+      // count without any percentage, matching how the dashboard renders them.
       const count = Number(window.remaining);
       const countValue = remaining == null && !balanceRowCoversCount && Number.isFinite(count) ? String(count) : '';
       const metric = String(window.metric || '').toLowerCase() === 'credits' ? 'credits' : '';

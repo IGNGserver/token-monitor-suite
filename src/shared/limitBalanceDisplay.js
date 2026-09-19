@@ -33,7 +33,7 @@
   // A hub older than the `spend` metric drops it during normalization while
   // keeping the window itself, so a metric-less billing window carrying the
   // canonical label is the same thing arriving through one of those. Without
-  // the fallback the row vanishes on new widget → old hub → new renderer.
+  // the fallback the row vanishes on new client → old hub → new renderer.
   // Removable once no supported hub predates the metric.
   function spendWindow(provider) {
     const windows = Array.isArray(provider?.windows) ? provider.windows : [];
@@ -70,7 +70,7 @@
     const funds = Math.max(0, amount);
     // No money left is 0% remaining, even before any spend has been observed.
     // Falling back to "full" here would paint a freshly tracked exhausted
-    // account as healthy on Home and in the tray.
+    // account as healthy on Home.
     if (funds === 0) return 0;
     const spend = Math.max(0, finiteNumber(provider?.balance?.monthSpend) ?? 0);
     // An untouched positive balance has no observed spend, so it reads as full.

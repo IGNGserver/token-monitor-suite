@@ -159,7 +159,8 @@ test('devicePlatformLabel / countActiveDays / heatmapValue behavior', () => {
 test('agentRuntimeLabel normalizes common runtimes', () => {
   const { agentRuntimeLabel } = dataApi;
   assert.equal(agentRuntimeLabel('headless-agent'), 'headless-agent');
-  assert.equal(agentRuntimeLabel('electron-widget'), 'widget');
+  // The wire value is still electron-widget; the label this product shows is not.
+  assert.equal(agentRuntimeLabel('electron-widget'), 'desktop');
   assert.equal(agentRuntimeLabel('embedded-hub'), 'legacy');
   assert.equal(agentRuntimeLabel(''), '');
 });

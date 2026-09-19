@@ -62,7 +62,7 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
  * drops `nativeSessions`/`nativeProjects` — the ONLY channel carrying Reasonix
  * session and project detail (Reasonix is excluded from the ordinary session
  * path). Sync mode reattaches them through composeLocalSyncStats(); the default
- * local mode did not, so its session/project views and the tray recency provider
+ * local mode did not, so its session/project views and the recency provider
  * were empty for Reasonix while everything else worked.
  *
  * These fields are display-only and local-only: syncPayload.js strips them from

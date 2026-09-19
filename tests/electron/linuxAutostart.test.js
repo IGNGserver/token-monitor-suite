@@ -12,7 +12,6 @@ const {
   desktopFileContents,
   isAutostartEnabled,
   setAutostartEnabled,
-  startedAtLoginFromArgs,
   STARTED_AT_LOGIN_ARG
 } = require('../../src/electron/linuxAutostart');
 
@@ -50,11 +49,6 @@ test('desktopFileContents produces a desktop entry pointing at the executable', 
   assert.ok(contents.endsWith('\n'));
 });
 
-test('desktopFileContents can mark AppImage launches as login-item launches', () => {
-  const contents = desktopFileContents('/opt/Token Monitor.AppImage', { startedAtLogin: true });
-  assert.match(contents, new RegExp(`\\nExec="/opt/Token Monitor\\.AppImage" ${STARTED_AT_LOGIN_ARG}\\n`));
-});
-
 test('desktopFileContents escapes reserved characters inside the quoted Exec argument', () => {
   const contents = desktopFileContents('/home/a"b/$HOME/`x`/App\\Image.AppImage');
   const execLine = contents.split('\n').find((line) => line.startsWith('Exec='));
@@ -88,13 +82,32 @@ test('setAutostartEnabled(true) writes a native .deb executable path without APP
   assert.match(written, /Exec="\/opt\/Token Monitor\/token-monitor"/);
 });
 
-test('setAutostartEnabled(true) preserves the login-item marker', () => {
+test('isAutostartEnabled still reads an entry written with the retired login marker', () => {
+  // Nothing starts hidden in a tray any more, so the marker is no longer
+  // written. An install that opted in once still has it in its autostart file,
+  // and that must keep reading as "start at login: on" rather than flipping off
+  // underneath the user after an update.
   const configHome = tmpConfigHome();
   const env = { XDG_CONFIG_HOME: configHome, APPIMAGE: '/opt/Token Monitor.AppImage' };
-  assert.equal(setAutostartEnabled(true, { env, startedAtLogin: true }), true);
-  const written = fs.readFileSync(path.join(configHome, 'autostart', 'token-monitor.desktop'), 'utf8');
-  assert.match(written, new RegExp(`Exec="/opt/Token Monitor\\.AppImage" ${STARTED_AT_LOGIN_ARG}`));
+  fs.mkdirSync(path.join(configHome, 'autostart'), { recursive: true });
+  fs.writeFileSync(
+    path.join(configHome, 'autostart', 'token-monitor.desktop'),
+    `Exec="/opt/Token Monitor.AppImage" ${STARTED_AT_LOGIN_ARG}\n`
+  );
   assert.equal(isAutostartEnabled({ env }), true);
+});
+
+test('setAutostartEnabled(true) rewrites a marked entry without the retired marker', () => {
+  const configHome = tmpConfigHome();
+  const env = { XDG_CONFIG_HOME: configHome, APPIMAGE: '/opt/Token Monitor.AppImage' };
+  fs.mkdirSync(path.join(configHome, 'autostart'), { recursive: true });
+  fs.writeFileSync(
+    path.join(configHome, 'autostart', 'token-monitor.desktop'),
+    `Exec="/opt/Token Monitor.AppImage" ${STARTED_AT_LOGIN_ARG}\n`
+  );
+  assert.equal(setAutostartEnabled(true, { env }), true);
+  const written = fs.readFileSync(path.join(configHome, 'autostart', 'token-monitor.desktop'), 'utf8');
+  assert.ok(!written.includes(STARTED_AT_LOGIN_ARG), 'the retired marker must not be rewritten');
 });
 
 test('isAutostartEnabled requires the desktop file to target the current AppImage', () => {
@@ -129,10 +142,4 @@ test('setAutostartEnabled(true) without an executable path reports failure', () 
   const env = { XDG_CONFIG_HOME: configHome };
   assert.equal(setAutostartEnabled(true, { env }), false);
   assert.equal(isAutostartEnabled({ env }), false);
-});
-
-test('startedAtLoginFromArgs only accepts the exact login marker', () => {
-  assert.equal(startedAtLoginFromArgs(['electron', STARTED_AT_LOGIN_ARG]), true);
-  assert.equal(startedAtLoginFromArgs(['electron', `${STARTED_AT_LOGIN_ARG}=true`]), false);
-  assert.equal(startedAtLoginFromArgs(['electron']), false);
 });

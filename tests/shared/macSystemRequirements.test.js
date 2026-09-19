@@ -5,34 +5,18 @@ const test = require('node:test');
 
 const {
   MAC_APP_MIN_DARWIN_VERSION,
-  MAC_APP_MIN_VERSION,
-  MAC_WIDGET_MIN_DARWIN_VERSION,
-  MAC_WIDGET_MIN_VERSION,
-  macWidgetRuntimeSupport
+  MAC_APP_MIN_VERSION
 } = require('../../src/shared/macSystemRequirements');
 
-test('keeps host, updater and Widget minimum versions explicit and aligned', () => {
+test('keeps the app floor and its Darwin equivalent aligned', () => {
   assert.equal(MAC_APP_MIN_VERSION, '12.0');
   assert.equal(MAC_APP_MIN_DARWIN_VERSION, '21.0.0');
-  assert.equal(MAC_WIDGET_MIN_VERSION, '14.0');
-  assert.equal(MAC_WIDGET_MIN_DARWIN_VERSION, '23.0.0');
 });
 
-test('enables the native Widget only on macOS 14 and later', () => {
-  assert.deepEqual(macWidgetRuntimeSupport({ platform: 'linux', osRelease: '23.0.0' }), {
-    supported: false,
-    reason: 'unsupported-platform'
-  });
-  for (const osRelease of ['', 'invalid', '21.6.0', '22.6.0']) {
-    assert.deepEqual(macWidgetRuntimeSupport({ platform: 'darwin', osRelease }), {
-      supported: false,
-      reason: 'unsupported-os'
-    });
-  }
-  for (const osRelease of ['23.0.0', '23.6.0', '24.0.0']) {
-    assert.deepEqual(macWidgetRuntimeSupport({ platform: 'darwin', osRelease }), {
-      supported: true,
-      reason: null
-    });
-  }
+test('the Darwin floor is the macOS release the marketing version names', () => {
+  // electron-builder writes MAC_APP_MIN_VERSION into LSMinimumSystemVersion while
+  // electron-updater compares against os.release(); if one is bumped without the
+  // other, an installer would advertise a floor the updater never enforces.
+  const major = Number(MAC_APP_MIN_DARWIN_VERSION.split('.')[0]);
+  assert.equal(Number(MAC_APP_MIN_VERSION.split('.')[0]) + 9, major);
 });

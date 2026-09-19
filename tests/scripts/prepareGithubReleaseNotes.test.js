@@ -16,7 +16,7 @@ test('composeReleaseNotes inserts GitHub notes below the single summary link', (
   const template = [
     '# User-facing notes',
     '<details>',
-    '<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v1.0.0...v1.1.0">v1.0.0...v1.1.0</a></summary>',
+    '<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v1.0.0...v1.1.0">v1.0.0...v1.1.0</a></summary>',
     '',
     GENERATED_NOTES_MARKER,
     '</details>'

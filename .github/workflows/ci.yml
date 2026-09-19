@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         # Full Node coverage on Linux; latest-Node smoke on macOS/Windows to
-        # catch platform-specific bugs (tray on macOS, WSL/paths on Windows).
+        # catch platform-specific bugs (macOS window/vibrancy, WSL/paths on Windows).
         os: [ubuntu-latest]
         node-version: ['22', '24']
         include:

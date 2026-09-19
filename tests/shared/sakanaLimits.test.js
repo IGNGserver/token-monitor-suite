@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -61,15 +62,21 @@ test('sakanaSessionCookie rejects a missing file, a value with no pair, and cont
 });
 
 test('the sakana session path honours TOKSCALE_CONFIG_DIR', () => {
+  // Build expectations with path.join: the implementation returns a real
+  // filesystem path, so it uses the platform separator. Hardcoding '/'-joined
+  // literals passed on Linux and macOS and failed on the Windows CI runner.
   const previous = process.env.TOKSCALE_CONFIG_DIR;
   process.env.TOKSCALE_CONFIG_DIR = '/custom/cfg';
   try {
-    assert.equal(sakanaSessionPath({}), '/custom/cfg/sakana-session');
+    assert.equal(sakanaSessionPath({}), path.join('/custom/cfg', 'sakana-session'));
   } finally {
     if (previous === undefined) delete process.env.TOKSCALE_CONFIG_DIR;
     else process.env.TOKSCALE_CONFIG_DIR = previous;
   }
-  assert.equal(sakanaSessionPath({ homeDir: '/home/alice' }), '/home/alice/.config/tokscale/sakana-session');
+  assert.equal(
+    sakanaSessionPath({ homeDir: '/home/alice' }),
+    path.join('/home/alice', '.config', 'tokscale', 'sakana-session')
+  );
 });
 
 test('parseSakanaBillingHtml binds each percentage to its own labelled section', () => {

@@ -209,10 +209,7 @@
 .window-title { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); letter-spacing: 0; }
 .window-body { padding: 1.1rem 1.2rem; }
 
-/* small uppercase label reused by the iOS surface mock */
-.panel-label { font-size: 0.62rem; font-weight: 800; letter-spacing: 0; text-transform: uppercase; color: var(--muted); }
-
-/* hero product stack — three real widget replicas at staggered 3D depths.
+/* hero product stack — three real app-window replicas at staggered 3D depths.
    setupHeroTilt in main.js sets --rx/--ry (main-card tilt) and --px/--py
    (parallax shift; outer cards consume them at opposite signs/strengths) on
    .product-stack. Without JS the stack is a clean static product shot. */
@@ -231,7 +228,7 @@
   pointer-events: none;
 }
 
-.app-widget {
+.app-window {
   position: absolute;
   overflow: hidden;
   border: 1px solid var(--widget-border);
@@ -248,21 +245,21 @@
   will-change: transform;
 }
 
-.app-widget-main {
+.app-window-main {
   inset: 44px 18px 18px 52px;
   z-index: 3;
   transform: rotateY(calc(-7deg + var(--ry, 0deg))) rotateX(calc(3deg + var(--rx, 0deg)));
 }
-.app-widget-main .tm-total { font-size: 50px; }
+.app-window-main .tm-total { font-size: 50px; }
 
-.app-widget-back {
+.app-window-back {
   inset: 18px 86px 176px 2px;
   z-index: 1;
   opacity: 0.62;
   transform: translate3d(calc(var(--px, 0px) * -0.6), calc(var(--py, 0px) * -0.6), 0) rotateY(-12deg) rotateX(5deg) rotateZ(-5deg);
 }
 
-.app-widget-front {
+.app-window-front {
   right: 0;
   bottom: 20px;
   z-index: 4;
@@ -276,7 +273,7 @@
 }
 
 /* specular sheen that sweeps the main card once after it lands */
-.app-widget-main::before {
+.app-window-main::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -290,11 +287,11 @@
    so each card settles into its var-driven base transform (no frozen value to
    fight the pointer parallax that starts afterwards). */
 @media (prefers-reduced-motion: no-preference) {
-  .js .hero-visual:not(.is-visible) .app-widget { opacity: 0; }
-  .js .hero-visual.is-visible .app-widget-main { animation: stack-in-main 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.08s backwards; }
-  .js .hero-visual.is-visible .app-widget-back { animation: stack-in-back 0.85s cubic-bezier(0.16, 1, 0.3, 1) 0.34s backwards; }
-  .js .hero-visual.is-visible .app-widget-front { animation: stack-in-front 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.58s backwards; }
-  .js .hero-visual.is-visible .app-widget-main::before { animation: stack-sheen 1.3s ease-in-out 1.3s both; }
+  .js .hero-visual:not(.is-visible) .app-window { opacity: 0; }
+  .js .hero-visual.is-visible .app-window-main { animation: stack-in-main 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.08s backwards; }
+  .js .hero-visual.is-visible .app-window-back { animation: stack-in-back 0.85s cubic-bezier(0.16, 1, 0.3, 1) 0.34s backwards; }
+  .js .hero-visual.is-visible .app-window-front { animation: stack-in-front 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.58s backwards; }
+  .js .hero-visual.is-visible .app-window-main::before { animation: stack-sheen 1.3s ease-in-out 1.3s both; }
 }
 @keyframes stack-in-main {
   from { opacity: 0; transform: rotateY(-7deg) rotateX(3deg) translate3d(0, 54px, -60px) scale(0.965); filter: blur(10px); }
@@ -312,12 +309,12 @@
 
 /* bars inside the stack fill in sequence after their card lands */
 @media (prefers-reduced-motion: no-preference) {
-  .js .hero-visual .app-widget-main .tm-row:nth-child(1) .tm-bar span { transition-delay: 0.8s; }
-  .js .hero-visual .app-widget-main .tm-row:nth-child(2) .tm-bar span { transition-delay: 0.92s; }
-  .js .hero-visual .app-widget-main .tm-row:nth-child(3) .tm-bar span { transition-delay: 1.04s; }
-  .js .hero-visual .app-widget-main .tm-row:nth-child(4) .tm-bar span { transition-delay: 1.16s; }
-  .js .hero-visual .app-widget-back .tm-bar span { transition-delay: 1.1s; }
-  .js .hero-visual .app-widget-front .tm-bar span { transition-delay: 1.35s; }
+  .js .hero-visual .app-window-main .tm-row:nth-child(1) .tm-bar span { transition-delay: 0.8s; }
+  .js .hero-visual .app-window-main .tm-row:nth-child(2) .tm-bar span { transition-delay: 0.92s; }
+  .js .hero-visual .app-window-main .tm-row:nth-child(3) .tm-bar span { transition-delay: 1.04s; }
+  .js .hero-visual .app-window-main .tm-row:nth-child(4) .tm-bar span { transition-delay: 1.16s; }
+  .js .hero-visual .app-window-back .tm-bar span { transition-delay: 1.1s; }
+  .js .hero-visual .app-window-front .tm-bar span { transition-delay: 1.35s; }
 }
 
 .tm-inner { padding: 20px 22px 21px; }
@@ -402,7 +399,7 @@
 .tm-total {
   margin-top: 12px;
   color: var(--widget-text);
-  /* The real widget gives only this number a tuned sans face; everything else stays mono. */
+  /* The real app window gives only this number a tuned sans face; everything else stays mono. */
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
   font-size: 60px;
   line-height: 0.96;
@@ -558,8 +555,8 @@
   color: var(--widget-text);
 }
 
-/* mini widgets riding the back/front of the hero stack */
-.mini-widget {
+/* mini app windows riding the back/front of the hero stack */
+.mini-panel {
   padding: 17px;
 }
 
@@ -583,7 +580,7 @@
 
 .mini-line strong { color: #fff; }
 
-.mini-session-widget {
+.mini-session-panel {
   padding: 14px 16px 15px;
 }
 
@@ -668,12 +665,12 @@
   font-size: 10.5px;
 }
 
-.mini-session-widget .tm-bar {
+.mini-session-panel .tm-bar {
   height: 6px;
   margin-top: 7px;
 }
 
-/* flat glass app widget — the tour screens' surface; same .tm-* type system
+/* flat glass app window — the tour screens' surface; same .tm-* type system
    as the hero stack so every mock mirrors a real view of the desktop app */
 .app-frame {
   position: relative;
@@ -694,14 +691,14 @@
   font-family: var(--mono);
 }
 
-/* the hero widget runs large; the feature widgets are tuned for the ~432px slot */
+/* the hero app window runs large; the feature app windows are tuned for the ~432px slot */
 .app-frame .tm-inner { padding: 18px 20px 19px; }
 .app-frame .tm-titlebar { margin-bottom: 18px; }
 .app-frame .tm-title { font-size: 21px; }
 .app-frame .tm-tabs { padding: 3px; border-radius: 14px; }
 .app-frame .tm-tabs span { padding: 7px 11px; font-size: 11px; border-radius: 10px; }
 .app-frame .tm-label { font-size: 13px; }
-/* matches the desktop widget's .total-number (SF Pro Display 500, up to 46px) */
+/* matches the desktop app window's .total-number (SF Pro Display 500, up to 46px) */
 .app-frame .tm-total { margin-top: 9px; font-size: 42px; }
 .app-frame .tm-cost { margin-top: 6px; font-size: 14px; }
 .app-frame .tm-breakdown { margin-top: 18px; }
@@ -723,7 +720,7 @@
 .app-frame .tm-trends-cap { margin-top: 19px; }
 .app-frame .tm-crumb { margin-top: 17px; }
 
-/* in-widget Trends preview (mirrors the app's .trends-* panel) */
+/* in-panel Trends preview (mirrors the app's .trends-* panel) */
 .tm-trends-cap {
   display: flex;
   align-items: center;

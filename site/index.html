@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title data-i18n="meta.title">Token Monitor: AI Tools usage at a glance</title>
-    <meta name="description" content="Token Monitor is a local-first desktop widget for real-time token, cost, limit, and session monitoring across AI Tools." data-i18n-attr="content:meta.description">
+    <meta name="description" content="Token Monitor is a local-first desktop app for real-time token, cost, limit, and session monitoring across AI Tools." data-i18n-attr="content:meta.description">
     <meta property="og:title" content="Token Monitor" data-i18n-attr="content:meta.ogTitle">
     <meta property="og:description" content="Local-first token, cost, limit, and session monitoring for AI Tools." data-i18n-attr="content:meta.ogDescription">
     <meta property="og:type" content="website">
@@ -64,7 +64,7 @@
         <div class="hero-copy reveal">
           <p class="eyebrow" data-i18n="hero.eyebrow">Local-first AI coding telemetry</p>
           <h1 data-i18n="hero.title">AI Tools usage at a glance</h1>
-          <p class="lede" data-i18n="hero.lede">A local-first desktop widget for real-time token, cost, limit, session, and trend monitoring across AI Tools, with optional self-hosted sync.</p>
+          <p class="lede" data-i18n="hero.lede">A local-first desktop app for real-time token, cost, limit, session, and trend monitoring across AI Tools, with optional self-hosted sync.</p>
           <div class="hero-actions" aria-label="Primary actions" data-i18n-attr="aria-label:hero.actions">
             <a class="btn btn-primary" href="https://github.com/IGNGserver/token-monitor-suite/releases/latest" data-i18n="cta.download">Download latest release</a>
             <a class="btn btn-secondary" href="https://github.com/IGNGserver/token-monitor-suite">
@@ -80,13 +80,13 @@
           </div>
         </div>
         <div class="hero-visual reveal" aria-hidden="true">
-          <!-- the real widget as a 3-deep stack (limits behind, totals in front, session
+          <!-- the desktop app as a 3-deep stack (limits behind, totals in front, session
                detail on top). Cards fly in staged, then setupHeroTilt drives a per-layer
                pointer parallax: --rx/--ry tilt the main card, --px/--py shift the outer
                cards at different depths. Static product shot without JS. -->
           <div class="product-stack">
-            <div class="app-widget app-widget-back">
-              <div class="mini-widget">
+            <div class="app-window app-window-back">
+              <div class="mini-panel">
                 <div class="mini-top"><span>Σ · Limits</span><span>TOTAL</span></div>
                 <div class="mini-line">Claude Code <strong>8% left</strong></div>
                 <div class="tm-bar"><span style="--w:8%;--bar:#df8b6d"></span></div>
@@ -101,7 +101,7 @@
               </div>
             </div>
 
-            <div class="app-widget app-widget-main">
+            <div class="app-window app-window-main">
               <div class="tm-inner">
                 <div class="tm-titlebar">
                   <div class="tm-title tm-title-icon" aria-label="Token Monitor"><span aria-hidden="true">Σ</span><span class="tm-live"></span></div>
@@ -158,8 +158,8 @@
               </div>
             </div>
 
-            <div class="app-widget app-widget-front">
-              <div class="mini-widget mini-session-widget">
+            <div class="app-window app-window-front">
+              <div class="mini-panel mini-session-panel">
                 <div class="mini-session-top"><span class="mini-back">‹ sessions</span><span class="mini-pill" data-i18n="mock.newest">↕ Newest</span></div>
                 <div class="mini-session-row">
                   <span class="mini-session-copy"><span class="mini-session-title">[image] text</span><span class="mini-session-meta">in 2 · out 1,221 · cache 51,020</span></span>
@@ -229,7 +229,7 @@
           <h2 id="features-title" data-i18n="feature.title">Tokens, limits, trends, and session detail in one view.</h2>
         </div>
 
-        <!-- product tour: the feature rail on the left drives one widget stage on the
+        <!-- product tour: the feature rail on the left drives one app stage on the
              right. setupTour in main.js auto-advances via the progress-bar animation,
              pauses on hover/focus, and stops once the visitor takes over. Screens are
              faithful replicas of the app's views with sample data. -->
@@ -256,8 +256,8 @@
               <span class="tour-progress" aria-hidden="true"><i></i></span>
             </button>
             <button class="tour-item" type="button" role="tab" id="tour-tab-status" aria-controls="tour-status" aria-selected="false" tabindex="-1">
-              <strong data-i18n="feature.status.title">Provider status, right in the widget</strong>
-              <span class="tour-item-body"><span class="tour-item-text" data-i18n="feature.status.body">Watch Claude, OpenAI, Cursor, and DeepSeek service status without leaving the widget. Each card leads with the active incident title and the count of affected components, and re-checks on your chosen interval.</span></span>
+              <strong data-i18n="feature.status.title">Provider status, next to your quotas</strong>
+              <span class="tour-item-body"><span class="tour-item-text" data-i18n="feature.status.body">Watch Claude, OpenAI, Cursor, and DeepSeek service status on the Limits view's health panel. Each card leads with the active incident title and the count of affected components, and re-checks on your chosen interval.</span></span>
               <span class="tour-progress" aria-hidden="true"><i></i></span>
             </button>
           </div>
@@ -529,7 +529,7 @@
       <section class="dashboard section shell" id="dashboard" aria-labelledby="dashboard-title">
         <div class="section-head reveal">
           <h2 id="dashboard-title" data-i18n="dash.title">A year of AI coding, charted.</h2>
-          <p class="lede" data-i18n="dash.lede">Turn on opt-in history and Token Monitor opens a full dashboard window: a GitHub-style activity heatmap with streaks, plus per-tool and per-model usage stacked over time in bar and K-line views, rolled up across all your devices.</p>
+          <p class="lede" data-i18n="dash.lede">Turn on history collection and Token Monitor builds a full year of data: a GitHub-style activity heatmap with streaks, plus per-tool and per-model usage stacked over time in bar and K-line views, rolled up across all your devices.</p>
         </div>
 
         <!-- replica of the app's dedicated dashboard window (dashboard.html in the
@@ -606,30 +606,30 @@
         </div>
         <div class="surface-grid">
           <article class="card surface-card reveal">
-            <div class="surface-mock mb" aria-hidden="true"><span class="mb-pill"><span class="tray-mark mb-mark" style="--m:url(../assets/icons/tray-codex.svg)"></span><span class="num">147.9M</span></span></div>
-            <h3 data-i18n="surfaces.menubar.title">Menu bar &amp; tray</h3>
-            <p data-i18n="surfaces.menubar.body">Live cost, tokens, or your closest limit % right next to the clock on macOS and Windows.</p>
+            <div class="surface-mock web" aria-hidden="true"><span class="web-chrome"><i></i><i></i><i></i><span class="web-url">hub.yourdomain.dev</span></span><span class="web-body"><span class="web-num">147.9M</span><span class="web-sub">$122.29 today</span></span></div>
+            <h3 data-i18n="surfaces.web.title">Hub dashboard &amp; PWA</h3>
+            <p data-i18n="surfaces.web.body">The Hub serves the identical UI in a browser and installs as a PWA, so a machine without the app still gets the full dashboard.</p>
           </article>
           <article class="card surface-card reveal">
-            <div class="surface-mock bubble" aria-hidden="true"><span class="bub-glass"><img class="bub-mark" src="assets/icons/tray-claude.svg" alt="" width="19" height="19"><span class="bub-bars"><span class="bub-bar"><i style="--w:95%"></i></span><span class="bub-bar"><i style="--w:52%"></i></span></span></span></div>
-            <h3 data-i18n="surfaces.bubble.title">Floating Bubble</h3>
-            <p data-i18n="surfaces.bubble.body">Collapse the widget into a draggable mini-window with click or hover preview.</p>
+            <div class="surface-mock desktop" aria-hidden="true"><span class="desk-chrome"><i></i><i></i><i></i></span><span class="desk-body"><span class="desk-rail"></span><span class="desk-content"><span class="desk-num">147.9M</span><span class="desk-bar" style="--w:74%"></span></span></span></div>
+            <h3 data-i18n="surfaces.desktop.title">Desktop app</h3>
+            <p data-i18n="surfaces.desktop.body">A normal macOS, Windows, and Linux window that watches this machine's own logs and updates within seconds.</p>
           </article>
           <article class="card surface-card reveal">
-            <div class="surface-mock discord" aria-hidden="true"><span class="d-status"><span data-i18n="surfaces.discord.playing">Playing</span><span class="d-dots">···</span></span><span class="d-body"><span class="d-icon"><img class="d-logo" src="assets/app.png" alt="" width="55" height="55"><span class="d-badge"><img src="assets/icons/tray-claude.svg" alt="" width="24" height="24"></span></span><span class="d-text"><span class="d-app">Token Monitor</span><span class="d-detail">Claude · 147.9M tokens</span><small>$122.29 today</small><span class="d-time"><svg class="d-pad" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" x2="10" y1="11" y2="11"></line><line x1="8" x2="8" y1="9" y2="13"></line><line x1="15" x2="15.01" y1="12" y2="12"></line><line x1="18" x2="18.01" y1="10" y2="10"></line><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.544-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"></path></svg><span id="d-elapsed">10:47:09</span></span></span></span></div>
+            <div class="surface-mock discord" aria-hidden="true"><span class="d-status"><span data-i18n="surfaces.discord.playing">Playing</span><span class="d-dots">···</span></span><span class="d-body"><span class="d-icon"><img class="d-logo" src="assets/app.png" alt="" width="55" height="55"><span class="d-badge"><img src="assets/icons/claude.svg" alt="" width="24" height="24"></span></span><span class="d-text"><span class="d-app">Token Monitor</span><span class="d-detail">Claude · 147.9M tokens</span><small>$122.29 today</small><span class="d-time"><svg class="d-pad" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" x2="10" y1="11" y2="11"></line><line x1="8" x2="8" y1="9" y2="13"></line><line x1="15" x2="15.01" y1="12" y2="12"></line><line x1="18" x2="18.01" y1="10" y2="10"></line><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.544-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"></path></svg><span id="d-elapsed">10:47:09</span></span></span></span></div>
             <h3 data-i18n="surfaces.discord.title">Discord Rich Presence</h3>
             <p data-i18n="surfaces.discord.body">Broadcast today's tokens, cost, and top tool to your profile. Opt-in.</p>
           </article>
           <article class="card surface-card reveal">
-            <div class="surface-mock ios" aria-hidden="true"><span class="panel-label">Today</span><span class="num">147.9M</span><span class="ios-sub">$122.29</span></div>
-            <h3 data-i18n="surfaces.ios.title">iOS widget</h3>
-            <p data-i18n="surfaces.ios.body">Today's totals on your Home Screen via the self-hosted Hub API, with Widgy or Scriptable.</p>
+            <div class="surface-mock android" aria-hidden="true"><span class="droid-notch"></span><span class="droid-body"><span class="droid-label">Devices</span><span class="droid-row"><span>mac-studio</span><strong>147.9M</strong></span><span class="droid-row"><span>work-laptop</span><strong>62.4M</strong></span><span class="droid-row stale"><span>lab-box</span><strong>stale</strong></span></span></div>
+            <h3 data-i18n="surfaces.android.title">Android client</h3>
+            <p data-i18n="surfaces.android.body">A native read-only client for your synced devices, totals, trends, and Hub-managed account limits.</p>
           </article>
         </div>
       </section>
       <section class="how section shell" aria-labelledby="how-title">
         <div class="section-head reveal">
-          <h2 id="how-title" data-i18n="how.title">Start with one widget. Add a hub for multi-device sync.</h2>
+          <h2 id="how-title" data-i18n="how.title">Start with one desktop app. Add a hub for multi-device sync.</h2>
           <p class="lede how-lede" data-i18n="how.lede">Local stays the default path. Add self-hosted sync when you want token usage from multiple devices rolled into one view.</p>
         </div>
         <div class="how-grid">
@@ -639,13 +639,13 @@
           <div class="mode-flow reveal">
             <div class="mode-step">
               <h3 data-i18n="how.local.title">Local mode</h3>
-              <p data-i18n="how.local.body">The widget reads local usage summaries through tokscale and renders them on the same machine. No account, no cloud.</p>
+              <p data-i18n="how.local.body">The desktop app reads local usage summaries through tokscale and renders them on the same machine. No account, no cloud.</p>
               <div class="mode-pipeline" aria-hidden="true">
                 <span class="source-pill"><span class="source-dot"></span><span data-i18n="how.node.localLogs">Local AI logs</span></span>
                 <span class="pipe-arrow">→</span>
                 <span class="source-pill"><span class="source-dot"></span><span data-i18n="how.node.tokscale">tokscale</span></span>
                 <span class="pipe-arrow">→</span>
-                <span class="source-pill"><span class="source-dot"></span><span data-i18n="how.node.widget">Widget</span></span>
+                <span class="source-pill"><span class="source-dot"></span><span data-i18n="how.node.desktop">Desktop app</span></span>
               </div>
             </div>
 
@@ -654,16 +654,16 @@
                 <span class="mode-field-label">Hub URL</span>
                 <span class="mode-field-input"><span class="mode-field-text">https://hub.yourdomain.dev</span><span class="mode-caret"></span></span>
               </div>
-              <p class="mode-pivot-note" data-i18n="how.pivot.note">There is no mode toggle. Paste a hub URL and the widget starts syncing; clear the field and everything stays on this machine.</p>
+              <p class="mode-pivot-note" data-i18n="how.pivot.note">Choose Local only or Connect to a hub under Settings → Hub connection. Point it at a Hub URL and the app starts syncing; clear the field and everything stays on this machine.</p>
             </div>
 
             <div class="mode-step">
               <h3 data-i18n="how.sync.title">Sync mode</h3>
-              <p data-i18n="how.sync.body">Each widget or headless agent posts that device's usage summary to your hub, which merges totals and streams them back to every connected widget.</p>
+              <p data-i18n="how.sync.body">Each desktop app or headless agent posts that device's usage summary to your hub, which merges totals and streams them back to every connected client.</p>
               <div class="sync-lane" aria-hidden="true">
                 <div class="device-stack">
-                  <span class="device-pill" data-i18n="how.node.mac">Mac widget</span>
-                  <span class="device-pill" data-i18n="how.node.windows">Windows widget</span>
+                  <span class="device-pill" data-i18n="how.node.mac">macOS app</span>
+                  <span class="device-pill" data-i18n="how.node.windows">Windows app</span>
                   <span class="device-pill" data-i18n="how.node.agent">Headless agent</span>
                 </div>
                 <span class="flow-arrow"></span>
@@ -678,9 +678,9 @@
             </div>
           </div>
 
-          <!-- the payoff: the widget's real Devices view, every machine's share of the
+          <!-- the payoff: the app's real Devices view, every machine's share of the
                same merged totals (one stale row greyed out, like the app) -->
-          <div class="how-widget reveal" aria-hidden="true">
+          <div class="how-window reveal" aria-hidden="true">
             <div class="app-frame">
               <div class="tm-inner">
                 <div class="tm-titlebar">
@@ -752,7 +752,7 @@
               <li data-i18n="privacy.never.3">OAuth credentials or provider responses</li>
             </ul>
           </div>
-          <!-- the actual wire shape a widget or agent posts (collectUsageOnce in
+          <!-- the actual wire shape the app or an agent posts (collectUsageOnce in
                src/shared/collector.js); shown whole because there is nothing to hide -->
           <div class="privacy-payload reveal">
             <div class="window term payload-window">

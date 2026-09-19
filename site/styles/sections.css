@@ -76,9 +76,9 @@
   .hero-copy h1 { font-size: 4rem; }
   .hero-copy .lede { max-width: 38ch; }
   .product-stack { min-height: 560px; }
-  .app-widget-main { inset: 58px 0 26px 18px; }
-  .app-widget-back { inset: 30px 70px 190px 0; }
-  .app-widget-front { width: 52%; bottom: 34px; }
+  .app-window-main { inset: 58px 0 26px 18px; }
+  .app-window-back { inset: 30px 70px 190px 0; }
+  .app-window-front { width: 52%; bottom: 34px; }
   .product-stack .tm-inner { padding: 18px; }
   .product-stack .tm-title { font-size: 20px; }
   .product-stack .tm-tabs span { padding: 8px 11px; font-size: 11px; }
@@ -106,9 +106,9 @@
   .hero .eyebrow { margin-bottom: 0.65rem; }
   .hero-actions { margin-top: 1.15rem; }
   .product-stack { min-height: 510px; }
-  .app-widget-main { inset: 34px 8px 14px 38px; }
-  .app-widget-back { inset: 16px 72px 158px 0; }
-  .app-widget-front { width: 51%; min-height: 160px; bottom: 14px; }
+  .app-window-main { inset: 34px 8px 14px 38px; }
+  .app-window-back { inset: 16px 72px 158px 0; }
+  .app-window-front { width: 51%; min-height: 160px; bottom: 14px; }
   .product-stack .tm-inner { padding: 17px 19px 18px; }
   .product-stack .tm-titlebar { margin-bottom: 24px; }
   .product-stack .tm-title { font-size: 19px; }
@@ -166,12 +166,12 @@
     font-size: 0.9rem;
   }
   .product-stack { min-height: 460px; }
-  .app-widget-main {
+  .app-window-main {
     inset: 40px 0 18px 0;
     transform: rotateY(calc(-4deg + var(--ry, 0deg))) rotateX(calc(2deg + var(--rx, 0deg)));
   }
-  .app-widget-back,
-  .app-widget-front { display: none; }
+  .app-window-back,
+  .app-window-front { display: none; }
   .product-stack .tm-inner { padding: 14px; }
   .product-stack .tm-titlebar { align-items: center; gap: 8px; margin-bottom: 20px; }
   .product-stack .tm-title { font-size: 17px; }
@@ -226,15 +226,15 @@
     width: calc(100vw - 32px);
     max-width: calc(100vw - 32px);
   }
-  .app-widget-main {
+  .app-window-main {
     inset: 18px 0 0 0;
     min-width: 0;
     width: 100%;
     max-width: 100%;
     transform: none;
   }
-  .app-widget-back,
-  .app-widget-front { display: none; }
+  .app-window-back,
+  .app-window-front { display: none; }
 }
 @media (max-width: 560px) {
   .hero {
@@ -344,7 +344,7 @@
   }
 }
 
-/* features — product tour: the feature rail on the left drives one glass widget
+/* features — product tour: the feature rail on the left drives one glass app
    stage on the right. setupTour in main.js moves .is-active; the active item's
    progress-bar animation paces the auto-advance (animationend → next screen). */
 .features {
@@ -517,7 +517,7 @@
   .tour-item-body, .tour-progress { display: none; }
 }
 
-/* Service Status mock — provider cards inside the narrow .app-frame widget.
+/* Service Status mock — provider cards inside the narrow .app-frame panel.
    Sits directly under the title bar like the AI Tool Limits view. */
 .tm-status { margin-top: 13px; padding-bottom: 12px; border-bottom: 1px solid rgba(232,238,244,0.12); }
 .tm-status:first-child { margin-top: 0; }
@@ -814,52 +814,25 @@
   justify-content: center;
   gap: 0.3rem;
 }
-.surface-mock .num { font-size: 1.1rem; color: var(--text-strong); }
+/* Hub dashboard: a browser frame with the Hub origin in the address bar, then the
+   same totals the shared UI renders on the desktop host. */
+.surface-mock.web { align-items: stretch; gap: 0.5rem; }
+.surface-mock.web .web-chrome { display: flex; align-items: center; gap: 5px; }
+.surface-mock.web .web-chrome i { width: 8px; height: 8px; border-radius: 50%; background: color-mix(in srgb, var(--text) 22%, transparent); }
+.surface-mock.web .web-url { margin-left: 0.4rem; padding: 2px 8px; border-radius: 6px; background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--muted); font-family: var(--mono); font-size: 0.66rem; }
+.surface-mock.web .web-body { display: flex; flex-direction: column; gap: 2px; }
+.surface-mock.web .web-num { color: var(--text-strong); font-size: 1.5rem; font-weight: 700; font-family: var(--mono); }
+.surface-mock.web .web-sub { color: var(--muted); font-size: 0.74rem; }
 
-/* Tray glyphs (tray-codex / tray-claude) are macOS template images: monochrome, system-tinted.
-   Mask them so they render as a single light ink on the dark surfaces, like the real tray. */
-.surface-mock .tray-mark {
-  display: block; flex: none;
-  -webkit-mask: var(--m) center / contain no-repeat;
-  mask: var(--m) center / contain no-repeat;
-  background-color: #f4f8ff;
-}
-
-/* Menu bar: the real tray shows the top tool's icon + the value on a dark macOS menu-bar pill. */
-.surface-mock.mb { align-items: center; }
-.surface-mock.mb .mb-pill {
-  display: inline-flex; align-items: center; gap: 0.28rem;
-  padding: 0.32rem 0.62rem 0.32rem 0.5rem;
-  border-radius: 9px;
-  background: rgba(18,22,31,0.92);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12);
-}
-.surface-mock.mb .mb-mark { width: 20px; height: 20px; }
-.surface-mock.mb .num { color: #f3f7ff; font-size: 0.95rem; font-weight: 600; }
-
-/* Floating Bubble: a dark glass capsule, the top tool's icon beside two limit bars
-   (track .22 / fill .92, matching BUBBLE_BARS_COLORS in the app). */
-.surface-mock.bubble { align-items: center; }
-.surface-mock.bubble .bub-glass {
-  display: inline-flex; align-items: center; gap: 11px;
-  padding: 11px 16px;
-  border-radius: 22px;
-  background: linear-gradient(135deg, rgba(62,68,84,0.92), rgba(34,38,52,0.94));
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.16), 0 12px 26px rgba(0,0,0,0.38);
-}
-/* the Claude Code glyph only fills ~62% of its box height, so the box is oversized to land the
-   visible mark at the same height as the two-bar stack (≈25px) */
-.surface-mock.bubble .bub-mark { display: block; flex: none; width: 40px; height: 40px; }
-.surface-mock.bubble .bub-bars { display: inline-flex; flex-direction: column; gap: 7px; }
-.surface-mock.bubble .bub-bar {
-  width: 38px; height: 9px; border-radius: 999px;
-  background: rgba(255,255,255,0.22);
-  overflow: hidden;
-}
-.surface-mock.bubble .bub-bar i {
-  display: block; height: 100%; width: var(--w);
-  border-radius: 999px; background: rgba(255,255,255,0.92);
-}
+/* Desktop app: a normal titled window with the sidebar rail the app renders. */
+.surface-mock.desktop { align-items: stretch; gap: 0.5rem; padding: 0.6rem; }
+.surface-mock.desktop .desk-chrome { display: flex; align-items: center; gap: 5px; }
+.surface-mock.desktop .desk-chrome i { width: 8px; height: 8px; border-radius: 50%; background: color-mix(in srgb, var(--text) 22%, transparent); }
+.surface-mock.desktop .desk-body { display: flex; gap: 0.6rem; min-height: 62px; }
+.surface-mock.desktop .desk-rail { flex: none; width: 18px; border-radius: 6px; background: color-mix(in srgb, var(--text) 10%, transparent); }
+.surface-mock.desktop .desk-content { display: flex; flex: 1; flex-direction: column; justify-content: center; gap: 6px; min-width: 0; }
+.surface-mock.desktop .desk-num { color: var(--text-strong); font-size: 1.3rem; font-weight: 700; font-family: var(--mono); }
+.surface-mock.desktop .desk-bar { display: block; height: 8px; width: var(--w); border-radius: 999px; background: color-mix(in srgb, var(--accent-from) 80%, transparent); }
 
 /* Discord: a 1:1 of the real presence card — status line on top, then a large app logo (with the
    top tool's icon badged in the corner) beside a text column: app name / details / state / timer. */
@@ -888,8 +861,14 @@
 .surface-mock.discord .d-time { display: flex; align-items: center; gap: 0.28rem; margin-top: 3px; color: #3ba55c; font-size: 0.7rem; font-family: var(--mono); }
 .surface-mock.discord .d-time .d-pad { flex: none; width: 12px; height: 12px; }
 
-.surface-mock.ios { align-items: flex-start; }
-.surface-mock.ios .ios-sub { color: var(--muted); font-size: 0.78rem; }
+/* Android: a phone frame listing the synced devices, stale row greyed like the app. */
+.surface-mock.android { align-items: center; gap: 0.3rem; padding: 0.6rem; }
+.surface-mock.android .droid-notch { width: 42px; height: 5px; border-radius: 999px; background: color-mix(in srgb, var(--text) 18%, transparent); }
+.surface-mock.android .droid-body { display: flex; flex-direction: column; gap: 4px; width: 100%; padding-top: 0.3rem; }
+.surface-mock.android .droid-label { color: var(--muted); font-size: 0.62rem; font-weight: 800; text-transform: uppercase; }
+.surface-mock.android .droid-row { display: flex; justify-content: space-between; gap: 0.5rem; color: var(--text); font-size: 0.74rem; font-family: var(--mono); }
+.surface-mock.android .droid-row strong { color: var(--text-strong); }
+.surface-mock.android .droid-row.stale { opacity: 0.55; }
 @media (max-width: 980px) {
   .surface-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
   .surface-card:nth-child(n) { grid-column: auto; }
@@ -910,7 +889,7 @@
   margin: 0;
 }
 /* one continuous mode story on the left (Local → the Hub URL field → Sync),
-   the widget's real Devices view on the right (the payoff of syncing: every
+   the app's real Devices view on the right (the payoff of syncing: every
    machine's share of one merged total). No cards: the app has no mode toggle,
    the Hub URL setting is the actual switch, so the field is the pivot. */
 .how-grid {
@@ -919,7 +898,7 @@
   gap: clamp(1.4rem, 4vw, 3rem);
   align-items: center;
 }
-.how-widget { min-width: 0; }
+.how-window { min-width: 0; }
 .mode-flow {
   position: relative;
   display: grid;

@@ -1,5 +1,13 @@
 # Senior design review resolution
 
+> **Historical Archive / 历史归档说明**
+> 
+> 本文档是 2026-09 分支独立与桌面端重构过程中的内部审计/计划快照，**不再维护**。
+> 文中提及的旧路径（如 `worker/`、`native/macos/`、旧版 `app.js` 等）在当前代码库中已不存在。
+
+---
+
+
 The verified design-boundary findings from `AUDIT.md` have now received an
 explicit product decision and an end-to-end implementation. This file no longer
 contains an unresolved release blocker.

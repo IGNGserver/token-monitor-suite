@@ -1,5 +1,13 @@
 # 02 — Hub Web Dashboard: Complete Architectural Inventory
 
+> **Historical Archive / 历史归档说明**
+> 
+> 本文档是 2026-09 分支独立与桌面端重构过程中的内部审计/计划快照，**不再维护**。
+> 文中提及的旧路径（如 `worker/`、`native/macos/`、旧版 `app.js` 等）在当前代码库中已不存在。
+
+---
+
+
 Target: reuse the Hub's web dashboard (`src/hub/web/`) as the UI of a rewritten Electron desktop client.
 
 Scope of evidence (all read in full):

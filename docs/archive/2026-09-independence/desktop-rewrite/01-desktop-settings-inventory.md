@@ -1,5 +1,13 @@
 # Desktop (Electron) client — complete settings inventory
 
+> **Historical Archive / 历史归档说明**
+> 
+> 本文档是 2026-09 分支独立与桌面端重构过程中的内部审计/计划快照，**不再维护**。
+> 文中提及的旧路径（如 `worker/`、`native/macos/`、旧版 `app.js` 等）在当前代码库中已不存在。
+
+---
+
+
 Scope: the **current** floating-widget Electron client, as a baseline for the planned rewrite.
 
 Sources of truth (all line numbers verified against the working tree at

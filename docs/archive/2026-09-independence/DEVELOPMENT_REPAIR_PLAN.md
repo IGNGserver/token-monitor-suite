@@ -1,5 +1,13 @@
 # Qoder、账号来源与中枢连接问题修复计划
 
+> **Historical Archive / 历史归档说明**
+> 
+> 本文档是 2026-09 分支独立与桌面端重构过程中的内部审计/计划快照，**不再维护**。
+> 文中提及的旧路径（如 `worker/`、`native/macos/`、旧版 `app.js` 等）在当前代码库中已不存在。
+
+---
+
+
 状态：源码修复与本机自动化验证完成；Windows Qoder `main.sqlite` → 最终 Windows unpacked/NSIS 安装 → Electron UI/localhost fake Hub、Linux AppImage/`.deb` 及 extracted package 启动已验收；macOS、生产 Hub 连接和长运行验收待执行
 分析基线：2026-09-04，`HEAD=7ef887cb326ab9427dc80f447298c64cc1f2161c`
 范围：记录问题、证据、实施顺序和验收标准；本次已完成可在本机执行的源码修复与自动化验证，未发布版本。

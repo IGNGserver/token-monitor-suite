@@ -1,5 +1,13 @@
 # 修复计划（PROJECT_FIX_PLAN）
 
+> **Historical Archive / 历史归档说明**
+> 
+> 本文档是 2026-09 分支独立与桌面端重构过程中的内部审计/计划快照，**不再维护**。
+> 文中提及的旧路径（如 `worker/`、`native/macos/`、旧版 `app.js` 等）在当前代码库中已不存在。
+
+---
+
+
 对应问题清单：`PROJECT_AUDIT_FINDINGS.md`
 审计基线：`807cd82` / `0.45.0-rev.38`，2026-09-17
 

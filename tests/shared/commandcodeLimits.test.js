@@ -4,15 +4,31 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  COMMANDCODE_ALPHA_CREDITS_URL,
+  COMMANDCODE_ALPHA_SUBSCRIPTIONS_URL,
+  COMMANDCODE_ALPHA_SUMMARY_URL,
+  COMMANDCODE_ALPHA_WHOAMI_URL,
+  COMMANDCODE_CLI_ENVIRONMENT,
+  COMMANDCODE_CLI_VERSION,
   COMMANDCODE_CREDITS_URL,
   COMMANDCODE_PLANS,
+  planFor,
   COMMANDCODE_SUBSCRIPTIONS_URL,
+  alphaHeaders,
+  commandcodeApiKey,
   commandcodeCookie,
   fetchCommandcodeLimits,
+  hasCommandcodeCredentials,
+  normalizeCommandcodeApiKey,
   normalizeCommandcodeCookieHeader,
+  orgLimitWindows,
   parseCommandcodeCredits,
-  parseCommandcodeSubscription
+  parseCommandcodeSubscription,
+  parseCommandcodeWhoami,
+  spendWindows,
+  withOrgId
 } = require('../../src/shared/commandcodeLimits');
+const { probeLimitProvider } = require('../../src/shared/limitCollector');
 
 const SESSION_COOKIE = '__Secure-commandcode_prod_.session_token=tok';
 const SESSION_DATA_COOKIE = '__Secure-commandcode_prod_.session_data=data';
@@ -432,16 +448,29 @@ test('a response without the published caps drops the denominator too', async ()
   assert.equal(windowByKind(provider, 'weekly').length, 0);
 });
 
-test('every catalogued plan spends less in a window than it grants in a month', () => {
-  // The caps are checked against the wire, so a typo in the catalogue would be
-  // caught on a real account — but only on a plan someone runs. This is the
-  // cheap half of that, and it holds for every plan Command Code publishes.
+test('every catalogued plan is priced and labelled, and its caps are coherent', () => {
+  // Only the plans whose live payload has been captured carry caps (they are
+  // read off the wire, not published), so the cap checks apply to just those.
+  // The monthly amount and label are required for every entry, because a missing
+  // one silently costs that plan its meter and its name.
   for (const [id, plan] of Object.entries(COMMANDCODE_PLANS)) {
     assert.ok(plan.monthlyCreditsUsd > 0, id);
+    assert.ok(plan.label, id);
+    if (plan.fiveHourCapUsd === undefined && plan.weeklyCapUsd === undefined) continue;
     assert.ok(plan.fiveHourCapUsd > 0 && plan.fiveHourCapUsd < plan.monthlyCreditsUsd, id);
     assert.ok(plan.weeklyCapUsd > plan.fiveHourCapUsd && plan.weeklyCapUsd < plan.monthlyCreditsUsd, id);
-    assert.ok(plan.label, id);
   }
+});
+
+test('the plan catalogue covers both Pro price cohorts separately', () => {
+  // Command Code repriced Pro ($30 -> $80) and minted `individual-pro-v1` for the
+  // new price instead of migrating the old id, so both are live. The CLI resolves
+  // this by prefix-matching with the shorter id first, which reads every v1
+  // subscriber as a $30 plan; our exact match must not reproduce that.
+  assert.equal(COMMANDCODE_PLANS['individual-pro'].monthlyCreditsUsd, 30);
+  assert.equal(COMMANDCODE_PLANS['individual-pro-v1'].monthlyCreditsUsd, 80);
+  assert.equal(planFor('individual-pro'), COMMANDCODE_PLANS['individual-pro']);
+  assert.equal(planFor('individual-pro-v1'), COMMANDCODE_PLANS['individual-pro-v1']);
 });
 
 test('accountKey follows the account, not the credential', async () => {
@@ -665,4 +694,382 @@ test('an exhausted credits probe reports unavailable rather than hanging', async
 
   assert.equal(provider.status, 'unavailable');
   assert.deepEqual(provider.windows, []);
+});
+
+// ---------------------------------------------------------------------------
+// API-key channel (`/alpha/*`): the `cmd` CLI's own route, Bearer-authenticated.
+// ---------------------------------------------------------------------------
+
+const API_KEY = 'cmd_hubkey1234567890';
+const WHOAMI_URL = `${COMMANDCODE_ALPHA_WHOAMI_URL}?limits=1`;
+
+// A v1 Pro account: the id minted when Pro was repriced from $30 to $80.
+const ALPHA_CREDITS_BODY = {
+  credits: {
+    planId: 'individual-pro-v1',
+    monthlyCredits: 60,
+    usagePercent: 25,
+    purchasedRemaining: 12.5,
+    freeCredits: 5,
+    windowLimits: {
+      fiveHour: { cap: 20, used: 5, exceeded: false, resetAt: 1786700000000 },
+      weekly: { cap: 40, used: 10, exceeded: false, resetAt: 1787000000000 }
+    }
+  }
+};
+const ALPHA_SUBSCRIPTION_BODY = {
+  data: { planId: 'individual-pro-v1', status: 'active', currentPeriodEnd: 1787000000000 }
+};
+const ALPHA_WHOAMI_BODY = {
+  org: { id: 'org_123', login: 'acme' },
+  user: { userName: 'dev' },
+  orgLimits: [{ label: 'Org monthly', limit: 500, used: 120, currency: 'USD' }]
+};
+
+// Routes the alpha channel by path, ignoring the query string so the orgId
+// assertions stay separate from the stubbing.
+function stubAlpha(overrides = {}, calls = []) {
+  const routes = {
+    [COMMANDCODE_ALPHA_WHOAMI_URL]: ALPHA_WHOAMI_BODY,
+    [COMMANDCODE_ALPHA_CREDITS_URL]: ALPHA_CREDITS_BODY,
+    [COMMANDCODE_ALPHA_SUBSCRIPTIONS_URL]: ALPHA_SUBSCRIPTION_BODY,
+    ...overrides
+  };
+  return async (url, init) => {
+    const href = String(url);
+    calls.push({ url: href, headers: init?.headers || {} });
+    const path = href.split('?')[0];
+    const route = routes[path];
+    if (route === undefined) throw new Error(`unexpected request: ${href}`);
+    if (typeof route === 'function') return route();
+    return { ok: true, status: 200, json: async () => route };
+  };
+}
+
+test('normalizeCommandcodeApiKey accepts only cmd_-prefixed keys', () => {
+  assert.equal(normalizeCommandcodeApiKey('cmd_abcdefgh1234'), 'cmd_abcdefgh1234');
+  assert.equal(normalizeCommandcodeApiKey('  "cmd_abcdefgh1234"  '), 'cmd_abcdefgh1234');
+  // Anything else is far more likely another provider's credential, and sending
+  // it as a Bearer would leak it to api.commandcode.ai.
+  assert.equal(normalizeCommandcodeApiKey('sk-whatever'), '');
+  assert.equal(normalizeCommandcodeApiKey('cmd_short'), '');
+  assert.equal(normalizeCommandcodeApiKey(''), '');
+  assert.equal(normalizeCommandcodeApiKey('cmd_has\nnewline'), '');
+});
+
+test('commandcodeApiKey prefers settings over env', () => {
+  assert.equal(commandcodeApiKey({}, { commandcodeApiKey: API_KEY }), API_KEY);
+  assert.equal(commandcodeApiKey({ COMMAND_CODE_API_KEY: API_KEY }), API_KEY);
+  assert.equal(commandcodeApiKey({ COMMANDCODE_API_KEY: API_KEY }), API_KEY);
+  assert.equal(commandcodeApiKey({ COMMAND_CODE_API_KEY: 'nope' }), '');
+  assert.equal(commandcodeApiKey({}), '');
+});
+
+test('hasCommandcodeCredentials accepts either credential form', () => {
+  assert.equal(hasCommandcodeCredentials({ commandcodeApiKey: API_KEY }), true);
+  assert.equal(hasCommandcodeCredentials({ commandcodeCookie: SESSION_COOKIE }), true);
+  assert.equal(hasCommandcodeCredentials({}), false);
+});
+
+test('alphaHeaders reproduces the CLI header set', () => {
+  const headers = alphaHeaders(API_KEY);
+  assert.equal(headers.Authorization, `Bearer ${API_KEY}`);
+  assert.equal(headers['User-Agent'], 'cli');
+  assert.equal(headers['x-cli-environment'], COMMANDCODE_CLI_ENVIRONMENT);
+  assert.equal(headers['x-command-code-version'], COMMANDCODE_CLI_VERSION);
+  // The cookie channel's browser UA must not leak onto the CLI route.
+  assert.equal(headers.Cookie, undefined);
+});
+
+test('withOrgId appends only the params that are known', () => {
+  assert.equal(withOrgId('https://x/y', 'org_1'), 'https://x/y?orgId=org_1');
+  assert.equal(withOrgId('https://x/y', ''), 'https://x/y');
+  assert.equal(withOrgId('https://x/y', null, { since: '2026-05-01' }), 'https://x/y?since=2026-05-01');
+  assert.equal(withOrgId('https://x/y', 'o', { since: 's' }), 'https://x/y?orgId=o&since=s');
+});
+
+test('parseCommandcodeWhoami reads the org, the user, and org limits', () => {
+  const identity = parseCommandcodeWhoami(ALPHA_WHOAMI_BODY);
+  assert.equal(identity.orgId, 'org_123');
+  assert.equal(identity.orgLogin, 'acme');
+  assert.equal(identity.userName, 'dev');
+  assert.equal(identity.orgLimits.length, 1);
+  // A bare payload (no `data` wrapper) is the alpha shape; tolerate both.
+  assert.equal(parseCommandcodeWhoami({ data: { org: { id: 'x' } } }).orgId, 'x');
+  assert.deepEqual(parseCommandcodeWhoami(null), { orgId: '', orgLogin: '', userName: '', orgLimits: [] });
+});
+
+test('parseCommandcodeSubscription accepts the unwrapped alpha envelope', () => {
+  // The alpha route has no `success` flag: the plan id sits at data.planId.
+  const subscription = parseCommandcodeSubscription(ALPHA_SUBSCRIPTION_BODY);
+  assert.equal(subscription.planId, 'individual-pro-v1');
+  assert.equal(subscription.status, 'active');
+  // A free alpha account is an absent inner object.
+  assert.equal(parseCommandcodeSubscription({ data: null }), null);
+  // But a FAILED cookie-channel envelope still must not read as free.
+  assert.throws(() => parseCommandcodeSubscription({ success: false, data: null }), /unsuccessful/);
+});
+
+test('parseCommandcodeCredits reads the vendor percentage and both pools', () => {
+  const credits = parseCommandcodeCredits(ALPHA_CREDITS_BODY);
+  assert.equal(credits.usagePercent, 25);
+  assert.equal(credits.purchasedRemaining, 12.5);
+  assert.equal(credits.freeCredits, 5);
+  assert.equal(credits.planId, 'individual-pro-v1');
+  // A response without usagePercent reports null rather than a guessed figure.
+  assert.equal(parseCommandcodeCredits({ credits: { monthlyCredits: 5 } }).usagePercent, null);
+});
+
+test('orgLimitWindows reads org caps and skips unusable entries', () => {
+  const windows = orgLimitWindows([
+    { label: 'Org monthly', limit: 500, used: 120, currency: 'USD' },
+    { label: 'No limit' },
+    { name: 'Spend', cap: 100, spent: 40, resetAt: 1787000000000 }
+  ]);
+  assert.equal(windows.length, 2);
+  assert.equal(windows[0].label, 'Org monthly');
+  assert.equal(windows[0].usedPercent, 24);
+  assert.equal(windows[0].metric, 'spend');
+  assert.equal(windows[1].label, 'Spend');
+  assert.equal(windows[1].usedPercent, 40);
+  assert.deepEqual(orgLimitWindows(null), []);
+});
+
+test('the API key path calls whoami then both billing reads with the org id', async () => {
+  const calls = [];
+  const provider = await fetchCommandcodeLimits(
+    { commandcodeApiKey: API_KEY },
+    { env: {}, fetch: stubAlpha({}, calls) }
+  );
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'api');
+  assert.equal(provider.accountLabel, 'Pro');
+  assert.equal(provider.accountName, 'acme');
+  assert.ok(provider.accountKey.startsWith('sha256:'));
+
+  // whoami first (it resolves the org), then credits + subscriptions, both scoped.
+  assert.equal(calls[0].url, WHOAMI_URL);
+  assert.ok(calls.every((call) => call.headers.Authorization === `Bearer ${API_KEY}`));
+  assert.ok(calls.every((call) => call.headers.Cookie === undefined));
+  const creditsCall = calls.find((call) => call.url.startsWith(COMMANDCODE_ALPHA_CREDITS_URL));
+  const subscriptionCall = calls.find((call) => call.url.startsWith(COMMANDCODE_ALPHA_SUBSCRIPTIONS_URL));
+  assert.match(creditsCall.url, /\?orgId=org_123$/);
+  assert.match(subscriptionCall.url, /\?orgId=org_123$/);
+});
+
+test('the API key path meters the month from the vendor percentage', async () => {
+  const provider = await fetchCommandcodeLimits(
+    { commandcodeApiKey: API_KEY },
+    { env: {}, fetch: stubAlpha() }
+  );
+  const [monthly] = windowByKind(provider, 'billing');
+  assert.equal(monthly.label, 'Monthly');
+  // 25 is the vendor's own figure. It must NOT be recomputed from the catalogue
+  // entry (individual-pro-v1 = $80), which would report 25% of 80 as the meter.
+  assert.equal(monthly.usedPercent, 25);
+  assert.equal(monthly.remainingPercent, 75);
+  assert.equal(monthly.remaining, 60);
+  assert.equal(monthly.showMeter, true);
+  // The catalogue is not consulted when the vendor reports a percentage, so no
+  // denominator ships (normalizeLimitWindow emits null, not undefined).
+  assert.equal(monthly.limit, null);
+  // Rolling windows and the top-up still ship.
+  assert.equal(windowByKind(provider, 'session')[0].usedPercent, 25);
+  assert.equal(windowByKind(provider, 'weekly')[0].usedPercent, 25);
+  assert.equal(provider.windows.some((window) => window.label === 'Top-up' && window.remaining === 12.5), true);
+});
+
+test('the API key path publishes org-wide caps the cookie route cannot see', async () => {
+  const provider = await fetchCommandcodeLimits(
+    { commandcodeApiKey: API_KEY },
+    { env: {}, fetch: stubAlpha() }
+  );
+  const org = provider.windows.find((window) => window.label === 'Org monthly');
+  assert.ok(org, 'expected the org limit window');
+  assert.equal(org.metric, 'spend');
+  assert.equal(org.limit, 500);
+  assert.equal(org.usedPercent, 24);
+});
+
+test('the API key path still works when whoami reports no org', async () => {
+  const calls = [];
+  const provider = await fetchCommandcodeLimits(
+    { commandcodeApiKey: API_KEY },
+    { env: {}, fetch: stubAlpha({ [COMMANDCODE_ALPHA_WHOAMI_URL]: {} }, calls) }
+  );
+  assert.equal(provider.status, 'ok');
+  // Without an org there is nothing to scope by, so the param is omitted.
+  assert.equal(calls.some((call) => call.url.includes('orgId')), false);
+});
+
+test('the API key path survives a failed subscription read', async () => {
+  const provider = await fetchCommandcodeLimits(
+    { commandcodeApiKey: API_KEY },
+    {
+      env: {},
+      fetch: (url, init) => {
+        if (String(url).startsWith(COMMANDCODE_ALPHA_SUBSCRIPTIONS_URL)) {
+          return Promise.resolve(jsonResponse(500, {}));
+        }
+        return stubAlpha()(url, init);
+      }
+    }
+  );
+  assert.equal(provider.status, 'ok');
+  // The credits payload carries its own planId, which is the CLI's own fallback.
+  assert.equal(provider.accountLabel, 'Pro');
+  assert.equal(windowByKind(provider, 'billing')[0].remaining, 60);
+});
+
+test('the API key path reports a rejected key as unauthorized without touching the cookie route', async () => {
+  const calls = [];
+  const provider = await fetchCommandcodeLimits(
+    { commandcodeApiKey: API_KEY, commandcodeCookie: SESSION_COOKIE },
+    {
+      env: {},
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), headers: init?.headers || {} });
+        return jsonResponse(401, {});
+      }
+    }
+  );
+  assert.equal(provider.status, 'unauthorized');
+  assert.equal(provider.source, 'api');
+  // No automatic fallback: the two channels speak different auth schemes, so
+  // retrying the cookie route would report a rejected KEY as an expired SESSION.
+  assert.ok(calls.every((call) => call.url.includes('/alpha/')));
+});
+
+test('the API key path maps transport failures onto provider statuses', async () => {
+  const at = (status) => fetchCommandcodeLimits(
+    { commandcodeApiKey: API_KEY },
+    { env: {}, fetch: async () => jsonResponse(status, {}) }
+  );
+  assert.equal((await at(403)).status, 'unauthorized');
+  assert.equal((await at(429)).status, 'sourceRateLimited');
+  assert.equal((await at(500)).status, 'unavailable');
+});
+
+test('an API key wins over a cookie when both are configured', async () => {
+  const calls = [];
+  const provider = await fetchCommandcodeLimits(
+    { commandcodeApiKey: API_KEY, commandcodeCookie: SESSION_COOKIE },
+    { env: {}, fetch: stubAlpha({}, calls) }
+  );
+  assert.equal(provider.source, 'api');
+  assert.ok(calls.every((call) => call.url.includes('/alpha/')));
+  assert.ok(calls.every((call) => call.headers.Cookie === undefined));
+});
+
+test('the cookie channel is untouched by the API key path', async () => {
+  const calls = [];
+  const provider = await fetchCommandcodeLimits(
+    { commandcodeCookie: SESSION_COOKIE },
+    {
+      env: {},
+      fetch: stubFetch({
+        [COMMANDCODE_CREDITS_URL]: CREDITS_BODY,
+        [COMMANDCODE_SUBSCRIPTIONS_URL]: SUBSCRIPTION_BODY
+      }, calls)
+    }
+  );
+  assert.equal(provider.source, 'web');
+  assert.equal(provider.status, 'ok');
+  assert.ok(calls.every((call) => call.url.includes('/internal/')));
+});
+
+test('probeLimitProvider reaches the API key channel through the Hub gate', async () => {
+  const rows = await probeLimitProvider('commandcode', {
+    limitProviders: 'commandcode',
+    limitProviderAuthority: 'hub',
+    suppressAutoDetectedAccounts: true,
+    commandcodeApiKey: API_KEY
+  }, {}, { fetch: stubAlpha() });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, 'ok');
+  assert.equal(rows[0].source, 'api');
+});
+
+test('probeLimitProvider returns no rows for commandcode without a credential', async () => {
+  const rows = await probeLimitProvider('commandcode', {
+    limitProviders: 'commandcode',
+    limitProviderAuthority: 'hub',
+    suppressAutoDetectedAccounts: true
+  }, {}, {
+    fetch: async () => { throw new Error('commandcode must not be probed without a credential'); }
+  });
+  assert.deepEqual(rows, []);
+});
+
+test('spendWindows reports the period cost without a meter', () => {
+  const [window] = spendWindows({ totalCost: 12.34 });
+  assert.equal(window.label, 'Period spend');
+  assert.equal(window.metric, 'spend');
+  assert.equal(window.remaining, 12.34);
+  assert.equal(window.currency, 'USD');
+  // A dollar figure is not a consumed quota, so there is no bar to draw.
+  assert.equal(window.showMeter, false);
+  // A bare payload is tolerated; an unusable one yields nothing rather than $0.
+  assert.equal(spendWindows({ data: { totalCost: 5 } })[0].remaining, 5);
+  assert.deepEqual(spendWindows(null), []);
+  assert.deepEqual(spendWindows({}), []);
+});
+
+test('the API key path anchors the usage summary on the billing period start', async () => {
+  const calls = [];
+  const provider = await fetchCommandcodeLimits(
+    { commandcodeApiKey: API_KEY },
+    {
+      env: {},
+      fetch: (url, init) => {
+        const path = String(url).split('?')[0];
+        if (path === COMMANDCODE_ALPHA_SUMMARY_URL) {
+          calls.push({ url: String(url), headers: init?.headers || {} });
+          return Promise.resolve(jsonResponse(200, { totalCost: 12.34 }));
+        }
+        return stubAlpha({
+          [COMMANDCODE_ALPHA_SUBSCRIPTIONS_URL]: {
+            data: {
+              planId: 'individual-pro-v1',
+              status: 'active',
+              currentPeriodEnd: 1787000000000,
+              currentPeriodStart: 1784000000000
+            }
+          }
+        }, calls)(url, init);
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'ok');
+  const summaryCall = calls.find((call) => call.url.startsWith(COMMANDCODE_ALPHA_SUMMARY_URL));
+  assert.ok(summaryCall, 'expected a usage summary request');
+  assert.match(summaryCall.url, /\?orgId=org_123&since=/);
+  assert.equal(summaryCall.url.includes(encodeURIComponent(new Date(1784000000000).toISOString())), true);
+  const spend = provider.windows.find((window) => window.label === 'Period spend');
+  assert.equal(spend.remaining, 12.34);
+});
+
+test('a failed usage summary costs only its own window', async () => {
+  const provider = await fetchCommandcodeLimits(
+    { commandcodeApiKey: API_KEY },
+    {
+      env: {},
+      fetch: (url, init) => {
+        if (String(url).startsWith(COMMANDCODE_ALPHA_SUMMARY_URL)) {
+          return Promise.resolve(jsonResponse(500, {}));
+        }
+        return stubAlpha()(url, init);
+      }
+    }
+  );
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.windows.some((window) => window.label === 'Period spend'), false);
+  // Everything else still ships: the monthly grant, the top-up, and the org cap
+  // from whoami. Only the spend window is lost.
+  assert.deepEqual(
+    windowByKind(provider, 'billing').map((window) => window.label),
+    ['Monthly', 'Top-up', 'Org monthly']
+  );
 });

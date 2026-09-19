@@ -44,6 +44,7 @@ const NODE_RUNTIME_SOURCE_FILES = Object.freeze([
   'src/shared/clientSyncRunners.js',
   'src/shared/clientSyncStatus.js',
   'src/shared/clientTracking.js',
+  'src/shared/clineLimits.js',
   'src/shared/codexAuth.js',
   'src/shared/collector.js',
   'src/shared/commandcodeLimits.js',
@@ -60,9 +61,12 @@ const NODE_RUNTIME_SOURCE_FILES = Object.freeze([
   'src/shared/deepseekBalanceHistory.js',
   'src/shared/deepseekHarnessPaths.js',
   'src/shared/exchangeRates.js',
+  'src/shared/factoryLimits.js',
+  'src/shared/geminiLimits.js',
   'src/shared/grokLimits.js',
   'src/shared/hashKey.js',
   'src/shared/hermesProfiles.js',
+  'src/shared/kiloLimits.js',
   'src/shared/kimiLimits.js',
   'src/shared/kiroLimits.js',
   'src/shared/limitCollector.js',
@@ -100,6 +104,7 @@ const NODE_RUNTIME_SOURCE_FILES = Object.freeze([
   'src/shared/wslUsage.js',
   'src/shared/volcengineLimits.js',
   'src/shared/wireValidation.js',
+  'src/shared/warpLimits.js',
   'src/shared/zaiLimits.js',
   'src/shared/zaiTeamLimits.js'
 ]);

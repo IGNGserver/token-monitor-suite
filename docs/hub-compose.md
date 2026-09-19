@@ -46,6 +46,28 @@ docker compose up -d
 
 Do **not** run `docker compose down -v` — that deletes the MySQL data volume.
 
+## Gemini quota renewal
+
+Google's OAuth token endpoint requires a client id **and** secret to redeem a
+refresh token, so automatic renewal for a Gemini Code Assist account needs an
+OAuth client of your own. This project deliberately ships neither — Google's own
+client belongs to the `gemini-cli` project, and bundling it would make every
+install authenticate as someone else's application.
+
+Register a client (type **Desktop app**) in Google Cloud, then set both values in
+`.env` and recreate the container:
+
+```bash
+GEMINI_OAUTH_CLIENT_ID=...apps.googleusercontent.com
+GEMINI_OAUTH_CLIENT_SECRET=...
+docker compose up -d
+```
+
+Set this on the **Hub**, not the desktop app: the probe runs server-side. A
+pasted access token needs none of this (it is used as-is, and simply expires);
+without the pair a refresh-token account reports *not configured* rather than
+failing ambiguously.
+
 ## First GHCR pull note
 
 If the package is private on a fresh org, set the package visibility to **Public** under

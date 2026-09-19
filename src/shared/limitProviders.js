@@ -18,9 +18,9 @@
   // tests/docs/readmeConsistency.test.js asserts the two agree, so a new provider
   // is added in the same slot in both places (amp before deepseek, sakana last).
   const LIMIT_PROVIDER_IDS = Object.freeze([
-    'claude', 'codex', 'opencode', 'cursor', 'antigravity', 'kimi', 'grok',
-    'copilot', 'commandcode', 'mimo', 'zai', 'zaiteam', 'kiro', 'qoder',
-    'amp', 'deepseek', 'openrouter', 'minimax', 'volcengine', 'ollama',
+    'claude', 'codex', 'opencode', 'cursor', 'antigravity', 'cline', 'kimi', 'grok',
+    'copilot', 'kilocode', 'commandcode', 'mimo', 'zai', 'zaiteam', 'kiro', 'qoder', 'gemini',
+    'amp', 'droid', 'warp', 'deepseek', 'openrouter', 'minimax', 'volcengine', 'ollama',
     'thirdparty', 'sakana'
   ]);
 

@@ -84,3 +84,22 @@ test('the packager emits a bundle-scoped manifest, not the root one', () => {
     'the bundle main should not be the Electron entry point'
   );
 });
+
+test('the headless packager accepts a plain SemVer release version', () => {
+  // The guard used to be a `-rev.N` regex, but AGENTS.md documents the revision
+  // suffix as optional and verify-release-version accepts a bare version. That
+  // made the release's headless job fail for 0.46.0 while npm run verify was
+  // green, because verify never invokes this script.
+  const source = fs.readFileSync(path.join(rootDir, 'scripts', 'package-headless.js'), 'utf8');
+  assert.match(source, /parseProjectVersion/, 'the guard should use the shared version parser');
+  assert.doesNotMatch(
+    source,
+    /\^\\d\+\\\.\\d\+\\\.\\d\+-rev\\\./,
+    'a rev-only regex must not gate a release version'
+  );
+
+  const { parseProjectVersion } = require(path.join(rootDir, 'src', 'shared', 'versioning'));
+  assert.ok(parseProjectVersion('0.46.0'), 'a bare SemVer release must be accepted');
+  assert.ok(parseProjectVersion('0.46.0-rev.1'), 'a revision release must still be accepted');
+  assert.equal(parseProjectVersion('not-a-version'), null, 'garbage must still be rejected');
+});

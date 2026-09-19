@@ -13,11 +13,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const tar = require('tar');
 
+const { parseProjectVersion } = require('../src/shared/versioning');
+
 const root = path.resolve(__dirname, '..');
 const requestedVersion = process.argv[2] || process.env.TOKEN_MONITOR_VERSION || '';
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const version = String(requestedVersion || packageJson.version).replace(/^v/, '');
-if (!/^\d+\.\d+\.\d+-rev\.\d+$/.test(version)) {
+// Validated through the shared parser rather than a `-rev.N` regex: AGENTS.md
+// documents the revision suffix as optional, so a plain SemVer release (0.46.0)
+// is legal and the old pattern rejected it, failing the release's headless job.
+if (!parseProjectVersion(version)) {
   throw new Error(`invalid headless package version: ${version}`);
 }
 

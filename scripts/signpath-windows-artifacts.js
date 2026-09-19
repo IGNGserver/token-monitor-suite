@@ -72,7 +72,7 @@ function windowsApplicationProductVersion(pkg, env = process.env) {
     throw new Error(`Unsupported package version for Windows signing: ${String(pkg.version)}`);
   }
   const { major, minor, patch, revision } = parsedVersion;
-  if ([major, minor, patch, revision].some((part) => !Number.isSafeInteger(part))) {
+  if ([major, minor, patch].some((part) => !Number.isSafeInteger(part))) {
     throw new Error(`Unsupported package version for Windows signing: ${String(pkg.version)}`);
   }
   const configuredBuildNumber = pkg.build?.buildNumber;
@@ -81,7 +81,11 @@ function windowsApplicationProductVersion(pkg, env = process.env) {
   const buildNumber = /^\d+$/.test(String(candidateBuildNumber ?? ''))
     ? String(candidateBuildNumber)
     : '';
-  return `${major}.${minor}.${patch}.${buildNumber || revision}`;
+  // Windows needs a four-part product version and a plain SemVer release has no
+  // revision, so the field defaults to 0. Previously the null revision tripped
+  // the safe-integer guard and failed the Windows release build for 0.46.0.
+  const fourthField = buildNumber || (Number.isSafeInteger(revision) ? revision : 0);
+  return `${major}.${minor}.${patch}.${fourthField}`;
 }
 
 function expectedWindowsApplication(packageJsonPath, env = process.env) {

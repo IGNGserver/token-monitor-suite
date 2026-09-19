@@ -206,6 +206,22 @@ test('windows application ProductVersion mirrors electron-builder four-part meta
   );
 });
 
+test('a plain SemVer release still yields a four-part Windows version', () => {
+  // AGENTS.md documents the -rev.N suffix as optional, and npm run
+  // verify:release-version accepts a bare version, so 0.46.0 is a legal release.
+  // The fourth field used to be the revision, which is null for a bare version,
+  // and that null tripped the safe-integer guard — failing the Windows build for
+  // the 0.46.0 release while every other platform succeeded.
+  assert.equal(windowsApplicationProductVersion({ version: '0.46.0' }, {}), '0.46.0.0');
+  // An explicit build number still wins, and shortVersionWindows still overrides.
+  assert.equal(windowsApplicationProductVersion({ version: '0.46.0', build: { buildNumber: 5 } }, {}), '0.46.0.5');
+  assert.equal(
+    windowsApplicationProductVersion({ version: '0.46.0', shortVersionWindows: '0.46.0.9' }, {}),
+    '0.46.0.9'
+  );
+  assert.throws(() => windowsApplicationProductVersion({ version: 'nonsense' }, {}), /Unsupported package version/);
+});
+
 test('writes the updater config skipped by electron-builder prepackaged mode', (t) => {
   const fixture = makeFixture(t);
   writeUnsignedApplication(fixture);

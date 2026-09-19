@@ -66,8 +66,15 @@ test('every path the Hub serves is inside a copied root', () => {
     .flatMap((m) => [...m[1].matchAll(/'([^']+)'/g)].map((seg) => seg[1]))
     .filter((seg) => seg !== '..');
   for (const root of roots) {
-    const relative = path.join('src', 'hub', root);
-    const covered = [...copies].some((entry) => relative === entry || relative.startsWith(`${entry}/`));
+    // Compare with forward slashes on both sides. Dockerfile paths are always
+    // POSIX, and path.join produces backslashes on Windows, so a joined string
+    // never matched the COPY entries there — this test failed on the Windows CI
+    // runner for exactly that reason.
+    const relative = ['src', 'hub', root].join('/');
+    const covered = [...copies].some((entry) => {
+      const normalized = entry.split(path.sep).join('/').replace(/\/$/, '');
+      return relative === normalized || relative.startsWith(`${normalized}/`);
+    });
     assert.ok(covered, `static.js serves ${relative}, which the Dockerfile does not copy`);
   }
 });

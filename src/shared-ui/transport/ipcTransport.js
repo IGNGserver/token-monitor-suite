@@ -70,14 +70,24 @@ function createIpcTransport(bridge) {
       }
       return result.data;
     },
-    openStream({ onStats, onStatus, onRetry } = {}) {
+    openStream({ onStats, onStatus, onRetry, onHealth } = {}) {
       // The main process owns the stream lifecycle (SSE in client mode, local
       // collector ticks otherwise) and already handles reconnect, backoff and
       // the idle watchdog. Re-deriving that here would double it.
       const offStats = bridge.onStatsPush((payload) => {
-        if (!payload || payload.event !== 'stats') return;
+        if (!payload) return;
+        if (payload.event === 'sync-health') {
+          onHealth?.(payload.data || {});
+          return;
+        }
+        if (payload.event !== 'stats') return;
         const data = payload.data || {};
-        onStats?.(data.stats || data, data.type || 'stats', { at: data.at || null, lastEventAt: Date.now() });
+        onStats?.(data.stats || data, data.type || 'stats', {
+          at: data.at || null,
+          lastEventAt: Date.now(),
+          snapshot: data.snapshot || null
+        });
+        if (data.snapshot) onHealth?.({ snapshot: data.snapshot });
         onStatus?.('live', { lastEventAt: Date.now() });
       });
       const offStatus = bridge.onStreamStatus?.((status) => {
@@ -212,6 +222,7 @@ function createIpcTransport(bridge) {
       dismissAppUpdate: (version) => bridge.dismissAppUpdate?.(version),
       recoverNow: () => bridge.recoverNow?.(),
       getSyncHealth: () => bridge.getSyncHealth?.(),
+      getSnapshotMeta: () => bridge.getSnapshotMeta?.(),
       getStreamStatus: () => bridge.getStreamStatus?.(),
       onSettingsPush: (callback) => bridge.onSettingsPush?.(callback) || (() => {}),
       onAppUpdatePush: (callback) => bridge.onAppUpdatePush?.(callback) || (() => {}),

@@ -95,7 +95,17 @@ test('hub serves the web UI on the same port without a secret', async () => {
     const sw = await fetch(`${base}/sw.js`);
     assert.equal(sw.status, 200);
     assert.match(sw.headers.get('content-type') || '', /javascript/);
-    assert.ok((await sw.text()).length > 0);
+    const swSource = await sw.text();
+    assert.match(swSource, /token-monitor-web-v6/);
+    for (const modulePath of [
+      '/ui/core/viewContext.js',
+      '/ui/views/home.js',
+      '/ui/views/limits.js',
+      '/ui/views/usage.js',
+      '/ui/views/trends.js'
+    ]) {
+      assert.match(swSource, new RegExp(modulePath.replaceAll('/', '\\/')));
+    }
 
     const icon = await fetch(`${base}/icons/icon-192.png`);
     assert.equal(icon.status, 200);
@@ -110,6 +120,7 @@ test('hub serves the web UI on the same port without a secret', async () => {
 
     const appJs = await fetch(`${base}/ui/app.js`);
     assert.equal(appJs.status, 200);
+    assert.equal(appJs.headers.get('cache-control'), 'no-cache');
     const appSource = await appJs.text();
     assert.match(appSource, /openStatsStream|serviceWorker/);
     assert.match(appSource, /function openNav\(/);
@@ -117,6 +128,7 @@ test('hub serves the web UI on the same port without a secret', async () => {
 
     const bootJs = await fetch(`${base}/js/boot.js`);
     assert.equal(bootJs.status, 200);
+    assert.equal(bootJs.headers.get('cache-control'), 'no-cache');
     assert.match(await bootJs.text(), /configureTransport/);
 
     const clientIcon = await fetch(`${base}/icons/clients/claude.svg`);

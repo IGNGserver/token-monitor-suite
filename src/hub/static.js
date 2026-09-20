@@ -39,11 +39,16 @@ function contentTypeFor(filePath) {
   return MIME_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
 }
 
-function cacheControlFor(filePath) {
+function cacheControlFor(filePath, { revalidate = false } = {}) {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.html' || ext === '.webmanifest' || path.basename(filePath) === 'sw.js') {
     return 'no-cache';
   }
+  // The shared UI is deployed from the same source tree as the Hub and its
+  // module URLs are intentionally stable. Revalidate those modules so a normal
+  // HTTP browser cannot keep an older renderer after a Hub update; the service
+  // worker still provides an explicit offline cache when available.
+  if (revalidate && (ext === '.js' || ext === '.css')) return 'no-cache';
   if (ext === '.js' || ext === '.css' || ext === '.png' || ext === '.svg' || ext === '.webp' || ext === '.ico') {
     return 'public, max-age=3600';
   }
@@ -125,12 +130,12 @@ async function resolveStaticAsset(webRoot, pathname) {
   return null;
 }
 
-function sendFile(res, filePath, stat, { method = 'GET' } = {}) {
+function sendFile(res, filePath, stat, { method = 'GET', revalidate = false } = {}) {
   const headers = corsHeaders({
     ...SECURITY_HEADERS,
     'content-type': contentTypeFor(filePath),
     'content-length': stat.size,
-    'cache-control': cacheControlFor(filePath)
+    'cache-control': cacheControlFor(filePath, { revalidate })
   });
 
   if (path.basename(filePath) === 'sw.js') {
@@ -168,7 +173,7 @@ async function tryServeStatic(req, res, { webRoot = DEFAULT_WEB_ROOT } = {}) {
   if (url.pathname === '/ui' || url.pathname.startsWith('/ui/')) {
     const rest = url.pathname.slice('/ui'.length) || '/';
     const asset = await resolveStaticAsset(SHARED_UI_ROOT, rest);
-    if (asset) return sendFile(res, asset.filePath, asset.stat, { method: req.method });
+    if (asset) return sendFile(res, asset.filePath, asset.stat, { method: req.method, revalidate: true });
     return false;
   }
 
@@ -183,7 +188,10 @@ async function tryServeStatic(req, res, { webRoot = DEFAULT_WEB_ROOT } = {}) {
 
   const asset = await resolveStaticAsset(webRoot, url.pathname);
   if (!asset) return false;
-  return sendFile(res, asset.filePath, asset.stat, { method: req.method });
+  return sendFile(res, asset.filePath, asset.stat, {
+    method: req.method,
+    revalidate: url.pathname === '/js/boot.js'
+  });
 }
 
 module.exports = {

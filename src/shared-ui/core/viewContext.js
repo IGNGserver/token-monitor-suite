@@ -11,9 +11,38 @@
 
 let context = null;
 
-export function configureViewContext(next) {
+// Keep this list next to the context validator so adding a view helper cannot
+// silently leave a route with an unhandled runtime exception. Tests also compare
+// it with the helper names used by the extracted view modules.
+export const VIEW_HELPER_NAMES = Object.freeze([
+  'activePeriod',
+  'emptyHtml',
+  'formatDuration',
+  'formatTrendValue',
+  'loadingHtml',
+  'managementError',
+  'panel',
+  'pwaStatusText',
+  'renderCompletenessNotice',
+  'renderHistoryScopeNotice',
+  'renderTokenMix',
+  'rowHtml',
+  'segButtons',
+  'shareBarHtml',
+  'toolRows',
+  'trendValue',
+  'uiIcon',
+  'usageMetricCard',
+  'viewStats'
+]);
+
+export function configureViewContext(next, { requiredHelpers = [] } = {}) {
   if (!next || typeof next.tr !== 'function') {
     throw new Error('configureViewContext requires at least a tr() helper');
+  }
+  const missing = requiredHelpers.filter((name) => typeof next[name] !== 'function');
+  if (missing.length) {
+    throw new Error(`configureViewContext is missing view helpers: ${missing.join(', ')}`);
   }
   context = next;
 }

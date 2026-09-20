@@ -127,6 +127,12 @@ const linuxAutostart = require('./linuxAutostart');
 const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
 const { classifyStreamFailure } = require('./syncConnection');
 const { composeLocalSyncStats, reattachLocalNativeView } = require('./syncDisplayStats');
+const {
+  cacheable: cacheableDesktopSnapshot,
+  emptyDesktopSnapshotCache,
+  readDesktopSnapshotCache,
+  writeDesktopSnapshotCache
+} = require('./desktopSnapshotCache');
 const { normalizeSyncUploadIntervalMs } = require('../shared/syncUploadScheduler');
 const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
 const {
@@ -582,6 +588,7 @@ function stopPersistBoundsTimer() {
 function ensureSettingsLoaded() {
   if (settings) return settings;
   settings = readSettings();
+  ensureDesktopSnapshotCacheLoaded();
   ensureClientUsageArchiveLoaded();
   ensureDeviceIdentityLoaded();
   // Auto-enable newly introduced default clients (e.g. claude-desktop) once for existing installs.
@@ -1149,6 +1156,125 @@ function withHistoryPreview(stats, devices) {
   return stats;
 }
 
+function desktopSnapshotCachePath() {
+  return path.join(app.getPath('userData'), 'desktop-stats-cache.json');
+}
+
+function ensureDesktopSnapshotCacheLoaded() {
+  if (desktopSnapshotCacheLoaded) return desktopSnapshotCache;
+  desktopSnapshotCacheLoaded = true;
+  desktopSnapshotCache = readDesktopSnapshotCache(desktopSnapshotCachePath()) || emptyDesktopSnapshotCache();
+
+  // Restore only the read model. The collector still starts normally and will
+  // replace these values after its first successful tick; cached records never
+  // become upload credentials or a second collection lifecycle.
+  if (desktopSnapshotCache.local) {
+    localDevice = desktopSnapshotCache.local.device || null;
+    lastCollectedDevice = localDevice;
+    localStats = desktopSnapshotCache.local.stats || null;
+    localStatsLive = false;
+  }
+  if (desktopSnapshotCache.hub) {
+    latestHubStats = desktopSnapshotCache.hub.stats || null;
+    latestHubStatsLive = false;
+  }
+  return desktopSnapshotCache;
+}
+
+function queueDesktopSnapshotCacheWrite() {
+  if (desktopSnapshotCacheWriteTimer !== null) return;
+  desktopSnapshotCacheWriteTimer = setTimeout(() => {
+    desktopSnapshotCacheWriteTimer = null;
+    try {
+      ensureDesktopSnapshotCacheLoaded();
+      desktopSnapshotCache = writeDesktopSnapshotCache(desktopSnapshotCachePath(), desktopSnapshotCache);
+    } catch (error) {
+      // Cache persistence is best effort. A permission failure must not stop
+      // collection, Hub reconnect, or settings access.
+      console.warn(`[snapshot-cache] write failed: ${error.message}`);
+    }
+  }, 250);
+  desktopSnapshotCacheWriteTimer.unref?.();
+}
+
+function cacheLocalSnapshot({ history = null } = {}) {
+  ensureDesktopSnapshotCacheLoaded();
+  if (!localStats && !lastCollectedDevice) return;
+  const capturedAt = new Date().toISOString();
+  desktopSnapshotCache.local = {
+    capturedAt,
+    stats: cacheableDesktopSnapshot(localStats || withHistoryPreview(
+      aggregateDevices(lastCollectedDevice ? [lastCollectedDevice] : [], 0),
+      lastCollectedDevice ? [lastCollectedDevice] : []
+    )),
+    device: cacheableDesktopSnapshot(lastCollectedDevice || localDevice),
+    history: cacheableDesktopSnapshot(history)
+  };
+  queueDesktopSnapshotCacheWrite();
+}
+
+function cacheHubSnapshot({ history = null } = {}) {
+  ensureDesktopSnapshotCacheLoaded();
+  if (!latestHubStats) return;
+  const previous = desktopSnapshotCache.hub || {};
+  desktopSnapshotCache.hub = {
+    capturedAt: new Date().toISOString(),
+    stats: cacheableDesktopSnapshot(latestHubStats),
+    device: null,
+    history: cacheableDesktopSnapshot(history) || previous.history || null
+  };
+  queueDesktopSnapshotCacheWrite();
+}
+
+function emptyDesktopStats() {
+  return withHistoryPreview(aggregateDevices([], 0), []);
+}
+
+function localFallbackStats() {
+  if (localStats) return localStats;
+  if (lastCollectedDevice) {
+    return reattachLocalNativeView(
+      withHistoryPreview(aggregateDevices([lastCollectedDevice], 0), [lastCollectedDevice]),
+      lastCollectedDevice
+    );
+  }
+  return emptyDesktopStats();
+}
+
+function desktopStatsFallback() {
+  ensureDesktopSnapshotCacheLoaded();
+  if (settings?.hubMode === 'client' && latestHubStats) {
+    return injectLocalDeviceStatus(composeLocalSyncStats(latestHubStats, lastCollectedDevice));
+  }
+  return localFallbackStats();
+}
+
+function desktopSnapshotMeta() {
+  ensureDesktopSnapshotCacheLoaded();
+  const local = desktopSnapshotCache.local;
+  const hub = desktopSnapshotCache.hub;
+  const clientMode = settings?.hubMode === 'client';
+  const localAvailable = Boolean(localStats || lastCollectedDevice || local);
+  const hubAvailable = Boolean(latestHubStats || hub);
+  let source = 'empty';
+  if (!clientMode) source = localStatsLive ? 'local-live' : (localAvailable ? 'local-cache' : 'empty');
+  else if (latestHubStatsLive) source = localStatsLive ? 'hub-live+local-live' : 'hub-live';
+  else if (hubAvailable) source = localStatsLive ? 'hub-cache+local-live' : 'hub-cache';
+  else if (localStatsLive) source = 'local-live';
+  else if (localAvailable) source = 'local-cache';
+  return {
+    source,
+    mode: clientMode ? 'client' : 'local',
+    localAvailable,
+    hubAvailable,
+    localLive: localStatsLive,
+    hubLive: latestHubStatsLive,
+    localCapturedAt: local?.capturedAt || null,
+    hubCapturedAt: hub?.capturedAt || null,
+    cacheUpdatedAt: desktopSnapshotCache.updatedAt || null
+  };
+}
+
 let mode = 'idle';
 let deviceRuntimeHandle = null;
 let localDevice = null;
@@ -1180,7 +1306,12 @@ const syncHealth = {
 };
 let lastCollectedDevice = null;
 let latestHubStats = null;
+let latestHubStatsLive = false;
 let latestStats = null;
+let localStatsLive = false;
+let desktopSnapshotCache = null;
+let desktopSnapshotCacheLoaded = false;
+let desktopSnapshotCacheWriteTimer = null;
 const DEFAULT_EXPORT_INTERVAL_MS = 60 * 1000;
 let lastExportAt = 0;
 let lastAutoExport = { dir: null, signature: null };
@@ -1224,6 +1355,7 @@ function syncHealthSnapshot() {
   };
   return {
     mode,
+    snapshot: desktopSnapshotMeta(),
     local: { ...syncHealth.local },
     upload: { ...upload },
     rest: { ...syncHealth.rest },
@@ -1436,6 +1568,12 @@ function startSyncCollector() {
         return false;
       }
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
+      localStats = reattachLocalNativeView(
+        withHistoryPreview(aggregateDevices([lastCollectedDevice], 0), [lastCollectedDevice]),
+        lastCollectedDevice
+      );
+      localStatsLive = true;
+      cacheLocalSnapshot();
       const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
       if (displayStats) {
         updateDiscordRpc(displayStats, settings.currency);
@@ -1514,7 +1652,7 @@ function sendPush(payload) {
 
 function flushPush() {
   pendingPushTimer = null;
-  const payload = pendingPush;
+  let payload = pendingPush;
   pendingPush = null;
   if (!payload) return;
   const previousHistoryRevision = pendingPushHistoryRevision;
@@ -1522,6 +1660,13 @@ function flushPush() {
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+    payload = {
+      ...payload,
+      data: {
+        ...payload.data,
+        snapshot: desktopSnapshotMeta()
+      }
+    };
     if (settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
       lastExportAt = Date.now();
       writeExportTo(settings.exportDir, payload.data.stats.periods, { skipUnchanged: true })
@@ -1615,8 +1760,14 @@ function sendStatus(connected, extra) {
 function stopLocalCollector(options = {}) {
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
-  localDevice = null;
-  localStats = null;
+  // Keep the last persisted local snapshot available while a new collector is
+  // starting. This makes a cold client-mode launch render before the first
+  // tokscale scan or Hub request completes.
+  const cached = ensureDesktopSnapshotCacheLoaded()?.local;
+  localDevice = cached?.device || null;
+  lastCollectedDevice = localDevice || lastCollectedDevice;
+  localStats = cached?.stats || null;
+  localStatsLive = false;
 }
 
 function startLocalCollector() {
@@ -1641,6 +1792,8 @@ function startLocalCollector() {
         withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]),
         localDevice
       );
+      localStatsLive = true;
+      cacheLocalSnapshot();
       updateDiscordRpc(localStats, settings.currency);
       sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } });
       updateSyncHealth('local', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null });
@@ -1770,6 +1923,8 @@ async function fetchHubStatsSnapshot(options = {}) {
     const stats = await response.json();
     if (!isCurrent()) return null;
     latestHubStats = stats;
+    latestHubStatsLive = true;
+    cacheHubSnapshot();
     updateSyncHealth('rest', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null, status: null });
     return injectLocalDeviceStatus(composeLocalSyncStats(stats, lastCollectedDevice));
   } catch (error) {
@@ -1833,7 +1988,13 @@ function scheduleRestFallbackPoll(generation = sseGeneration) {
 async function startStatsStream(options = {}) {
   stopStatsStream();
   const currentGeneration = sseGeneration;
-  if (options.resetSnapshot) latestHubStats = null;
+  if (options.resetSnapshot) {
+    // Reset the live marker while retaining the last Hub snapshot as an
+    // offline read model. A reconnect must not blank the dashboard.
+    ensureDesktopSnapshotCacheLoaded();
+    latestHubStats = desktopSnapshotCache?.hub?.stats || null;
+    latestHubStatsLive = false;
+  }
   if (options.resetBackoff || options.resetSnapshot) sseAttempt = 0;
   const config = safeEffectiveHubConfig();
   if (!config.ok) {
@@ -1929,6 +2090,8 @@ async function startStatsStream(options = {}) {
         }
         if (parsed.event === 'stats' && parsed.data?.stats) {
           latestHubStats = parsed.data.stats;
+          latestHubStatsLive = true;
+          cacheHubSnapshot();
           const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
           parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
           updateDiscordRpc(displayStats, settings.currency);
@@ -1974,7 +2137,10 @@ function focusExistingWindow() {
 function settingsForRenderer() {
   const safeSettings = stripLegacyLocalLimitSettings(settings);
   const redactedCredentials = credentialSettingsForRenderer(settings, {
-    expose: ['secret']
+    // The renderer only needs the configured boolean. A Hub secret is accepted
+    // through the one-shot validation/save IPC path and is never part of the
+    // settings snapshot or cache sent to the renderer.
+    expose: []
   });
   return {
     ...safeSettings,
@@ -2206,20 +2372,17 @@ async function fetchStats(options = {}) {
     });
   }
   if (mode === 'local') {
-    if (localStats) return localStats;
-    return withHistoryPreview(aggregateDevices(localDevice ? [localDevice] : [], 0), localDevice ? [localDevice] : []);
+    return localFallbackStats();
   }
   try {
     return await fetchHubStatsSnapshot();
   } catch (error) {
-    // The local collector remains useful while a client-mode Hub is blocked or
-    // offline. Keep the read-side failure in syncHealth; do not turn it into a
-    // second collection lifecycle or replace the local snapshot with zeros.
-    if (lastCollectedDevice) {
-      return withHistoryPreview(aggregateDevices([lastCollectedDevice], 0), [lastCollectedDevice]);
-    }
-    if (error?.code === 'hub_not_configured') return withHistoryPreview(aggregateDevices([], 0), []);
-    throw error;
+    // The local collector and the last successful Hub response remain useful
+    // while a client-mode Hub is blocked or offline. Keep the read-side failure
+    // in syncHealth, but never replace a usable snapshot with a blank/error
+    // page. The caller can still inspect sync health to explain the source.
+    void error;
+    return desktopStatsFallback();
   }
 }
 
@@ -2956,21 +3119,28 @@ async function getDashboardHistory() {
     // branch reads /api/history. Forcing a full collection tick here made the
     // fetch take seconds; on a quick close/reopen the response outlived the
     // renderer and was dropped, stranding the dashboard on its empty state.
-    return aggregateHistory(localDevice ? [localDevice] : []);
+    const history = aggregateHistory(localDevice ? [localDevice] : []);
+    if (localDevice) cacheLocalSnapshot({ history });
+    return history;
   }
+  ensureDesktopSnapshotCacheLoaded();
   const config = safeEffectiveHubConfig();
   if (!config.ok) {
     const error = new Error('Hub history transport is unavailable');
     error.code = config.error?.code || 'hub_history_transport_unavailable';
     updateSyncHealth('rest', { state: 'error', lastFailureAt: new Date().toISOString(), failureCode: error.code });
-    throw error;
+    return desktopSnapshotCache?.hub?.history
+      || desktopSnapshotCache?.local?.history
+      || aggregateHistory(lastCollectedDevice ? [lastCollectedDevice] : []);
   }
   const { url: hubUrl, secret } = config;
   if (!hubUrl) {
     const error = new Error('Hub history is not configured');
     error.code = 'hub_not_configured';
     updateSyncHealth('rest', { state: 'blocked', lastFailureAt: new Date().toISOString(), failureCode: error.code });
-    return aggregateHistory([]);
+    return desktopSnapshotCache?.hub?.history
+      || desktopSnapshotCache?.local?.history
+      || aggregateHistory(lastCollectedDevice ? [lastCollectedDevice] : []);
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/history`;
   try {
@@ -2984,6 +3154,7 @@ async function getDashboardHistory() {
       throw error;
     }
     const history = await response.json();
+    cacheHubSnapshot({ history });
     updateSyncHealth('rest', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null, status: null });
     return history;
   } catch (error) {
@@ -2993,7 +3164,12 @@ async function getDashboardHistory() {
       failureCode: stableSyncFailureCode(error, 'hub_history_failed'),
       status: Number.isInteger(Number(error?.status)) ? Number(error.status) : null
     });
-    throw error;
+    // History is an enhancement to the cached stats snapshot. Preserve the
+    // last full trend data when the Hub is unavailable, then fall back to the
+    // current local record if this is a first-ever connection.
+    return desktopSnapshotCache?.hub?.history
+      || desktopSnapshotCache?.local?.history
+      || aggregateHistory(lastCollectedDevice ? [lastCollectedDevice] : []);
   }
 }
 
@@ -3573,6 +3749,7 @@ app.whenReady().then(() => {
   ipcMain.handle('session:getDetail', (_event, args) => fetchSessionDetail(args));
   ipcMain.handle('sync:recover', () => recoverNow());
   ipcMain.handle('sync:health', () => syncHealthSnapshot());
+  ipcMain.handle('desktop:snapshot-meta', () => desktopSnapshotMeta());
   ipcMain.handle('stream:status', () => ({ connected: streamConnected, mode, health: syncHealthSnapshot(), ...(streamFailure || {}) }));
   ipcMain.handle('serviceStatus:get', (_event, options) => serviceStatusClient.getServiceStatus({
     force: Boolean(options?.force),

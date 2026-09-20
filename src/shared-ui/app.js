@@ -22,17 +22,20 @@ import {
   writeRoute
 } from './transport/index.js';
 import { applyI18n, resolveLocale, t } from './core/i18n.js';
-import { configureViewContext } from './core/viewContext.js';
+import { configureViewContext, VIEW_HELPER_NAMES } from './core/viewContext.js';
+import { syncHealthStateLabel } from './core/syncHealth.js';
 import { renderLimits } from './views/limits.js';
 import { renderHome } from './views/home.js';
-import { renderUsage } from './views/usage.js';
+import { renderUsage, renderTokenMix } from './views/usage.js';
 import { renderDevices } from './views/devices.js';
 import { renderAccountsPage } from './views/accounts.js';
 import { readDesktopSettingsPatch } from './views/settingsDesktop.js';
 import { renderSettingsPage } from './views/settings.js';
+import { usageMetricCard } from './views/rows.js';
 import {
   renderTrends,
   renderCompletenessNotice,
+  renderHistoryScopeNotice,
   historyHasBreakdown
 } from './views/trends.js';
 import {
@@ -208,6 +211,9 @@ const els = {
   primaryNav: document.getElementById('primaryNav'),
   streamStatus: document.getElementById('streamStatus'),
   streamStatusText: document.getElementById('streamStatusText'),
+  streamStatusDetail: document.getElementById('streamStatusDetail'),
+  desktopSyncStatus: document.getElementById('desktopSyncStatus'),
+  desktopSnapshotSource: document.getElementById('desktopSnapshotSource'),
   settingsOpen: document.getElementById('settingsOpen'),
   settingsOpenTop: document.getElementById('settingsOpenTop'),
   menuToggle: document.getElementById('menuToggle'),
@@ -347,17 +353,26 @@ const state = {
   // Desktop-only settings, loaded from the main process when the host has them.
   desktopSettings: null,
   desktopCatalog: null,
-  desktopInfo: null
+  desktopInfo: null,
+  desktopSyncHealth: null,
+  desktopSnapshotMeta: null
 };
+
+const EMPTY_STATS_MODEL = Object.freeze({
+  devices: [],
+  periods: {},
+  limits: { providers: [] },
+  historyPreview: { daily: [], summary: null }
+});
 
 function tr(key, params) {
   return t(state.locale, key, params);
 }
 
 function viewStats() {
-  const stats = state.stats;
+  const stats = state.stats || EMPTY_STATS_MODEL;
   const deviceId = String(state.prefs.deviceFilter || '').trim();
-  if (!stats || !deviceId) return stats;
+  if (!deviceId) return stats;
   const device = (stats.devices || []).find((entry) => String(entry?.deviceId || '') === deviceId);
   if (!device) return stats;
   return {
@@ -394,6 +409,40 @@ function formatDuration(milliseconds) {
   const days = Math.floor(hours / 24);
   const remainder = hours % 24;
   return remainder ? `${days}d ${remainder}h` : `${days}d`;
+}
+
+function renderDesktopSyncStatus() {
+  if (!els.desktopSyncStatus || !isCapable('desktopSettings')) return;
+  const health = state.desktopSyncHealth || {};
+  const channels = [
+    ['local', health.local],
+    ['upload', health.upload],
+    ['rest', health.rest],
+    ['stream', health.stream]
+  ];
+  for (const [channel, value] of channels) {
+    const row = els.desktopSyncStatus.querySelector(`[data-sync-channel="${channel}"]`);
+    if (!row) continue;
+    const stateValue = value?.state || 'unknown';
+    row.dataset.state = stateValue;
+    const stateNode = row.querySelector('[data-sync-state]');
+    if (stateNode) stateNode.textContent = syncHealthStateLabel(stateValue, tr);
+    const failure = value?.failureCode ? ` · ${value.failureCode}` : '';
+    row.title = `${syncHealthStateLabel(stateValue, tr)}${failure}`;
+  }
+  const source = String(state.desktopSnapshotMeta?.source || 'empty');
+  const sourceChannel = source.startsWith('local') ? 'settings.sync.healthLocal' : 'settings.sync.healthRest';
+  const sourceState = source.includes('cache') ? 'offline' : source === 'empty' ? 'unknown' : 'ok';
+  if (els.desktopSnapshotSource) {
+    els.desktopSnapshotSource.textContent = `${tr(sourceChannel)} · ${syncHealthStateLabel(sourceState, tr)}`;
+  }
+  if (els.streamStatusDetail) {
+    els.streamStatusDetail.textContent = source.includes('cache')
+      ? tr('settings.sync.healthState.offline')
+      : source === 'empty'
+        ? tr('settings.sync.healthState.unknown')
+        : tr('settings.sync.healthState.ok');
+  }
 }
 
 function showToast(message) {
@@ -450,6 +499,7 @@ function setStreamStatus(status, meta = {}) {
     ? `${tr('status.dataAsOf')} ${new Date(state.dataAsOf).toLocaleTimeString()}`
     : '';
   if (status === 'unauthorized') showAuth(true);
+  renderDesktopSyncStatus();
 }
 
 function applyTheme() {
@@ -534,7 +584,7 @@ function openSettings(open) {
     if (els.homeLimitAccountCount) {
       els.homeLimitAccountCount.value = String(clampHomeLimitAccountCount(state.prefs.homeLimitAccountCount, 3));
     }
-    els.settingsSecret.value = state.secret || '';
+    if (els.settingsSecret) els.settingsSecret.value = state.secret || '';
     els.languageSelect.focus({ preventScroll: true });
   } else if (wasOpen) {
     restoreOverlayFocus('settings');
@@ -1242,42 +1292,57 @@ function render() {
   const renderState = captureRenderState();
   if (state.prefs.view !== 'accounts') state.accountProviderMenuOpen = false;
   renderChrome();
-  if (state.loading && !state.stats) {
+  // A browser has to wait for its authorized Hub snapshot. The desktop host
+  // has an independent local collector/cache and must keep navigation and
+  // settings usable while a remote request is timing out.
+  const desktopHost = isCapable('desktopSettings');
+  if (state.loading && !state.stats && !desktopHost) {
     els.content.innerHTML = loadingHtml();
     restoreRenderState(renderState);
     return;
   }
-  if (state.error && !state.stats) {
+  if (state.error && !state.stats && !desktopHost) {
     els.content.innerHTML = `<section class="error-card"><div class="error-kicker">Token Monitor</div><h2>${escapeHtml(tr('error.title'))}</h2><p>${escapeHtml(state.error.message || tr('error.generic'))}</p><button type="button" class="primary-btn" data-retry-dashboard>${tr('actions.retry')}</button></section>`;
     restoreRenderState(renderState);
     return;
   }
-  renderHero();
   let html;
-  switch (state.prefs.view) {
-    case 'usage':
-      html = renderUsage();
-      break;
-    case 'devices':
-      html = renderDevices();
-      break;
-    case 'limits':
-      html = renderLimits();
-      break;
-    case 'accounts':
-      html = renderAccountsPage();
-      break;
-    case 'trends':
-      html = renderTrends();
-      break;
-    case 'management':
-      html = renderManagement();
-      break;
-    case 'settings':
-      html = renderSettingsPage();
-      break;
-    default:
-      html = renderHome();
+  try {
+    // Keep the hero update before the view render: it is useful to show the
+    // latest aggregate even when a secondary view has a local rendering bug.
+    renderHero();
+    switch (state.prefs.view) {
+      case 'usage':
+        html = renderUsage();
+        break;
+      case 'devices':
+        html = renderDevices();
+        break;
+      case 'limits':
+        html = renderLimits();
+        break;
+      case 'accounts':
+        html = renderAccountsPage();
+        break;
+      case 'trends':
+        html = renderTrends();
+        break;
+      case 'management':
+        html = renderManagement();
+        break;
+      case 'settings':
+        html = renderSettingsPage();
+        break;
+      default:
+        html = renderHome();
+    }
+  } catch (error) {
+    // A view exception used to leave the previous loading skeleton in place,
+    // which made a valid stats response look like a dead Hub. Keep the
+    // diagnostic in the console without exposing internal details or secrets
+    // in the page, and give the user a retry path.
+    console.error('[token-monitor] view render failed', error);
+    html = `<section class="error-card" role="alert"><div class="error-kicker">Token Monitor</div><h2>${escapeHtml(tr('error.title'))}</h2><p>${escapeHtml(tr('error.generic'))}</p><button type="button" class="primary-btn" data-retry-dashboard>${tr('actions.retry')}</button></section>`;
   }
   els.content.innerHTML = html;
   restoreRenderState(renderState);
@@ -1305,7 +1370,7 @@ async function ensureHistory({ force = false } = {}) {
   return state.historyRequest;
 }
 
-function applyStatsSnapshot(stats) {
+function applyStatsSnapshot(stats, meta = null) {
   if (!stats || typeof stats !== 'object') return;
   const previous = state.stats;
   const historyChanged = Boolean(previous)
@@ -1314,6 +1379,8 @@ function applyStatsSnapshot(stats) {
   const subscriptionsChanged = Boolean(previous)
     && previous.subscriptionsUpdatedAt !== stats.subscriptionsUpdatedAt;
   state.stats = stats;
+  if (meta?.snapshot) state.desktopSnapshotMeta = meta.snapshot;
+  else if (meta && isCapable('desktopSettings')) state.desktopSnapshotMeta = meta;
   state.loading = false;
   state.error = null;
   if (historyChanged) {
@@ -1331,7 +1398,11 @@ function applyStatsSnapshot(stats) {
 async function refreshStats() {
   state.error = null;
   const stats = await fetchJson('/api/stats', { secret: state.secret });
-  applyStatsSnapshot(stats);
+  let meta = null;
+  if (isCapable('desktopSettings')) {
+    try { meta = await getTransport().desktop?.getSnapshotMeta?.(); } catch (_) {}
+  }
+  applyStatsSnapshot(stats, meta);
   return stats;
 }
 
@@ -1345,7 +1416,13 @@ function connectStream() {
     onStatus: setStreamStatus,
     onStats: (stats, _event, meta) => {
       if (meta?.lastEventAt) state.dataAsOf = meta.lastEventAt;
-      applyStatsSnapshot(stats);
+      applyStatsSnapshot(stats, meta);
+    },
+    onHealth: (health) => {
+      if (!isCapable('desktopSettings')) return;
+      if (health?.snapshot) state.desktopSnapshotMeta = health.snapshot;
+      state.desktopSyncHealth = health;
+      renderDesktopSyncStatus();
     },
     onRetry: (delay) => {
       if (state.stream !== 'live') setStreamStatus('retrying');
@@ -1729,14 +1806,19 @@ async function bootstrapAuthorized() {
   render();
   await refreshStats();
   const capabilities = state.authorization?.capabilities || state.health?.capabilities || {};
-  await Promise.all([
+  // The stats snapshot is the required boot dependency. Establish the stream
+  // and paint the core dashboard immediately; history and management data are
+  // useful enhancements and must not keep a healthy snapshot behind a spinner.
+  connectStream();
+  render();
+  void Promise.allSettled([
     ensureHistory(),
     capabilities.subscriptions === false ? null : loadSubscriptions(),
     capabilities.pricing === false ? null : loadPricing(),
     capabilities.hubAccounts === false ? null : loadAccounts()
-  ]);
-  connectStream();
-  render();
+  ]).then(() => {
+    if (state.stats) render();
+  });
 }
 
 async function tryConnect(secret, remember = true, { persist = false } = {}) {
@@ -1760,7 +1842,7 @@ async function tryConnect(secret, remember = true, { persist = false } = {}) {
     }
     if (desktopOwnsSecret) {
       els.secretInput.value = '';
-      els.settingsSecret.value = '';
+      if (els.settingsSecret) els.settingsSecret.value = '';
     }
     els.authError.classList.add('hidden');
     await bootstrapAuthorized();
@@ -2202,7 +2284,7 @@ function bindEvents() {
     // Desktop-only settings actions (folder picker, export, update check).
     const desktopAction = event.target.closest('[data-desktop-action]');
     if (desktopAction) {
-      void runDesktopAction(desktopAction.dataset.desktopAction);
+      void runDesktopAction(desktopAction.dataset.desktopAction, desktopAction);
       return;
     }
     const usageTab = event.target.closest('[data-usage-tab]');
@@ -2736,7 +2818,7 @@ function bindEvents() {
       refreshPwaUi();
     });
   }
-  els.saveSettingsBtn.addEventListener('click', async () => {
+  els.saveSettingsBtn?.addEventListener('click', async () => {
     state.prefs.language = els.languageSelect.value;
     state.prefs.theme = els.themeSelect.value;
     state.prefs.currency = els.currencySelect.value;
@@ -2750,7 +2832,7 @@ function bindEvents() {
       currency: state.prefs.currency,
       homeLimitAccountCount: state.prefs.homeLimitAccountCount
     });
-    const nextSecret = els.settingsSecret.value.trim();
+    const nextSecret = els.settingsSecret?.value.trim() || '';
     const secretChanged = nextSecret !== state.secret;
     applyTheme();
     applyLocale();
@@ -2761,7 +2843,7 @@ function bindEvents() {
     openSettings(false);
     showToast(tr('toast.saved'));
   });
-  els.signOutBtn.addEventListener('click', () => {
+  els.signOutBtn?.addEventListener('click', () => {
     openSettings(false);
     signOutFromHub();
   });
@@ -2783,20 +2865,27 @@ async function loadDesktopSettings() {
   const desktop = getTransport().desktop;
   if (!desktop) return;
   try {
-    const [settings, catalog, info] = await Promise.all([
+    const [settings, catalog, info, syncHealth, snapshotMeta] = await Promise.all([
       desktop.getSettings(),
       desktop.getCatalog ? desktop.getCatalog() : Promise.resolve({}),
-      desktop.getAppInfo ? desktop.getAppInfo() : Promise.resolve({})
+      desktop.getAppInfo ? desktop.getAppInfo() : Promise.resolve({}),
+      desktop.getSyncHealth ? desktop.getSyncHealth() : Promise.resolve(null),
+      desktop.getSnapshotMeta ? desktop.getSnapshotMeta() : Promise.resolve(null)
     ]);
     state.desktopSettings = settings || {};
     state.desktopCatalog = catalog || {};
     state.desktopInfo = info || {};
+    state.desktopSyncHealth = syncHealth || null;
+    state.desktopSnapshotMeta = snapshotMeta || syncHealth?.snapshot || null;
+    renderDesktopSyncStatus();
   } catch (error) {
     // A settings read failure must not blank the whole dashboard; the section
     // simply renders with defaults until the next successful read.
     state.desktopSettings = {};
     state.desktopCatalog = {};
     state.desktopInfo = {};
+    state.desktopSyncHealth = null;
+    state.desktopSnapshotMeta = null;
     console.warn('Could not load desktop settings:', error?.message || error);
   }
 }
@@ -2855,6 +2944,19 @@ async function runDesktopAction(action, element) {
         showToast(result?.ok === false ? tr('error.generic') : tr('toast.saved'));
         break;
       }
+      case 'save-hub-secret': {
+        const input = element?.closest('[data-desktop-settings]')?.querySelector('[data-hub-secret-input]');
+        await saveDesktopSettings({ secret: String(input?.value || '').trim() });
+        if (input) input.value = '';
+        render();
+        showToast(tr('toast.saved'));
+        break;
+      }
+      case 'clear-hub-secret':
+        await saveDesktopSettings({ secret: '' });
+        render();
+        showToast(tr('toast.saved'));
+        break;
       default:
         break;
     }
@@ -2889,8 +2991,15 @@ async function init() {
     uiIcon,
     toolRows,
     shareBarHtml,
-      rowHtml
-  });
+    rowHtml,
+    loadingHtml,
+    managementError,
+    pwaStatusText,
+    renderCompletenessNotice,
+    renderHistoryScopeNotice,
+    renderTokenMix,
+    usageMetricCard
+  }, { requiredHelpers: VIEW_HELPER_NAMES });
   const loadedPrefs = await loadPrefs();
   if (loadedPrefs && typeof loadedPrefs === 'object') {
     Object.assign(state.prefs, loadedPrefs);
@@ -2912,7 +3021,19 @@ async function init() {
   applyTheme();
   applyLocale();
   bindEvents();
+  if (isCapable('desktopSettings')) {
+    const desktop = getTransport().desktop;
+    desktop?.onSettingsPush?.((next) => {
+      state.desktopSettings = next || {};
+      render();
+    });
+    desktop?.onOpenSettings?.(() => switchView('settings'));
+    desktop?.onOpenView?.((view) => switchView(normalizeViewId(view)));
+  }
   renderChrome();
+  // Paint the shell before any remote request. On desktop this is what keeps
+  // Settings and local navigation available during a Hub timeout.
+  render();
 
   if (isCapable('pwa') && 'serviceWorker' in navigator && window.isSecureContext) {
     try {

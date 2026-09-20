@@ -59,6 +59,7 @@ test('hidden snapshots avoid DOM work and restore only the latest state', () => 
     document: { hidden: true, addEventListener: (_, callback) => { onVisibility = callback; } },
     state: { prefs: { view: 'overview' }, stats: { value: 0 } },
     els: { content }, captureRenderState: () => ({}), restoreRenderState() {},
+    isCapable: () => false,
     renderChrome() {}, renderHero() {},
     renderHome: () => String(context.state.stats.value)
   };

@@ -78,6 +78,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   getStreamStatus: () => ipcRenderer.invoke('stream:status'),
   recoverNow: () => ipcRenderer.invoke('sync:recover'),
   getSyncHealth: () => ipcRenderer.invoke('sync:health'),
+  getSnapshotMeta: () => ipcRenderer.invoke('desktop:snapshot-meta'),
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
   // The standalone trends window is gone; the trends view renders in the main
   // window. History is fetched through the transport's /api/history route.

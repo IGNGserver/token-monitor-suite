@@ -235,6 +235,18 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
       <label class="mode-toggle"><input type="radio" name="hubMode" value="client"${settings.hubMode === 'client' ? ' checked' : ''} /><span>${escapeHtml(tr('desktop.settings.hubClient'))}</span></label>
     </div>`);
   hubRows.push(textField('hubUrl', 'desktop.settings.hubUrl', settings.hubUrl || '', { placeholder: 'http://hub-host:17321' }));
+  hubRows.push(`<div class="desktop-setting-block desktop-hub-secret" data-hub-secret>
+    <label class="field"><span>${escapeHtml(tr('settings.secret'))}</span>
+      <input type="password" data-hub-secret-input autocomplete="new-password" spellcheck="false" placeholder="${escapeHtml(settings.hubAdminConfigured ? tr('desktop.settings.hubSecretConfigured') : tr('desktop.settings.hubSecretMissing'))}" />
+    </label>
+    <div class="desktop-setting-row">
+      <span class="row-sub">${escapeHtml(tr('desktop.settings.hubSecretHint'))}</span>
+      <span class="drawer-actions">
+        <button type="button" class="ghost-btn" data-desktop-action="save-hub-secret">${escapeHtml(tr('desktop.settings.saveHubSecret'))}</button>
+        ${settings.hubAdminConfigured ? `<button type="button" class="ghost-btn" data-desktop-action="clear-hub-secret">${escapeHtml(tr('desktop.settings.clearHubSecret'))}</button>` : ''}
+      </span>
+    </div>
+  </div>`);
   hubRows.push(selectField('syncUploadIntervalMs', 'desktop.settings.syncUploadInterval',
     (catalog.syncUploadIntervals || []).map((ms) => [String(ms), ms === 0 ? tr('desktop.settings.syncLive') : `${Math.round(ms / 60000)} min`]),
     String(settings.syncUploadIntervalMs ?? 600000)));

@@ -90,6 +90,8 @@ test('hub web app wires status, heatmap, and active-days controls', () => {
   assert.match(app, /captureRenderState\(/);
   assert.match(app, /restoreRenderState\(/);
   assert.match(app, /new AbortController\(/);
+  assert.match(app, /view render failed/);
+  assert.match(app, /Promise\.allSettled\(/);
 });
 
 test('hub web navigation exposes the new page model and compatibility routes', () => {

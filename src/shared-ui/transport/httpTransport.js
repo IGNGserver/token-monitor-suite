@@ -14,12 +14,58 @@ const STORAGE_PREFS = 'token-monitor.hub.prefs';
 // watchdog plus a request deadline; mirror that here.
 const SSE_IDLE_TIMEOUT_MS = 90_000;
 const SSE_CONNECT_TIMEOUT_MS = 15_000;
+const HTTP_REQUEST_TIMEOUT_MS = 15_000;
 
 function authHeaders(secret, extra = {}) {
   const headers = { ...extra };
   const value = String(secret || '').trim();
   if (value) headers.authorization = `Bearer ${value}`;
   return headers;
+}
+
+function createRequestSignal(parentSignal, timeoutMs = HTTP_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  let timedOut = false;
+  let timer = null;
+
+  const abortFromParent = () => {
+    try {
+      controller.abort(parentSignal?.reason);
+    } catch {
+      controller.abort();
+    }
+  };
+
+  if (parentSignal?.aborted) abortFromParent();
+  else parentSignal?.addEventListener('abort', abortFromParent, { once: true });
+
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      const reason = new Error('request timed out');
+      reason.code = 'request_timeout';
+      try {
+        controller.abort(reason);
+      } catch {
+        controller.abort();
+      }
+    }, timeoutMs);
+  }
+
+  return {
+    signal: controller.signal,
+    didTimeout: () => timedOut,
+    dispose() {
+      if (timer !== null) clearTimeout(timer);
+      parentSignal?.removeEventListener('abort', abortFromParent);
+    }
+  };
+}
+
+function timeoutError() {
+  const error = new Error('request timed out');
+  error.code = 'request_timeout';
+  return error;
 }
 
 function createPrefsStore(storage) {
@@ -98,36 +144,52 @@ export function createHttpTransport(options = {}) {
     return `${baseUrl}${target}`;
   }
 
-  async function request(path, { secret, method = 'GET', body, signal } = {}) {
-    const res = await fetch(resolveUrl(path), {
-      method,
-      signal,
-      cache: 'no-store',
-      headers: authHeaders(secret !== undefined ? secret : getSecret(), body ? { 'content-type': 'application/json' } : {}),
-      body: body ? JSON.stringify(body) : undefined
-    });
-    if (res.status === 401) {
-      const error = new Error('unauthorized');
-      error.status = 401;
+  async function request(path, { secret, method = 'GET', body, signal, timeoutMs = HTTP_REQUEST_TIMEOUT_MS } = {}) {
+    const requestSignal = createRequestSignal(signal, timeoutMs);
+    try {
+      const res = await fetch(resolveUrl(path), {
+        method,
+        signal: requestSignal.signal,
+        cache: 'no-store',
+        headers: authHeaders(secret !== undefined ? secret : getSecret(), body ? { 'content-type': 'application/json' } : {}),
+        body: body ? JSON.stringify(body) : undefined
+      });
+      if (res.status === 401) {
+        const error = new Error('unauthorized');
+        error.status = 401;
+        throw error;
+      }
+      if (!res.ok) {
+        let payload = null;
+        try { payload = await res.json(); } catch { /* ignore */ }
+        const detail = payload?.message || payload?.error || '';
+        const error = new Error(detail || `http_${res.status}`);
+        error.status = res.status;
+        error.payload = payload;
+        throw error;
+      }
+      if (res.status === 204) return null;
+      return await res.json();
+    } catch (error) {
+      if (requestSignal.didTimeout()) throw timeoutError();
       throw error;
+    } finally {
+      requestSignal.dispose();
     }
-    if (!res.ok) {
-      let payload = null;
-      try { payload = await res.json(); } catch { /* ignore */ }
-      const detail = payload?.message || payload?.error || '';
-      const error = new Error(detail || `http_${res.status}`);
-      error.status = res.status;
-      error.payload = payload;
-      throw error;
-    }
-    if (res.status === 204) return null;
-    return res.json();
   }
 
   async function health() {
-    const res = await fetch(resolveUrl('/api/health'), { cache: 'no-store' });
-    if (!res.ok) throw new Error(`health_${res.status}`);
-    return res.json();
+    const requestSignal = createRequestSignal(undefined, HTTP_REQUEST_TIMEOUT_MS);
+    try {
+      const res = await fetch(resolveUrl('/api/health'), { cache: 'no-store', signal: requestSignal.signal });
+      if (!res.ok) throw new Error(`health_${res.status}`);
+      return await res.json();
+    } catch (error) {
+      if (requestSignal.didTimeout()) throw timeoutError();
+      throw error;
+    } finally {
+      requestSignal.dispose();
+    }
   }
 
   function openStream({ secret, onStats, onStatus, onRetry } = {}) {

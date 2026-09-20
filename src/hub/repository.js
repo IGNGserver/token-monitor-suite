@@ -170,11 +170,14 @@ function addTokenCost(mapTokens, mapCosts, key, tokens, cost) {
 
 function createRepository(pool) {
   async function listDeviceRecords(executor = pool) {
+    // Do not sort the JSON snapshots in MySQL. With a large snapshot, sorting
+    // the selected JSON values can exceed MySQL's sort_buffer_size even when
+    // the device table itself is small. Consumers that need stable output sort
+    // the normalized records in JavaScript.
     const [rows] = await executor.query(`SELECT state.snapshot_json
       FROM device_ingest_state state
       INNER JOIN devices device ON device.device_id = state.device_id
-      WHERE device.deleted_at IS NULL
-      ORDER BY state.device_id`);
+      WHERE device.deleted_at IS NULL`);
     return rows.map((row) => parseJson(row.snapshot_json, {}));
   }
 

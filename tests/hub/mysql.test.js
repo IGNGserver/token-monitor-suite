@@ -107,6 +107,19 @@ test('transaction retries on transient connection lost errors', async () => {
   assert.equal(attempts, 2);
 });
 
+test('device snapshot listing does not sort JSON payloads in MySQL', async () => {
+  let query = '';
+  const fakePool = {
+    async query(sql) {
+      query = sql;
+      return [[{ snapshot_json: '{"deviceId":"device-1"}' }], []];
+    }
+  };
+  const repository = createRepository(fakePool);
+  assert.deepEqual(await repository.listDeviceRecords(), [{ deviceId: 'device-1' }]);
+  assert.doesNotMatch(query, /ORDER BY/i);
+});
+
 test('batched session replacement binds every session counter column', async () => {
   const calls = [];
   const fakePool = {

@@ -31,8 +31,7 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
-      - name: Verify product scope
-        run: npm run verify:product-scope
-      - run: npm run lint
-      - run: npm test
-
+      # Keep CI on the same gate developers use locally: this includes the
+      # product-scope, shared-UI boundary and renderer CSS guards in addition
+      # to lint and the Node test suite.
+      - run: npm run verify

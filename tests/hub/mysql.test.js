@@ -106,3 +106,33 @@ test('transaction retries on transient connection lost errors', async () => {
   assert.equal(result, 'ok');
   assert.equal(attempts, 2);
 });
+
+test('batched session replacement binds every session counter column', async () => {
+  const calls = [];
+  const fakePool = {
+    async execute(sql, values) {
+      calls.push({ sql, values });
+      return [[], {}];
+    }
+  };
+  const repository = createRepository(fakePool);
+  await repository.replaceSessions('device-1', [{
+    client: 'codex',
+    sessionId: 'session-1',
+    totalTokens: 21,
+    inputTokens: 5,
+    outputTokens: 6,
+    cacheReadTokens: 7,
+    cacheWriteTokens: 2,
+    reasoningTokens: 1,
+    messageCount: 3,
+    costUsd: 0.5,
+    startedAt: '2026-09-20T00:00:00.000Z',
+    lastUsedAt: '2026-09-20T00:01:00.000Z',
+    models: { 'gpt-5': 21 }
+  }]);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].values.length, 14);
+  assert.equal(calls[1].values[7], 2);
+  assert.equal(calls[1].values[8], 1);
+});

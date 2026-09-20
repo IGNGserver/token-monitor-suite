@@ -19,6 +19,20 @@ const sharedDir = path.join(__dirname, '..', '..', 'src', 'shared-ui');
 
 const read = (file) => fs.readFileSync(file, 'utf8');
 
+test('all local shell imports, stylesheets and icon bases resolve on disk', () => {
+  const html = read(path.join(rendererDir, 'index.html'));
+  const boot = read(path.join(rendererDir, 'boot.js'));
+  const targets = [
+    ...[...html.matchAll(/(?:src|href)="(\.[^"]+)"/g)].map(match => match[1]),
+    ...[...boot.matchAll(/(?:from\s+|import\()['"](\.[^'"]+)['"]/g)].map(match => match[1]),
+    ...[...boot.matchAll(/configureIconBase\(['"]([^'"]+)['"]\)/g)].map(match => match[1])
+  ];
+  assert.ok(targets.length >= 6);
+  for (const target of targets) {
+    assert.ok(fs.existsSync(path.resolve(rendererDir, target)), `unreachable desktop resource: ${target}`);
+  }
+});
+
 test('the renderer shell loads the shared stylesheet and its own boot module', () => {
   const html = read(path.join(rendererDir, 'index.html'));
   assert.match(html, /shared-ui\/styles\/app\.css/, 'the shared stylesheet must be the base');
@@ -48,15 +62,15 @@ test('the boot module installs the transport before importing the shared UI', ()
   assert.match(boot, /await import\(/, 'the shared app must be imported dynamically');
   assert.doesNotMatch(boot, /^import ['"].*shared-ui\/app\.js/m, 'a static app import would break transport ordering');
   const configureIndex = boot.indexOf('configureTransport(');
-  const importIndex = boot.indexOf("await import('../shared-ui/app.js')");
+  const importIndex = boot.indexOf("await import('../../shared-ui/app.js')");
   assert.ok(configureIndex >= 0, 'the boot module must configure a transport');
   assert.ok(importIndex > configureIndex, 'the transport must be configured before the app loads');
 });
 
-test('the boot module points client icons at the packaged asset tree', () => {
+test('the boot module points client icons at the shared UI asset tree', () => {
   const boot = read(path.join(rendererDir, 'boot.js'));
   assert.match(boot, /configureIconBase\(/, 'the desktop icon base must be injected');
-  assert.match(boot, /assets\/icons/, 'icons resolve from the packaged assets directory');
+  assert.match(boot, /shared-ui\/icons\/clients/, 'icons resolve from the shared UI assets directory');
 });
 
 test('the desktop transport keeps hash routing and drops PWA surfaces', () => {
@@ -66,9 +80,17 @@ test('the desktop transport keeps hash routing and drops PWA surfaces', () => {
   assert.match(transport, /__configured__/, 'the renderer must never receive the raw secret');
 });
 
+test('desktop secret input is not retained in shared renderer state', () => {
+  const app = read(path.join(sharedDir, 'app.js'));
+  assert.match(app, /const desktopOwnsSecret = isCapable\('desktopSettings'\)/);
+  assert.match(app, /state\.secret = desktopOwnsSecret \? '' : candidateSecret/);
+  assert.match(app, /testSecret\(candidateSecret\)/, 'new desktop credentials must be validated through the main process');
+  assert.match(app, /els\.settingsSecret\.value = ''/);
+});
+
 test('the preload bridge exposes the transport contract the shared UI requires', () => {
   const preload = read(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'));
-  for (const member of ['request:', 'getCapabilities:', 'hasSecret:', 'prefsFromSettings', 'prefsToSettingsPatch', 'confirm:', 'onStatsPush:']) {
+  for (const member of ['request:', 'validateSecret:', 'getCapabilities:', 'hasSecret:', 'prefsFromSettings', 'prefsToSettingsPatch', 'confirm:', 'onStatsPush:']) {
     assert.ok(preload.includes(member), `preload must expose ${member}`);
   }
   // The prefs mapping is what lets one shared preference model survive in both

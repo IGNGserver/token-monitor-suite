@@ -13,7 +13,6 @@
  * No app settings / hard-coded proxy addresses — env only (CLI/systemd/shell).
  */
 
-const { EnvHttpProxyAgent, fetch: undiciFetch } = require('undici');
 
 function cleanProxyUrl(value) {
   if (typeof value !== 'string') return '';
@@ -85,8 +84,10 @@ function createOutboundFetch(env = process.env, deps = {}) {
   const proxyConfig = resolveProxyConfig(env);
   if (!proxyConfig.httpProxy && !proxyConfig.httpsProxy) return globalFetch();
 
-  const EnvHttpProxyAgentCtor = deps.EnvHttpProxyAgent || EnvHttpProxyAgent;
-  const fetchFn = deps.undiciFetch || undiciFetch;
+  // Direct requests use the runtime fetch; load the external HTTP stack only
+  // when a proxy actually needs its dispatcher.
+  const EnvHttpProxyAgentCtor = deps.EnvHttpProxyAgent || require('undici').EnvHttpProxyAgent;
+  const fetchFn = deps.undiciFetch || require('undici').fetch;
   // A configured-but-invalid proxy must fail closed. Silently falling back to
   // a direct request would violate operator intent and obscure configuration
   // errors on networks where direct access is forbidden.

@@ -11,9 +11,10 @@
 //     channel, which already carries reconnect/backoff/idle-watchdog handling
 //     for both local collection and SSE.
 //
-// Credentials never reach the renderer: `secret.load()` reports only whether a
-// Hub is configured, so the shared UI can label the connection state without
-// ever holding the value.
+// The persisted credential never reaches the renderer: `secret.load()` reports
+// only whether a Hub is configured. A newly entered value may cross the explicit
+// one-shot validation bridge below, but normal data requests cannot override the
+// main process's credential.
 
 function createIpcTransport(bridge) {
   if (!bridge || typeof bridge.request !== 'function') {
@@ -103,10 +104,18 @@ function createIpcTransport(bridge) {
       }
     },
     secret: {
-      load() {
+      async test(secret) {
+        if (typeof bridge.validateSecret !== 'function') {
+          throw new Error('Desktop secret validation is unavailable');
+        }
+        const result = await bridge.validateSecret(String(secret || ''));
+        if (!result?.ok) throw toError(result?.error);
+        return result.data;
+      },
+      async load() {
         // Never expose the secret itself; the UI only needs to know whether a
         // Hub connection is configured.
-        return bridge.hasSecret() ? '__configured__' : '';
+        return (await bridge.hasSecret()) ? '__configured__' : '';
       },
       async save(secret, remember) {
         // "Remember" is meaningless on the desktop: the credential store always
@@ -117,8 +126,8 @@ function createIpcTransport(bridge) {
       async clear() {
         await bridge.updateSettings({ secret: '' });
       },
-      isRemembered() {
-        return bridge.hasSecret();
+      async isRemembered() {
+        return Boolean(await bridge.hasSecret());
       }
     },
     flags: {

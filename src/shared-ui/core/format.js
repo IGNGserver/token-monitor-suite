@@ -63,13 +63,41 @@ export function formatCost(value, currency = 'USD') {
   return `${entry.symbol}${amount.toFixed(digits)}`;
 }
 
+// ICU formatter construction is expensive in per-row renders. Bound the cache
+// even when a caller supplies locales outside the UI's finite language list.
+const relativeFormatters = new Map();
+function relativeFormatter(locale) {
+  let formatter = relativeFormatters.get(locale);
+  if (!formatter) {
+    formatter = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+    if (relativeFormatters.size >= 16) relativeFormatters.clear();
+    relativeFormatters.set(locale, formatter);
+  }
+  return formatter;
+}
+
+// Share within a render turn only: a new turn must observe OS timezone changes.
+const resetFormatters = new Map();
+function resetFormatter(locale) {
+  let formatter = resetFormatters.get(locale);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(locale, {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+    if (resetFormatters.size === 0) queueMicrotask(() => resetFormatters.clear());
+    if (resetFormatters.size >= 16) resetFormatters.clear();
+    resetFormatters.set(locale, formatter);
+  }
+  return formatter;
+}
+
 export function formatRelative(iso, locale = 'en') {
   if (!iso) return '—';
   const ts = Date.parse(iso);
   if (!Number.isFinite(ts)) return '—';
   const delta = Date.now() - ts;
   const abs = Math.abs(delta);
-  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+  const rtf = relativeFormatter(locale);
   if (abs < 60_000) return rtf.format(-Math.round(delta / 1000), 'second');
   if (abs < 3_600_000) return rtf.format(-Math.round(delta / 60_000), 'minute');
   if (abs < 86_400_000) return rtf.format(-Math.round(delta / 3_600_000), 'hour');
@@ -80,12 +108,7 @@ export function formatReset(iso, locale = 'en') {
   if (!iso) return '';
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString(locale, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+  return resetFormatter(locale).format(date);
 }
 
 export function toDatetimeLocalValue(date = new Date()) {

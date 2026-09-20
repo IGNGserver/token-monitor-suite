@@ -67,6 +67,16 @@ function bestOf(runs, fn) {
   return best;
 }
 
+function bestAverage(runs, iterations, fn) {
+  let best = Infinity;
+  for (let index = 0; index < runs; index += 1) {
+    const startedAt = performance.now();
+    for (let iteration = 0; iteration < iterations; iteration += 1) fn();
+    best = Math.min(best, (performance.now() - startedAt) / iterations);
+  }
+  return best;
+}
+
 test('a normalized archive is not re-normalized on later passes', () => {
   const raw = buildArchive(200);
   const normalized = normalizeSessionUsageArchive(raw);
@@ -113,8 +123,11 @@ test('applying a large archive scales sub-quadratically', () => {
   applySessionUsageArchive(emptySummary(), small, { now: NOW });
   applySessionUsageArchive(emptySummary(), large, { now: NOW });
 
-  const smallMs = Math.max(1, bestOf(3, () => applySessionUsageArchive(emptySummary(), small, { now: NOW })));
-  const largeMs = bestOf(3, () => applySessionUsageArchive(emptySummary(), large, { now: NOW }));
+  // A single 500-session pass is close to the timer/JIT noise floor when the
+  // complete suite is busy. Batch the samples so the ratio compares work,
+  // rather than a sub-millisecond timing artifact.
+  const smallMs = Math.max(1, bestAverage(5, 8, () => applySessionUsageArchive(emptySummary(), small, { now: NOW })));
+  const largeMs = bestAverage(5, 8, () => applySessionUsageArchive(emptySummary(), large, { now: NOW }));
   const ratio = largeMs / smallMs;
   assert.ok(
     ratio < 8,

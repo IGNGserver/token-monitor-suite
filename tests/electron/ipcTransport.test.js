@@ -25,6 +25,7 @@ function bridge(overrides = {}) {
       return patch;
     },
     hasSecret: () => false,
+    validateSecret: async () => ({ ok: true, data: { scopes: ['read'] } }),
     readFlag: () => null,
     writeFlag: () => true,
     openExternal: async () => ({ ok: true }),
@@ -62,14 +63,14 @@ test('a failed request rejects with status and payload preserved', async () => {
 });
 
 test('the secret is never exposed to the renderer', async () => {
-  const configured = createIpcTransport(bridge({ hasSecret: () => true }));
-  const sentinel = configured.secret.load();
+  const configured = createIpcTransport(bridge({ hasSecret: async () => true }));
+  const sentinel = await configured.secret.load();
   assert.equal(sentinel, '__configured__');
-  assert.equal(configured.secret.isRemembered(), true);
+  assert.equal(await configured.secret.isRemembered(), true);
 
-  const empty = createIpcTransport(bridge({ hasSecret: () => false }));
-  assert.equal(empty.secret.load(), '');
-  assert.equal(empty.secret.isRemembered(), false);
+  const empty = createIpcTransport(bridge({ hasSecret: async () => false }));
+  assert.equal(await empty.secret.load(), '');
+  assert.equal(await empty.secret.isRemembered(), false);
 });
 
 test('saving a secret writes through settings rather than a browser store', async () => {
@@ -78,6 +79,31 @@ test('saving a secret writes through settings rather than a browser store', asyn
   await transport.secret.save('s3cret', true);
   const write = b.calls.find((c) => c.update);
   assert.deepEqual(write.update, { secret: 's3cret' });
+});
+
+test('new secrets use a dedicated validation bridge while normal requests stay secret-free', async () => {
+  let validatedSecret = '';
+  const b = bridge({
+    validateSecret: async (secret) => {
+      validatedSecret = secret;
+      return { ok: true, data: { accepted: secret } };
+    }
+  });
+  const transport = createIpcTransport(b);
+  assert.deepEqual(await transport.secret.test('s3cret'), { accepted: 's3cret' });
+  assert.equal(validatedSecret, 's3cret');
+  await transport.request('/api/stats', { secret: 's3cret' });
+  assert.equal(b.calls.at(-1).options.secret, undefined, 'normal IPC requests must not carry the secret');
+});
+
+test('dedicated secret validation preserves Hub auth errors', async () => {
+  const transport = createIpcTransport(bridge({
+    validateSecret: async () => ({ ok: false, error: { status: 401, code: 'unauthorized', message: 'bad secret' } })
+  }));
+  await assert.rejects(
+    () => transport.secret.test('wrong'),
+    (error) => error.status === 401 && error.code === 'unauthorized'
+  );
 });
 
 test('health degrades to a harmless shape when the probe fails', async () => {

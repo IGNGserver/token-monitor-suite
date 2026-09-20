@@ -87,6 +87,12 @@ export function saveSecret(secret, remember) {
   return getTransport().secret.save(secret, remember);
 }
 
+export function testSecret(secret) {
+  const store = getTransport().secret;
+  if (typeof store.test !== 'function') throw new Error('Secret validation is unavailable');
+  return store.test(secret);
+}
+
 export function clearSecret() {
   return getTransport().secret.clear();
 }

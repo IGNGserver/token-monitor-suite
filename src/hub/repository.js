@@ -183,6 +183,17 @@ function createRepository(pool) {
     return rows.length ? parseJson(rows[0].snapshot_json, null) : null;
   }
 
+  // The ingest baseline and the device row are updated in the same transaction.
+  // Locking the row before reading the baseline serializes cumulative deltas for
+  // one device while leaving different devices fully concurrent.
+  async function lockDevice(deviceId, executor = pool) {
+    const [rows] = await executor.execute(
+      'SELECT device_id FROM devices WHERE device_id = ? FOR UPDATE',
+      [String(deviceId || '')]
+    );
+    return rows.length > 0;
+  }
+
   async function saveDevice(record, executor = pool) {
     const storedRecord = { ...record };
     delete storedRecord.limits;
@@ -241,6 +252,14 @@ function createRepository(pool) {
   async function getHubAccount(accountId, executor = pool) {
     const [rows] = await executor.execute(
       'SELECT * FROM hub_accounts WHERE account_id = ?',
+      [String(accountId || '')]
+    );
+    return hubAccountRow(rows[0]);
+  }
+
+  async function getHubAccountForUpdate(accountId, executor = pool) {
+    const [rows] = await executor.execute(
+      'SELECT * FROM hub_accounts WHERE account_id = ? FOR UPDATE',
       [String(accountId || '')]
     );
     return hubAccountRow(rows[0]);
@@ -370,6 +389,18 @@ function createRepository(pool) {
     return hubAccountSnapshotRow(rows[0]);
   }
 
+  async function listHubAccountSnapshots(accountIds, executor = pool) {
+    const ids = [...new Set((accountIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+    if (!ids.length) return new Map();
+    const placeholders = ids.map(() => '?').join(', ');
+    const [rows] = await executor.execute(
+      `SELECT account_id, provider_snapshot, last_good_snapshot, updated_at
+       FROM hub_account_limits WHERE account_id IN (${placeholders})`,
+      ids
+    );
+    return new Map(rows.map((row) => [String(row.account_id), hubAccountSnapshotRow(row)]));
+  }
+
   async function saveHubAccountSnapshot(accountId, snapshot, executor = pool) {
     await executor.execute(`INSERT INTO hub_account_limits (
       account_id, provider_snapshot, last_good_snapshot, updated_at
@@ -477,21 +508,29 @@ function createRepository(pool) {
     // the immutable event ledger. Replacing it also makes a device-side counter
     // reset visible without rewriting any usage_events rows.
     await executor.execute('DELETE FROM sessions WHERE device_id = ?', [deviceId]);
-    for (const summary of summaries) {
-      await executor.execute(`INSERT INTO sessions (
-        device_id, client, session_id, total_tokens, input_tokens, output_tokens,
-        cache_read_tokens, cache_write_tokens, reasoning_tokens, message_count, cost_usd,
-        started_at, last_used_at, models
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE total_tokens = VALUES(total_tokens), input_tokens = VALUES(input_tokens),
-        output_tokens = VALUES(output_tokens), cache_read_tokens = VALUES(cache_read_tokens),
-        cache_write_tokens = VALUES(cache_write_tokens), reasoning_tokens = VALUES(reasoning_tokens),
-        message_count = VALUES(message_count), cost_usd = VALUES(cost_usd), started_at = VALUES(started_at),
-        last_used_at = VALUES(last_used_at), models = VALUES(models)`, [
-        deviceId, summary.client, summary.sessionId, summary.totalTokens, summary.inputTokens,
-        summary.outputTokens, summary.cacheReadTokens, summary.cacheWriteTokens, summary.reasoningTokens,
-        summary.messageCount, summary.costUsd, date(summary.startedAt), date(summary.lastUsedAt), JSON.stringify(summary.models)
-      ]);
+    const columns = `(device_id, client, session_id, total_tokens, input_tokens, output_tokens,
+      cache_read_tokens, cache_write_tokens, reasoning_tokens, message_count, cost_usd,
+      started_at, last_used_at, models)`;
+    const valuesPerRow = 14;
+    const batchSize = 500;
+    for (let offset = 0; offset < summaries.length; offset += batchSize) {
+      const batch = summaries.slice(offset, offset + batchSize);
+      const values = [];
+      const placeholders = batch.map((summary) => {
+        values.push(
+          deviceId, summary.client, summary.sessionId, summary.totalTokens, summary.inputTokens,
+          summary.outputTokens, summary.cacheReadTokens, summary.cacheWriteTokens, summary.reasoningTokens,
+          summary.messageCount, summary.costUsd, date(summary.startedAt), date(summary.lastUsedAt),
+          JSON.stringify(summary.models)
+        );
+        return `(${Array.from({ length: valuesPerRow }, () => '?').join(', ')})`;
+      }).join(', ');
+      await executor.execute(`INSERT INTO sessions ${columns} VALUES ${placeholders}
+        ON DUPLICATE KEY UPDATE total_tokens = VALUES(total_tokens), input_tokens = VALUES(input_tokens),
+          output_tokens = VALUES(output_tokens), cache_read_tokens = VALUES(cache_read_tokens),
+          cache_write_tokens = VALUES(cache_write_tokens), reasoning_tokens = VALUES(reasoning_tokens),
+          message_count = VALUES(message_count), cost_usd = VALUES(cost_usd), started_at = VALUES(started_at),
+          last_used_at = VALUES(last_used_at), models = VALUES(models)`, values);
     }
   }
 
@@ -629,6 +668,7 @@ function createRepository(pool) {
     deleteDevice,
     getDeviceRecord,
     getHubAccount,
+    getHubAccountForUpdate,
     getHubAccountCredential,
     getHubAccountSnapshot,
     getPricing,
@@ -639,9 +679,11 @@ function createRepository(pool) {
     deleteHubAccount,
     findHubAccount,
     listHubAccounts,
+    listHubAccountSnapshots,
     listDeviceRecords,
     listKnownModels,
     listPricing,
+    lockDevice,
     renameDevice,
     replaceHubAccountCredential,
     replaceSessions,

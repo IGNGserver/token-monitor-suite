@@ -4,7 +4,12 @@ const http = require('node:http');
 const https = require('node:https');
 const fs = require('node:fs');
 const { URL } = require('node:url');
-const { aggregateDevices, aggregateHistory, mergeDeviceRecord } = require('../shared/usage');
+const {
+  aggregateDevices,
+  aggregateHistory,
+  mergeDeviceRecord,
+  normalizeDeviceRecord
+} = require('../shared/usage');
 const { normalizeLimitsSummary } = require('../shared/limits');
 const { historyPreview, historyRevision } = require('../shared/history');
 const { deviceHistoryRevision } = require('../shared/history');
@@ -375,7 +380,10 @@ function createHub({
       refreshCeilingOverride: Number(process.env.TOKEN_MONITOR_HUB_REFRESH_CEILING_MS) || null,
       oauthFetch: oauthHttpFetch,
       logger,
-      onUpdate: () => { void broadcastStats('account-update'); }
+      onUpdate: () => {
+        invalidateStatsCache();
+        void broadcastStats('account-update');
+      }
     })
     : null;
   const oauthManager = createOAuthSessionManager();
@@ -397,6 +405,24 @@ function createHub({
   }
   let statsCache = null;
   let subscriptionsCache = emptySubscriptionDocument();
+  // A stale in-flight aggregation must not be allowed to repopulate the cache
+  // after a mutation. The generation is advanced by every invalidation.
+  let statsCacheGeneration = 0;
+  const ingestLocks = new Map();
+
+  async function withDeviceIngestLock(deviceId, work) {
+    const previous = ingestLocks.get(deviceId) || Promise.resolve();
+    let release;
+    const current = new Promise((resolve) => { release = resolve; });
+    ingestLocks.set(deviceId, current);
+    await previous;
+    try {
+      return await work();
+    } finally {
+      release();
+      if (ingestLocks.get(deviceId) === current) ingestLocks.delete(deviceId);
+    }
+  }
 
   // Display rates for the dashboard. Fetched at most once per day and kept in
   // memory; a failed fetch falls back to the shared built-in table so cost
@@ -434,8 +460,10 @@ function createHub({
   let statsInFlight = null;
 
   function invalidateStatsCache() {
+    statsCacheGeneration += 1;
     statsCache = null;
     statsCacheAt = 0;
+    statsInFlight = null;
   }
 
   async function getSubscriptions() {
@@ -452,19 +480,26 @@ function createHub({
     }
     // Share one computation across concurrent readers instead of stacking them.
     if (statsInFlight) return statsInFlight;
-    statsInFlight = computeStats()
+    const generation = statsCacheGeneration;
+    const inFlight = computeStats()
       .then((stats) => {
-        statsCache = stats;
-        statsCacheAt = Date.now();
+        if (generation === statsCacheGeneration) {
+          statsCache = stats;
+          statsCacheAt = Date.now();
+        }
         return stats;
       })
-      .finally(() => { statsInFlight = null; });
-    return statsInFlight;
+      .finally(() => {
+        if (statsInFlight === inFlight) statsInFlight = null;
+      });
+    statsInFlight = inFlight;
+    return inFlight;
   }
 
   async function computeStats() {
-    const records = await store.listDeviceRecords();
-    const stats = aggregateDevices(records, staleAfterMs);
+    const rawRecords = await store.listDeviceRecords();
+    const records = rawRecords.map((record) => normalizeDeviceRecord(record));
+    const stats = aggregateDevices(records, staleAfterMs, Date.now(), { normalized: true });
     const centralLimits = accountService
       ? await accountService.getLimitsSummary()
       : normalizeLimitsSummary({});
@@ -472,10 +507,10 @@ function createHub({
     stats.limits = centralLimits;
     stats.limitsAuthority = accountService ? 'hub' : 'none';
     stats.staleAfterMs = staleAfterMs;
-    const history = aggregateHistory(records);
+    const history = aggregateHistory(records, { normalized: true });
     stats.historyPreview = historyPreview(history);
     stats.historyRevision = historyRevision(history);
-    stats.deviceHistoryRevision = deviceHistoryRevision(records);
+    stats.deviceHistoryRevision = deviceHistoryRevision(rawRecords);
     stats.subscriptionsUpdatedAt = (await getSubscriptions()).updatedAt || '';
     stats.apiVersion = HUB_API_VERSION;
     stats.capabilities = capabilities;
@@ -838,8 +873,11 @@ function createHub({
     const limitsOnly = payload.limitsOnly === true;
     delete usagePayload.limitsOnly;
     validateDeviceRecordPayload(usagePayload);
-    const record = await store.transaction(async (connection) => {
-      const deviceId = String(usagePayload.deviceId || usagePayload.id);
+    const deviceId = String(usagePayload.deviceId || usagePayload.id);
+    const record = await withDeviceIngestLock(deviceId, async () => store.transaction(async (connection) => {
+      // The database row lock covers multiple Hub processes; the small process
+      // lock above also serializes first-ingest races before a device row exists.
+      if (typeof store.lockDevice === 'function') await store.lockDevice(deviceId, connection);
       const existing = await store.getDeviceRecord(deviceId, connection);
       const merged = mergeDeviceRecord(existing, {
         ...usagePayload,
@@ -860,7 +898,7 @@ function createHub({
       await store.insertUsageEvents(merged.deviceId, pricedEvents, connection);
       await store.replaceSessions(merged.deviceId, summarizeSessions(candidates), connection);
       return merged;
-    });
+    }));
     invalidateStatsCache();
     // The transaction has committed by now, so the payload IS stored. A failure
     // while building or broadcasting the response must not be reported as a client

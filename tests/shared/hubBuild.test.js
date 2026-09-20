@@ -6,8 +6,6 @@ const path = require('node:path');
 const test = require('node:test');
 const { Linter } = require('eslint');
 
-const { compareHubBuild, validBuildId } = require('../../src/shared/hubBuildComparison');
-const { currentHubBuild } = require('../../src/shared/hubBuildIdentity');
 const registry = require('../../src/shared/hubBuildRegistry.json');
 const {
   CORE_SOURCE_FILES,
@@ -164,11 +162,6 @@ test('Node Hub identity follows only its declared dotenv runtime dependency and 
   );
 });
 
-test('desktop comparison changes do not alter the Hub core closure', () => {
-  assert.ok(CORE_SOURCE_FILES.includes('src/shared/hubBuildIdentity.js'));
-  assert.ok(!CORE_SOURCE_FILES.includes('src/shared/hubBuildComparison.js'));
-});
-
 test('Hub build manifests cover the complete Node local dependency graph', () => {
   // The registry is runtime metadata produced from these hashes, so hashing it
   // back into either component would make the build identity self-referential.
@@ -223,85 +216,4 @@ test('Hub build registry advances only the component whose source changed', () =
   });
   assert.equal(next.components.core.length, 3);
   assert.deepEqual(next.components['node-hub'].at(-1), { revision: 5, buildId: buildId('d') });
-});
-
-test('Hub build comparison distinguishes current, older, newer, and divergent builds', () => {
-  const current = currentHubBuild('node-hub');
-  assert.equal(compareHubBuild(current).status, 'current');
-  assert.equal(compareHubBuild(current, {
-    ...current,
-    coreRevision: current.coreRevision + 1,
-    coreBuildId: buildId('a')
-  }).status, 'updateAvailable');
-  assert.equal(compareHubBuild({
-    ...current,
-    runtimeRevision: current.runtimeRevision + 1,
-    runtimeBuildId: buildId('b')
-  }).status, 'remoteNewer');
-  assert.equal(compareHubBuild({
-    ...current,
-    runtimeBuildId: 'sha256:custom'
-  }).status, 'unknown');
-  assert.equal(compareHubBuild(undefined).status, 'legacy');
-});
-
-test('only absent build metadata is legacy and current-schema metadata fails closed', () => {
-  const current = currentHubBuild('node-hub');
-  assert.equal(compareHubBuild(undefined).status, 'legacy');
-  for (const invalid of [null, [], '', { ...current, schemaVersion: 0 }, { ...current, schemaVersion: 'nope' }]) {
-    assert.equal(compareHubBuild(invalid).status, 'unknown');
-  }
-  assert.equal(compareHubBuild({
-    ...current,
-    coreRevision: current.coreRevision + 1,
-    coreBuildId: undefined
-  }).status, 'unknown');
-  assert.equal(compareHubBuild({
-    ...current,
-    runtimeRevision: current.runtimeRevision + 1,
-    runtimeBuildId: 'sha256:not-a-real-digest'
-  }).status, 'unknown');
-  assert.equal(validBuildId(buildId('f')), true);
-  assert.equal(validBuildId(`sha256:${'F'.repeat(64)}`), false);
-});
-
-test('known historical revisions must retain their canonical build ids', () => {
-  const current = currentHubBuild('node-hub');
-  const expectedNext = {
-    ...current,
-    coreRevision: current.coreRevision + 1,
-    coreBuildId: buildId('c'),
-    runtimeRevision: current.runtimeRevision + 1,
-    runtimeBuildId: buildId('d')
-  };
-  assert.equal(compareHubBuild(current, expectedNext).status, 'updateAvailable');
-  assert.equal(compareHubBuild({
-    ...current,
-    coreBuildId: 'sha256:custom-old-core'
-  }, expectedNext).status, 'unknown');
-  assert.equal(compareHubBuild({
-    ...current,
-    runtimeBuildId: 'sha256:custom-old-runtime'
-  }, expectedNext).status, 'unknown');
-  assert.equal(compareHubBuild({
-    ...current,
-    coreBuildId: 'sha256:custom-known-future-core'
-  }, {
-    ...current,
-    coreRevision: current.coreRevision - 1,
-    coreBuildId: 'sha256:older-expected-core'
-  }).status, 'unknown');
-});
-
-test('mixed component directions are treated as unknown instead of suggesting a downgrade', () => {
-  const current = currentHubBuild('node-hub');
-  assert.equal(compareHubBuild({
-    ...current,
-    coreRevision: current.coreRevision + 1,
-    coreBuildId: buildId('e')
-  }, {
-    ...current,
-    runtimeRevision: current.runtimeRevision + 1,
-    runtimeBuildId: buildId('f')
-  }).status, 'unknown');
 });

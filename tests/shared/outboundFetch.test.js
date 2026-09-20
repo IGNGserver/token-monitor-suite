@@ -2,6 +2,17 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { spawnSync } = require('node:child_process');
+
+test('direct requests do not load the external proxy HTTP stack', () => {
+  const result = spawnSync(process.execPath, ['-e', `
+    const assert = require('node:assert/strict');
+    const { createOutboundFetch } = require(${JSON.stringify(require.resolve('../../src/shared/outboundFetch'))});
+    createOutboundFetch({});
+    assert.equal(Object.keys(require.cache).some(file => file.includes('/node_modules/undici/')), false);
+  `], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+});
 
 const {
   cleanProxyUrl,

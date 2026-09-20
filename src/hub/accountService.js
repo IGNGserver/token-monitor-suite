@@ -1,7 +1,6 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const net = require('node:net');
 const { encryptCredential, decryptCredential } = require('./accountCrypto');
 const { LIMIT_PROVIDER_IDS } = require('../shared/limitProviders');
 const { normalizeLimitProvider, normalizeLimitsSummary } = require('../shared/limits');
@@ -9,7 +8,10 @@ const { HUB_MANUAL_PROVIDER_IDS } = require('../shared/limitProviderSources');
 const { probeLimitProvider } = require('../shared/limitCollector');
 const { refreshOAuthCredential } = require('./oauthService');
 const { createMimoManagedAccount } = require('../shared/mimoLimits');
-const { normalizeThirdPartyBaseUrl } = require('../shared/thirdPartyLimits');
+const {
+  hostnameIsNonPublic,
+  normalizeThirdPartyBaseUrl
+} = require('../shared/thirdPartyLimits');
 const { runWithProbeDeadline } = require('../shared/probeDeadline');
 
 const MAX_ACCOUNT_NAME_LENGTH = 128;
@@ -122,50 +124,6 @@ function mergeCredential(existingCredential, incomingCredential, provider) {
     ...existingCredential,
     profile: { ...existingProfile, ...incomingProfile }
   };
-}
-
-function ipv4IsNonPublic(hostname) {
-  const octets = hostname.split('.').map((part) => Number(part));
-  if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
-  const [first, second] = octets;
-  return first === 0
-    || first === 10
-    || first === 127
-    || (first === 100 && second >= 64 && second <= 127)
-    || (first === 169 && second === 254)
-    || (first === 172 && second >= 16 && second <= 31)
-    || (first === 192 && second === 0)
-    || (first === 192 && second === 168)
-    || (first === 198 && (second === 18 || second === 19))
-    || (first === 198 && second === 51)
-    || (first === 203 && second === 0 && octets[2] === 113)
-    || first >= 224;
-}
-
-function hostnameIsNonPublic(hostname) {
-  const normalized = String(hostname || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
-  if (!normalized) return true;
-  const ipVersion = net.isIP(normalized);
-  if (ipVersion === 4) return ipv4IsNonPublic(normalized);
-  if (ipVersion === 6) {
-    if (normalized.startsWith('::ffff:')) {
-      const mapped = normalized.slice('::ffff:'.length);
-      if (net.isIP(mapped) === 4) return ipv4IsNonPublic(mapped);
-    }
-    return normalized === '::'
-      || normalized === '::1'
-      || normalized.startsWith('fc')
-      || normalized.startsWith('fd')
-      || /^fe[89ab]/u.test(normalized)
-      || normalized.startsWith('ff');
-  }
-  return normalized === 'localhost'
-    || normalized.endsWith('.localhost')
-    || normalized.endsWith('.local')
-    || normalized.endsWith('.internal')
-    || normalized.endsWith('.lan')
-    || normalized === 'metadata.google.internal'
-    || normalized === 'instance-data.ec2.internal';
 }
 
 function validateHubThirdPartyCredential(credential) {
@@ -481,13 +439,27 @@ function createHubAccountService({
     return { account, snapshot };
   }
 
-  async function listAccounts({ includeCredentialMetadata = false } = {}) {
-    const accounts = await store.listHubAccounts();
-    const result = [];
+  async function snapshotsFor(accounts) {
+    const ids = accounts.map((account) => account.id);
+    if (typeof store.listHubAccountSnapshots === 'function') {
+      return store.listHubAccountSnapshots(ids);
+    }
+    const snapshots = new Map();
     for (const account of accounts) {
       const snapshot = typeof store.getHubAccountSnapshot === 'function'
         ? await store.getHubAccountSnapshot(account.id)
         : null;
+      snapshots.set(account.id, snapshot);
+    }
+    return snapshots;
+  }
+
+  async function listAccounts({ includeCredentialMetadata = false } = {}) {
+    const accounts = await store.listHubAccounts();
+    const snapshots = await snapshotsFor(accounts);
+    const result = [];
+    for (const account of accounts) {
+      const snapshot = snapshots.get(account.id) || null;
       let metadata = null;
       if (includeCredentialMetadata) {
         try {
@@ -505,11 +477,10 @@ function createHubAccountService({
 
   async function getLimitsSummary() {
     const accounts = await store.listHubAccounts();
+    const snapshots = await snapshotsFor(accounts);
     const providers = [];
     for (const account of accounts) {
-      const snapshot = typeof store.getHubAccountSnapshot === 'function'
-        ? await store.getHubAccountSnapshot(account.id)
-        : null;
+      const snapshot = snapshots.get(account.id) || null;
       if (snapshot?.provider) {
         providers.push({
           ...snapshot.provider,
@@ -584,20 +555,38 @@ function createHubAccountService({
     return { row: usable, credential: activeCredential };
   }
 
+  async function refreshOwner(account, executor) {
+    const current = typeof store.getHubAccountForUpdate === 'function'
+      ? await store.getHubAccountForUpdate(account.id, executor)
+      : await store.getHubAccount(account.id, executor);
+    if (!current) return null;
+    // User edits advance updatedAt. A refresh that started against an older
+    // credential or enabled state must not write its late provider result over
+    // that newer intent.
+    if (account.updatedAt && current.updatedAt !== account.updatedAt) return null;
+    if (current.enabled !== account.enabled) return null;
+    return current;
+  }
+
   async function refreshOne(id, reason = 'manual') {
     const entry = await accountWithSnapshot(id);
     if (!entry) return null;
     const { account, snapshot } = entry;
     const attemptAt = new Date(now()).toISOString();
     if (account.enabled === false) {
-      const disabled = normalizeLimitProvider({
-        ...(snapshot?.provider || {}),
-        provider: account.provider,
-        status: 'disabled',
-        updatedAt: attemptAt,
-        windows: []
-      });
-      await runTransaction(async (executor) => {
+      const committed = await runTransaction(async (executor) => {
+        const owner = await refreshOwner(account, executor);
+        if (!owner) return { stale: true };
+        const currentSnapshot = typeof store.getHubAccountSnapshot === 'function'
+          ? await store.getHubAccountSnapshot(account.id, executor)
+          : snapshot;
+        const disabled = normalizeLimitProvider({
+          ...(currentSnapshot?.provider || {}),
+          provider: owner.provider,
+          status: 'disabled',
+          updatedAt: attemptAt,
+          windows: []
+        });
         await store.updateHubAccount(account.id, {
           status: 'disabled',
           lastAttemptAt: attemptAt,
@@ -605,11 +594,12 @@ function createHubAccountService({
         }, executor);
         await store.saveHubAccountSnapshot(account.id, {
           provider: disabled,
-          lastGood: snapshot?.lastGood || null,
+          lastGood: currentSnapshot?.lastGood || null,
           updatedAt: attemptAt
         }, executor);
+        return { stale: false, row: disabled };
       });
-      return disabled;
+      return committed.stale ? null : committed.row;
     }
     await store.updateHubAccount(account.id, {
       status: 'refreshing',
@@ -623,14 +613,16 @@ function createHubAccountService({
       const probed = await probeAccount(account, credential);
       const row = probed.row;
       const storedCredential = probed.credential;
-      await runTransaction(async (executor) => {
+      const committed = await runTransaction(async (executor) => {
+        const owner = await refreshOwner(account, executor);
+        if (!owner) return { stale: true };
         if (JSON.stringify(storedCredential) !== JSON.stringify(credential)) {
           await store.replaceHubAccountCredential(account.id, encryptCredential(storedCredential, credentialKey), executor);
         }
         await store.updateHubAccount(account.id, {
-          accountKey: row.accountKey || account.accountKey || '',
-          accountEmail: row.accountEmail || account.accountEmail || '',
-          accountLabel: row.accountLabel || account.accountLabel || '',
+          accountKey: row.accountKey || owner.accountKey || '',
+          accountEmail: row.accountEmail || owner.accountEmail || '',
+          accountLabel: row.accountLabel || owner.accountLabel || '',
           status: 'ok',
           lastAttemptAt: attemptAt,
           lastSuccessAt: attemptAt,
@@ -643,9 +635,11 @@ function createHubAccountService({
           lastGood: row,
           updatedAt: attemptAt
         }, executor);
+        return { stale: false, row };
       });
+      if (committed.stale) return null;
       await onUpdate?.({ type: 'account-refresh', accountId: account.id, reason });
-      return row;
+      return committed.row;
     } catch (error) {
       const status = statusFromError(error);
       const previous = snapshot?.lastGood || snapshot?.provider || null;
@@ -660,7 +654,9 @@ function createHubAccountService({
         stale: Boolean(previous),
         windows: previous?.windows || []
       });
-      await runTransaction(async (executor) => {
+      const committed = await runTransaction(async (executor) => {
+        const owner = await refreshOwner(account, executor);
+        if (!owner) return { stale: true };
         await store.updateHubAccount(account.id, {
           status,
           lastAttemptAt: attemptAt,
@@ -673,10 +669,12 @@ function createHubAccountService({
           lastGood: previous,
           updatedAt: attemptAt
         }, executor);
+        return { stale: false, row: failed };
       });
+      if (committed.stale) return null;
       logger.warn?.(`[hub-accounts] ${account.provider}/${account.id} refresh failed (${status})`);
       await onUpdate?.({ type: 'account-refresh-failed', accountId: account.id, reason });
-      return failed;
+      return committed.row;
     }
   }
 
@@ -698,17 +696,21 @@ function createHubAccountService({
   async function refreshAll(reason = 'interval') {
     if (stopped) return [];
     if (refreshPromise) {
+      const stalledCycle = refreshPromise;
       const ageMs = now() - refreshStartedAt;
-      if (ageMs <= refreshCeilingMs) return refreshPromise;
+      if (ageMs <= refreshCeilingMs) return stalledCycle;
       logger.warn?.(
         `[hub-accounts] refresh cycle exceeded ${refreshCeilingMs}ms (age ${ageMs}ms); releasing the latch so limits can resume`
       );
       await onUpdate?.({ type: 'account-refresh-stalled', ageMs, ceilingMs: refreshCeilingMs, reason });
-      refreshPromise = null;
-      refreshStartedAt = 0;
+      if (refreshPromise === stalledCycle) {
+        refreshPromise = null;
+        refreshStartedAt = 0;
+      }
     }
     refreshStartedAt = now();
-    refreshPromise = (async () => {
+    let cyclePromise;
+    cyclePromise = (async () => {
       let accounts = [];
       try {
         accounts = await store.listHubAccounts();
@@ -738,10 +740,13 @@ function createHubAccountService({
       logger.warn?.(`[hub-accounts] refreshAll unhandled failure: ${err?.message || err}`);
       return [];
     }).finally(() => {
-      refreshPromise = null;
-      refreshStartedAt = 0;
+      if (refreshPromise === cyclePromise) {
+        refreshPromise = null;
+        refreshStartedAt = 0;
+      }
     });
-    return refreshPromise;
+    refreshPromise = cyclePromise;
+    return cyclePromise;
   }
 
   async function addAccount({ provider, name = '', label = '', credential }) {

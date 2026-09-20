@@ -53,6 +53,7 @@ function prefsToSettingsPatch(patch = {}) {
 contextBridge.exposeInMainWorld('tokenMonitor', {
   // --- Shared-UI transport surface -----------------------------------------
   request: (path, options) => ipcRenderer.invoke('transport:request', path, options),
+  validateSecret: (secret) => ipcRenderer.invoke('hub:validate-secret', secret),
   getCapabilities: () => ipcRenderer.invoke('transport:capabilities'),
   readFlag: (key) => ipcRenderer.invoke('transport:flag:read', key),
   writeFlag: (key, value) => ipcRenderer.invoke('transport:flag:write', key, value),

@@ -17,6 +17,7 @@ import {
   savePrefs,
   saveSecret,
   secretIsRemembered,
+  testSecret,
   writeFlag,
   writeRoute
 } from './transport/index.js';
@@ -251,7 +252,10 @@ const els = {
   heroStrip: document.getElementById('heroStrip')
 };
 
-const storedPrefs = loadPrefs();
+// Preferences and credentials are asynchronous in the desktop transport.
+// Start from safe defaults and merge them during init(); spreading a Promise
+// here silently discarded the persisted desktop view state.
+const storedPrefs = {};
 const initialRoute = routeFromLocation();
 
 const state = {
@@ -271,12 +275,12 @@ const state = {
     selectedToolId: '',
     deviceDetailPeriod: 'today',
     ...storedPrefs,
-    view: initialRoute.view || viewFromLocation() || normalizeViewId(storedPrefs.view),
-    usageTab: initialRoute.usageTab || storedPrefs.usageTab || 'tools',
-    managementTab: initialRoute.managementTab || storedPrefs.managementTab || 'subscriptions',
-    limitTab: initialRoute.limitTab || storedPrefs.limitTab || 'limits'
+    view: initialRoute.view || viewFromLocation() || 'overview',
+    usageTab: initialRoute.usageTab || 'tools',
+    managementTab: initialRoute.managementTab || 'subscriptions',
+    limitTab: initialRoute.limitTab || 'limits'
   },
-  secret: loadSecret(),
+  secret: '',
   locale: 'en',
   health: null,
   authorization: null,
@@ -1188,7 +1192,7 @@ async function saveWebSettingsForm(form) {
   applyTheme();
   applyLocale();
   if (secretChanged) {
-    const ok = await tryConnect(nextSecret, true);
+    const ok = await tryConnect(nextSecret, true, { persist: true });
     if (!ok) return false;
   }
   showToast(tr('toast.saved'));
@@ -1222,7 +1226,19 @@ function formatTrendValue(value, metric) {
 }
 
 
+let renderPending = false;
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && renderPending) render();
+});
+
 function render() {
+  // Continue accepting snapshots while hidden, but rebuild the DOM only once
+  // with the latest state when the user returns to the window/tab.
+  if (document.hidden) {
+    renderPending = true;
+    return;
+  }
+  renderPending = false;
   const renderState = captureRenderState();
   if (state.prefs.view !== 'accounts') state.accountProviderMenuOpen = false;
   renderChrome();
@@ -1723,12 +1739,29 @@ async function bootstrapAuthorized() {
   render();
 }
 
-async function tryConnect(secret, remember = true) {
-  state.secret = String(secret || '').trim();
+async function tryConnect(secret, remember = true, { persist = false } = {}) {
+  const candidateSecret = String(secret || '').trim();
+  const desktopOwnsSecret = isCapable('desktopSettings');
+  // Electron's main process owns the credential. Keep it out of renderer state;
+  // a newly entered value is validated through the dedicated bridge before it is
+  // persisted, because ordinary IPC requests intentionally ignore `secret`.
+  state.secret = desktopOwnsSecret ? '' : candidateSecret;
   try {
-    await fetchJson('/api/stats', { secret: state.secret });
-    state.authorization = await fetchJson('/api/capabilities', { secret: state.secret });
-    saveSecret(state.secret, remember);
+    if (desktopOwnsSecret && candidateSecret) {
+      state.authorization = await testSecret(candidateSecret);
+      // Desktop credentials are always persisted by the main-process store;
+      // `remember` remains an interface-compatible argument for the Hub form.
+      await saveSecret(candidateSecret, remember);
+      await fetchJson('/api/stats');
+    } else {
+      await fetchJson('/api/stats', { secret: candidateSecret });
+      state.authorization = await fetchJson('/api/capabilities', { secret: candidateSecret });
+      if (persist) await saveSecret(candidateSecret, remember);
+    }
+    if (desktopOwnsSecret) {
+      els.secretInput.value = '';
+      els.settingsSecret.value = '';
+    }
     els.authError.classList.add('hidden');
     await bootstrapAuthorized();
     return true;
@@ -1760,7 +1793,7 @@ async function deleteDevice(deviceId) {
 
 async function renameDevice(deviceId) {
   if (!deviceId) return;
-  const nextDeviceId = String(await promptAction(tr('devices.renamePrompt'), deviceId) || '').trim();
+  const nextDeviceId = String(await promptForValue(tr('devices.renamePrompt'), deviceId) || '').trim();
   if (!nextDeviceId || nextDeviceId === deviceId) return;
   if (!(await confirmAction(tr('devices.renameCredentialWarning')))) return;
   await fetchJson(`/api/devices/${encodeURIComponent(deviceId)}/rename`, {
@@ -1770,6 +1803,70 @@ async function renameDevice(deviceId) {
   });
   showToast(tr('devices.renamed'));
   await refreshStats();
+}
+
+/**
+ * Electron intentionally has no native text-prompt API. Keep the shared
+ * action usable there by falling back to a small DOM dialog when the host
+ * reports that its native prompt is unavailable.
+ */
+async function promptForValue(message, defaultValue = '') {
+  try {
+    return await promptAction(message, defaultValue);
+  } catch (error) {
+    if (error?.code !== 'prompt_unsupported') throw error;
+  }
+
+  return new Promise((resolve) => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'inline-prompt-backdrop';
+    backdrop.setAttribute('role', 'presentation');
+
+    const dialog = document.createElement('form');
+    dialog.className = 'card inline-prompt';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.addEventListener('submit', (event) => {
+      event.preventDefault();
+      finish(input.value);
+    });
+
+    const title = document.createElement('h2');
+    title.textContent = message;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = defaultValue;
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.className = 'inline-prompt-input';
+    input.setAttribute('aria-label', message);
+
+    const actions = document.createElement('div');
+    actions.className = 'drawer-actions';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'ghost-btn';
+    cancel.textContent = tr('actions.cancel');
+    cancel.addEventListener('click', () => finish(null));
+    const submit = document.createElement('button');
+    submit.type = 'submit';
+    submit.className = 'primary-btn';
+    submit.textContent = tr('actions.save');
+    actions.append(cancel, submit);
+    dialog.append(title, input, actions);
+    backdrop.append(dialog);
+
+    const finish = (value) => {
+      backdrop.remove();
+      resolve(value);
+    };
+    backdrop.addEventListener('click', (event) => {
+      if (event.target === backdrop) finish(null);
+    });
+    document.body.append(backdrop);
+    input.focus();
+    input.select();
+  });
 }
 
 function subscriptionFromForm(form) {
@@ -2658,7 +2755,7 @@ function bindEvents() {
     applyTheme();
     applyLocale();
     if (secretChanged) {
-      const ok = await tryConnect(nextSecret, true);
+      const ok = await tryConnect(nextSecret, true, { persist: true });
       if (!ok) return;
     }
     openSettings(false);
@@ -2671,7 +2768,7 @@ function bindEvents() {
 
   els.authForm.addEventListener('submit', async (event) => {
     event.preventDefault();
-    await tryConnect(els.secretInput.value, els.rememberSecret.checked);
+    await tryConnect(els.secretInput.value, els.rememberSecret.checked, { persist: true });
   });
 
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -2794,6 +2891,22 @@ async function init() {
     shareBarHtml,
       rowHtml
   });
+  const loadedPrefs = await loadPrefs();
+  if (loadedPrefs && typeof loadedPrefs === 'object') {
+    Object.assign(state.prefs, loadedPrefs);
+    const routeView = initialRoute.view || viewFromLocation();
+    const prefsPatch = { ...loadedPrefs };
+    if (routeView) delete prefsPatch.view;
+    else if (loadedPrefs.view) prefsPatch.view = normalizeViewId(loadedPrefs.view);
+    if (initialRoute.usageTab) delete prefsPatch.usageTab;
+    if (initialRoute.managementTab) delete prefsPatch.managementTab;
+    if (initialRoute.limitTab) delete prefsPatch.limitTab;
+    Object.assign(state.prefs, prefsPatch);
+  }
+  const loadedSecret = await loadSecret();
+  if (!isCapable('desktopSettings') && loadedSecret !== undefined && loadedSecret !== null) {
+    state.secret = loadedSecret;
+  }
   if (isCapable('desktopSettings')) await loadDesktopSettings();
   renderStaticUiIcons();
   applyTheme();
@@ -2814,18 +2927,15 @@ async function init() {
   // Display rates keep this dashboard's costs in the same currency units as the
   // device that collected them; the built-in table is only a fallback while the
   // request is in flight or unavailable. A failure must never block boot.
-  try {
-    const payload = await fetchJson('/api/rates');
+  const ratesReady = fetchJson('/api/rates').then((payload) => {
     if (payload?.rates) configureRates(payload.rates, { source: payload.source, date: payload.date });
-  } catch {
-    /* keep the built-in rates */
-  }
-
-  try {
-    state.health = await fetchHealth();
-  } catch {
+  }).catch(() => { /* keep the built-in rates */ });
+  const healthReady = fetchHealth().then((health) => {
+    state.health = health;
+  }).catch(() => {
     state.health = { secretRequired: true };
-  }
+  });
+  await Promise.all([ratesReady, healthReady]);
 
   if (!state.health.secretRequired) {
     await tryConnect('', true);
@@ -2833,7 +2943,7 @@ async function init() {
   }
 
   if (state.secret) {
-    const ok = await tryConnect(state.secret, secretIsRemembered());
+    const ok = await tryConnect(state.secret, await secretIsRemembered());
     if (ok) return;
   }
   showAuth(true);

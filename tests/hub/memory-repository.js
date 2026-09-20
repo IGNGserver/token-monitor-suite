@@ -52,6 +52,10 @@ class MemoryRepository {
 
   async getDeviceRecord(deviceId) { return clone(this.devices.get(deviceId) || null); }
 
+  // The in-memory store is single-threaded; keep the repository contract so
+  // server tests exercise the same lock-before-baseline call sequence.
+  async lockDevice(deviceId) { return this.devices.has(deviceId); }
+
   async saveDevice(record) {
     const stored = { ...record };
     delete stored.limits;
@@ -69,6 +73,19 @@ class MemoryRepository {
   }
 
   async getHubAccount(accountId) { return clone(this.hubAccounts.get(String(accountId || '')) || null); }
+
+  async getHubAccountForUpdate(accountId) {
+    return this.getHubAccount(accountId);
+  }
+
+  async listHubAccountSnapshots(accountIds) {
+    const result = new Map();
+    for (const id of accountIds || []) {
+      const key = String(id || '');
+      if (this.hubSnapshots.has(key)) result.set(key, clone(this.hubSnapshots.get(key)));
+    }
+    return result;
+  }
 
   async findHubAccount(provider, accountKey = '', accountEmail = '') {
     const normalizedProvider = String(provider || '').trim();

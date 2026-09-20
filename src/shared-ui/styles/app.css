@@ -603,6 +603,35 @@ html[data-theme="dark"] .heat.lvl-4 { fill: rgba(110, 168, 255, 0.92); }
   margin: 0;
   letter-spacing: -0.03em;
 }
+.inline-prompt-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+.inline-prompt {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.inline-prompt h2 { margin: 0; font-size: 18px; }
+.inline-prompt-input {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 11px 12px;
+}
+.inline-prompt-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--line-strong));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+  outline: none;
+}
 .field {
   display: flex;
   flex-direction: column;

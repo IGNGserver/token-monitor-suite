@@ -28,9 +28,11 @@ const {
   normalizeCustomEndpointPath,
   normalizeCustomJsonPath,
   normalizeThirdPartyProfile,
+  hostnameIsNonPublic,
   quotaPerUnit,
   readCustomJsonPath,
-  thirdPartyProfileName
+  thirdPartyProfileName,
+  validatePublicEndpointResolution
 } = require('../../src/shared/thirdPartyLimits');
 
 function response(status, body) {
@@ -125,6 +127,30 @@ test('third-party Base URLs preserve subpaths and strip only a terminal v1', () 
   assert.equal(
     normalizeThirdPartyBaseUrl('https://api.example.com/v1', { stripTerminalV1: false }),
     'https://api.example.com/v1'
+  );
+});
+
+test('Hub endpoint validation rejects loopback, mapped-private, and trailing-dot targets', async () => {
+  for (const hostname of ['localhost.', '127.0.0.1', '::ffff:127.0.0.1', 'fc00::1']) {
+    assert.equal(hostnameIsNonPublic(hostname), true, hostname);
+  }
+  assert.equal(hostnameIsNonPublic('2606:4700:4700::1111'), false);
+  await assert.doesNotReject(
+    validatePublicEndpointResolution('https://[2606:4700:4700::1111]/', {
+      lookup: async () => { throw new Error('literal IPv6 must not be resolved'); }
+    })
+  );
+  await assert.rejects(
+    validatePublicEndpointResolution('https://public-looking.example', {
+      lookup: async () => [{ address: '169.254.169.254', family: 4 }]
+    }),
+    { code: 'credential_invalid' }
+  );
+  await assert.rejects(
+    validatePublicEndpointResolution('https://localhost./api', {
+      lookup: async () => [{ address: '8.8.8.8', family: 4 }]
+    }),
+    { code: 'credential_invalid' }
   );
 });
 
@@ -744,6 +770,34 @@ test('scoped refresh fetches only the selected third-party profile', async () =>
   assert.equal(provider.accountName, 'personal');
   assert.ok(calls.every(([url]) => url.startsWith('https://personal.example')));
   assert.equal(calls.find(([url]) => url.endsWith(NEWAPI_TOKEN_USAGE_PATH))[1], 'Bearer personal');
+});
+
+test('Hub-scoped third-party requests attach the DNS-validated dispatcher', async () => {
+  const dispatchers = [];
+  const [provider] = await fetchThirdPartyLimits({
+    limitProviderAuthority: 'hub',
+    thirdPartyProfiles: {
+      manual: {
+        adapter: NEWAPI_TOKEN_ADAPTER,
+        baseUrl: 'https://manual.example',
+        apiKey: 'manual'
+      }
+    }
+  }, {
+    env: {},
+    fetch: async (url, init) => {
+      dispatchers.push(init.dispatcher);
+      return url.endsWith(NEWAPI_STATUS_PATH)
+        ? response(200, { data: { quota_per_unit: DEFAULT_QUOTA_PER_UNIT } })
+        : response(200, {
+          code: true,
+          data: { total_available: 500_000, total_used: 0, unlimited_quota: false }
+        });
+    }
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(dispatchers.length, 2);
+  assert.ok(dispatchers.every(Boolean));
 });
 
 test('an already-aborted third-party refresh propagates cancellation without a request', async () => {

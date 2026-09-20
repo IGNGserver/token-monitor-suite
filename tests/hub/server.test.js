@@ -271,6 +271,34 @@ test('ingest records initial, incremental, and reset deltas without negative eve
   assert.equal((await hub.getStats()).periods.allTime.totalTokens, 20);
 });
 
+test('concurrent cumulative ingests serialize one device baseline', async () => {
+  const { repository, hub } = createMemoryHub();
+  await hub.ingest(payload(100, { updatedAt: '2026-07-18T00:00:00.000Z' }));
+  let enteredResolve;
+  let release;
+  const entered = new Promise((resolve) => { enteredResolve = resolve; });
+  const gate = new Promise((resolve) => { release = resolve; });
+  const originalLock = repository.lockDevice.bind(repository);
+  let first = true;
+  repository.lockDevice = async (...args) => {
+    const result = await originalLock(...args);
+    if (first) {
+      first = false;
+      enteredResolve();
+      await gate;
+    }
+    return result;
+  };
+  const firstUpload = hub.ingest(payload(110, { updatedAt: '2026-07-18T00:00:01.000Z' }));
+  await entered;
+  const secondUpload = hub.ingest(payload(120, { updatedAt: '2026-07-18T00:00:02.000Z' }));
+  release();
+  await Promise.all([firstUpload, secondUpload]);
+  assert.equal(repository.devices.get('dev-a').periods.allTime.totalTokens, 120);
+  assert.equal(repository.events.reduce((sum, event) => sum + event.inputTokens, 0), 120);
+  assert.equal(repository.events.length, 3);
+});
+
 test('pricing changes do not mutate existing event snapshots or costs', async () => {
   const { hub, repository } = createMemoryHub();
   await hub.setPricing('gpt-5', {

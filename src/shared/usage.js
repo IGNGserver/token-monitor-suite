@@ -1346,7 +1346,7 @@ function aggregateHistory(devices, options = {}) {
   const histories = [];
   let reportedToday = '';
   for (const record of devices) {
-    const normalized = normalizeDeviceRecord(record);
+    const normalized = options.normalized === true ? record : normalizeDeviceRecord(record);
     if (!hasOwn(normalized, 'history') || normalized.history === null) continue;
     histories.push(normalized.history);
     if (!normalized.history.daily.length) continue;
@@ -1465,14 +1465,14 @@ function isPeriodExpired(record, periodName, nowMs) {
   return false;
 }
 
-function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
+function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {}) {
   const aggregate = { updatedAt: new Date().toISOString(), periods: {}, devices: [], projectsIncomplete: false };
   const sessionDetailsOmitted = {};
   const periodProjectsOmitted = {};
   for (const periodName of PERIODS) aggregate.periods[periodName] = emptyPeriod();
   const now = nowMs;
   for (const record of devices) {
-    const normalized = normalizeDeviceRecord(record);
+    const normalized = options.normalized === true ? record : normalizeDeviceRecord(record);
     const ageMs = now - Date.parse(normalized.receivedAt || normalized.updatedAt || 0);
     const deviceStaleAfterMs = staleAfterMsForSyncUpload(normalized.syncUploadIntervalMs, staleAfterMs);
     const stale = Number.isFinite(ageMs) && deviceStaleAfterMs > 0 ? ageMs > deviceStaleAfterMs : false;

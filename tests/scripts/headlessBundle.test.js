@@ -75,6 +75,8 @@ test('the packager emits a bundle-scoped manifest, not the root one', () => {
     'package-headless.js should no longer stage the root package.json verbatim'
   );
   assert.match(source, /HEADLESS_DEPENDENCIES/, 'the bundle manifest should list its own dependencies');
+  assert.match(source, /--package-lock-only/, 'the bundle should generate a lockfile for npm ci');
+  assert.match(source, /package-lock\.json/, 'the package-lock.json must be checked before archiving');
   for (const name of ['chokidar', 'dotenv', 'semver', 'tokscale']) {
     assert.ok(source.includes(`'${name}'`), `the bundle manifest should declare ${name}`);
   }

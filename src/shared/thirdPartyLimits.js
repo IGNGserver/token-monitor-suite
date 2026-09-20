@@ -1,5 +1,7 @@
 'use strict';
 
+const dns = require('node:dns');
+const net = require('node:net');
 const { createOutboundFetch } = require('./outboundFetch');
 const { hashKey } = require('./hashKey');
 const { normalizeLimitProvider } = require('./limits');
@@ -23,6 +25,143 @@ const DEFAULT_CUSTOM_ENDPOINT_PATH = '/user/balance';
 const DEFAULT_CUSTOM_CURRENCY = 'USD';
 const DEFAULT_CUSTOM_DIVISOR = 1;
 const CUSTOM_AUTH_MODES = Object.freeze(['bearer', 'x-api-key']);
+
+function ipv4IsNonPublic(hostname) {
+  const octets = hostname.split('.').map((part) => Number(part));
+  if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+  const [first, second, third] = octets;
+  return first === 0
+    || first === 10
+    || first === 127
+    || (first === 100 && second >= 64 && second <= 127)
+    || (first === 169 && second === 254)
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 0)
+    || (first === 192 && second === 168)
+    || (first === 198 && (second === 18 || second === 19))
+    || (first === 198 && second === 51 && third === 100)
+    || (first === 203 && second === 0 && third === 113)
+    || first >= 224;
+}
+
+function parseIpv6(hostname) {
+  const raw = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (raw.includes('%')) return null;
+  const halves = raw.split('::');
+  if (halves.length > 2) return null;
+  const left = halves[0] ? halves[0].split(':') : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const expandPart = (part) => {
+    if (!part) return [];
+    const last = part[part.length - 1];
+    if (net.isIP(last) === 4) {
+      if (!ipv4IsNonPublic(last)) {
+        const octets = last.split('.').map(Number);
+        const prefix = part.slice(0, -1).map((group) => /^[0-9a-f]{1,4}$/u.test(group) ? parseInt(group, 16) : null);
+        return [...prefix, (octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]];
+      }
+      return [];
+    }
+    return part.map((group) => /^[0-9a-f]{1,4}$/u.test(group) ? parseInt(group, 16) : null);
+  };
+  const leftGroups = expandPart(left);
+  const rightGroups = expandPart(right);
+  if ([...leftGroups, ...rightGroups].some((group) => group === null)) return null;
+  const missing = 8 - leftGroups.length - rightGroups.length;
+  if ((halves.length === 1 && missing !== 0) || missing < 0) return null;
+  return [...leftGroups, ...Array(Math.max(0, missing)).fill(0), ...rightGroups];
+}
+
+function unbracketHostname(hostname) {
+  return String(hostname || '').replace(/^\[|\]$/gu, '');
+}
+
+function hostnameIsNonPublic(hostname) {
+  const normalized = String(hostname || '').trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/u, '');
+  if (!normalized) return true;
+  const ipVersion = net.isIP(normalized);
+  if (ipVersion === 4) return ipv4IsNonPublic(normalized);
+  if (ipVersion === 6) {
+    const groups = parseIpv6(normalized);
+    if (!groups) return true;
+    const first = groups[0];
+    const isUnspecified = groups.every((group) => group === 0);
+    const isLoopback = isUnspecified || groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1;
+    const isMapped = groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff;
+    if (isMapped) {
+      const mapped = [groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff].join('.');
+      return ipv4IsNonPublic(mapped);
+    }
+    return isLoopback
+      || (first & 0xfe00) === 0xfc00 // fc00::/7, unique local
+      || (first & 0xffc0) === 0xfe80 // fe80::/10, link local
+      || (first & 0xff00) === 0xff00 // ff00::/8, multicast
+      || (groups[0] === 0x2001 && groups[1] === 0x0db8); // documentation range
+  }
+  return normalized === 'localhost'
+    || normalized.endsWith('.localhost')
+    || normalized.endsWith('.local')
+    || normalized.endsWith('.internal')
+    || normalized.endsWith('.lan')
+    || normalized === 'metadata.google.internal'
+    || normalized === 'instance-data.ec2.internal';
+}
+
+function assertPublicEndpoint(value) {
+  let parsed;
+  try { parsed = new URL(value); } catch (_) { parsed = null; }
+  if (!parsed || parsed.protocol !== 'https:' || hostnameIsNonPublic(parsed.hostname)) {
+    const error = new Error('Hub third-party accounts require an HTTPS public endpoint');
+    error.code = 'credential_invalid';
+    throw error;
+  }
+  return parsed;
+}
+
+async function lookupAddresses(hostname, deps = {}) {
+  const lookup = deps.lookup || dns.promises.lookup;
+  let result;
+  if (lookup.length >= 3) {
+    result = await new Promise((resolve, reject) => {
+      lookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
+        if (error) reject(error);
+        else resolve(addresses);
+      });
+    });
+  } else {
+    result = await lookup(hostname, { all: true, verbatim: true });
+  }
+  const addresses = (Array.isArray(result) ? result : [result])
+    .filter(Boolean)
+    .map((item) => typeof item === 'string' ? { address: item, family: net.isIP(item) } : item)
+    .filter((item) => item?.address);
+  if (!addresses.length || addresses.some((item) => !net.isIP(item.address) || hostnameIsNonPublic(item.address))) {
+    const error = new Error('Third-party endpoint resolved to a non-public address');
+    error.code = 'credential_invalid';
+    throw error;
+  }
+  return addresses.map((item) => ({ address: item.address, family: item.family || net.isIP(item.address) }));
+}
+
+function createPublicEndpointDispatcher(baseUrl, deps = {}) {
+  const parsed = assertPublicEndpoint(baseUrl);
+  if (net.isIP(unbracketHostname(parsed.hostname))) return null;
+  const { Agent, interceptors } = require('undici');
+  const lookup = (origin, _options, callback) => {
+    lookupAddresses(unbracketHostname(origin.hostname), deps)
+      .then((addresses) => callback(null, addresses))
+      .catch((error) => callback(error));
+  };
+  return new Agent().compose([
+    interceptors.dns({ lookup, maxTTL: 1000, maxItems: 1, dualStack: true })
+  ]);
+}
+
+async function validatePublicEndpointResolution(baseUrl, deps = {}) {
+  const parsed = assertPublicEndpoint(baseUrl);
+  if (!net.isIP(unbracketHostname(parsed.hostname))) await lookupAddresses(parsed.hostname, deps);
+  return parsed;
+}
 
 function cleanValue(value) {
   let raw = typeof value === 'string' ? value.trim() : '';
@@ -446,8 +585,9 @@ function endpoint(baseUrl, path) {
 }
 
 async function requestJson(url, options = {}, deps = {}) {
+  if (deps.limitProviderAuthority === 'hub') assertPublicEndpoint(url);
   const fetchFn = createOutboundFetch(deps.env || process.env, deps);
-  const response = await fetchFn(url, {
+  const init = {
     method: 'GET',
     headers: {
       Accept: 'application/json',
@@ -455,6 +595,10 @@ async function requestJson(url, options = {}, deps = {}) {
     },
     redirect: 'error',
     signal: deps.signal
+  };
+  if (deps.dispatcher) init.dispatcher = deps.dispatcher;
+  const response = await fetchFn(url, {
+    ...init
   });
   if (!response?.ok) {
     const error = new Error(`Third-party API request failed (${response?.status || 'unknown'})`);
@@ -544,12 +688,22 @@ async function fetchThirdPartyAccount(account, deps = {}) {
   }
   const request = adapter.request(account);
   const statusRequest = adapter.statusRequest?.(account);
-  const [quotaResponse, statusResponse] = await Promise.allSettled([
-    requestJson(endpoint(account.baseUrl, request.path), { headers: request.headers }, deps),
-    statusRequest
-      ? requestJson(endpoint(account.baseUrl, statusRequest.path), { headers: statusRequest.headers }, deps)
-      : Promise.resolve(null)
-  ]);
+  const dispatcher = deps.limitProviderAuthority === 'hub'
+    ? createPublicEndpointDispatcher(account.baseUrl, deps)
+    : null;
+  const requestDeps = dispatcher ? { ...deps, dispatcher } : deps;
+  let responses;
+  try {
+    responses = await Promise.allSettled([
+      requestJson(endpoint(account.baseUrl, request.path), { headers: request.headers }, requestDeps),
+      statusRequest
+        ? requestJson(endpoint(account.baseUrl, statusRequest.path), { headers: statusRequest.headers }, requestDeps)
+        : Promise.resolve(null)
+    ]);
+  } finally {
+    await dispatcher?.close?.();
+  }
+  const [quotaResponse, statusResponse] = responses;
   if (deps.signal?.aborted) {
     throw deps.signal.reason || Object.assign(new Error('Third-party API request aborted'), { name: 'AbortError' });
   }
@@ -616,7 +770,10 @@ async function fetchThirdPartyLimits(options = {}, deps = {}) {
       windows: []
     });
   }
-  return Promise.all(accounts.map((account) => fetchThirdPartyAccount(account, deps)));
+  const requestDeps = options.limitProviderAuthority === 'hub'
+    ? { ...deps, limitProviderAuthority: 'hub' }
+    : deps;
+  return Promise.all(accounts.map((account) => fetchThirdPartyAccount(account, requestDeps)));
 }
 
 module.exports = {
@@ -638,6 +795,7 @@ module.exports = {
   configuredAccounts,
   fetchThirdPartyAccount,
   fetchThirdPartyLimits,
+  validatePublicEndpointResolution,
   customBalanceQuota,
   newapiAccessToken,
   newapiAccountQuota,
@@ -652,6 +810,7 @@ module.exports = {
   normalizeCustomEndpointPath,
   normalizeCustomJsonPath,
   normalizeThirdPartyBaseUrl,
+  hostnameIsNonPublic,
   normalizeThirdPartyProfile,
   quotaPerUnit,
   readCustomJsonPath,

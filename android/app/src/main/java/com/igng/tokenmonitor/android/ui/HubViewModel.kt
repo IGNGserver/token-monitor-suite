@@ -60,15 +60,40 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
   val state = _state.asStateFlow()
   private var sseJob: Job? = null
   private var rangeJob: Job? = null
+  private val requestJobs = mutableSetOf<Job>()
+  private var connectionGeneration = 0L
+
+  private fun isCurrent(generation: Long) = generation == connectionGeneration
+
+  private fun launchRequest(block: suspend (Long) -> Unit): Job {
+    val generation = connectionGeneration
+    val job = viewModelScope.launch {
+      block(generation)
+    }
+    requestJobs += job
+    job.invokeOnCompletion { requestJobs.remove(job) }
+    return job
+  }
+
+  private fun cancelRequests() {
+    requestJobs.toList().forEach { it.cancel() }
+    requestJobs.clear()
+  }
 
   init {
+    val generation = connectionGeneration
     viewModelScope.launch {
       when (val result = repository.capabilities()) {
-        is HubResult.Success -> _state.value = _state.value.copy(authorization = result.value)
-        is HubResult.Failure -> _state.value = _state.value.copy(error = result.error.message)
+        is HubResult.Success -> if (isCurrent(generation)) {
+          _state.value = _state.value.copy(authorization = result.value)
+        }
+        is HubResult.Failure -> if (isCurrent(generation)) {
+          _state.value = _state.value.copy(error = result.error.message)
+        }
       }
+      if (!isCurrent(generation)) return@launch
       refreshAll()
-      startRealtime()
+      startRealtime(generation)
     }
   }
 
@@ -84,11 +109,12 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
     }
   }
 
-  
-  fun refreshHistory() = viewModelScope.launch {
+  fun refreshHistory() = launchRequest { generation ->
     when (val result = repository.history()) {
-      is HubResult.Success -> _state.value = _state.value.copy(history = result.value, historyError = null)
-      is HubResult.Failure -> {
+      is HubResult.Success -> if (isCurrent(generation)) {
+        _state.value = _state.value.copy(history = result.value, historyError = null)
+      }
+      is HubResult.Failure -> if (isCurrent(generation)) {
         // Not fatal to the dashboard, but the fallback (historyPreview) carries no
         // per-client/per-model stacks and is capped at 30 days, so trends and the
         // client model split stay degraded until this succeeds. Record it so the
@@ -98,53 +124,66 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
     }
   }
 
-  fun refreshStats() = viewModelScope.launch {
+  fun refreshStats() = launchRequest { generation ->
+    if (!isCurrent(generation)) return@launchRequest
     _state.value = _state.value.copy(isLoading = true, error = null)
     when (val result = repository.stats()) {
-      is HubResult.Success -> _state.value = _state.value.copy(stats = result.value, isLoading = false)
-      is HubResult.Failure -> _state.value = _state.value.copy(isLoading = false, error = result.error.message, realtime = RealtimeStatus.Disconnected)
+      is HubResult.Success -> if (isCurrent(generation)) {
+        _state.value = _state.value.copy(stats = result.value, isLoading = false)
+      }
+      is HubResult.Failure -> if (isCurrent(generation)) {
+        _state.value = _state.value.copy(isLoading = false, error = result.error.message, realtime = RealtimeStatus.Disconnected)
+      }
     }
   }
 
-  fun refreshDevices() = viewModelScope.launch {
+  fun refreshDevices() = launchRequest { generation ->
     when (val result = repository.devices()) {
-      is HubResult.Success -> _state.value = _state.value.copy(devices = result.value.devices)
-      is HubResult.Failure -> _state.value = _state.value.copy(error = result.error.message)
+      is HubResult.Success -> if (isCurrent(generation)) {
+        _state.value = _state.value.copy(devices = result.value.devices)
+      }
+      is HubResult.Failure -> if (isCurrent(generation)) {
+        _state.value = _state.value.copy(error = result.error.message)
+      }
     }
   }
 
-  fun refreshPricing() = viewModelScope.launch {
-    if (_state.value.authorization?.capabilities?.pricing != true) return@launch
+  fun refreshPricing() = launchRequest { generation ->
+    if (_state.value.authorization?.capabilities?.pricing != true) return@launchRequest
     when (val result = repository.pricing()) {
-      is HubResult.Success -> _state.value = _state.value.copy(pricing = result.value.pricing, error = null)
-      is HubResult.Failure -> _state.value = _state.value.copy(error = result.error.message)
+      is HubResult.Success -> if (isCurrent(generation)) {
+        _state.value = _state.value.copy(pricing = result.value.pricing, error = null)
+      }
+      is HubResult.Failure -> if (isCurrent(generation)) {
+        _state.value = _state.value.copy(error = result.error.message)
+      }
     }
   }
 
-  fun savePricing(model: String, request: PricingRequestDto) = viewModelScope.launch {
-    if (_state.value.authorization?.scopes?.contains("admin") != true) return@launch
+  fun savePricing(model: String, request: PricingRequestDto) = launchRequest { generation ->
+    if (_state.value.authorization?.scopes?.contains("admin") != true) return@launchRequest
     when (val result = repository.putPricing(model, request)) {
-      is HubResult.Success -> refreshPricing()
-      is HubResult.Failure -> _state.value = _state.value.copy(error = result.error.message)
+      is HubResult.Success -> if (isCurrent(generation)) refreshPricing()
+      is HubResult.Failure -> if (isCurrent(generation)) _state.value = _state.value.copy(error = result.error.message)
     }
   }
 
-  fun fetchUpstream(model: String) = viewModelScope.launch {
-    if (_state.value.authorization?.scopes?.contains("admin") != true) return@launch
+  fun fetchUpstream(model: String) = launchRequest { generation ->
+    if (_state.value.authorization?.scopes?.contains("admin") != true) return@launchRequest
     when (val result = repository.fetchUpstream(model)) {
-      is HubResult.Success -> refreshPricing()
-      is HubResult.Failure -> _state.value = _state.value.copy(error = result.error.message)
+      is HubResult.Success -> if (isCurrent(generation)) refreshPricing()
+      is HubResult.Failure -> if (isCurrent(generation)) _state.value = _state.value.copy(error = result.error.message)
     }
   }
 
-  fun fetchAllUpstream() = viewModelScope.launch {
-    if (_state.value.authorization?.scopes?.contains("admin") != true) return@launch
+  fun fetchAllUpstream() = launchRequest { generation ->
+    if (_state.value.authorization?.scopes?.contains("admin") != true) return@launchRequest
     when (val result = repository.fetchAllUpstream()) {
-      is HubResult.Success -> {
+      is HubResult.Success -> if (isCurrent(generation)) {
         _state.value = _state.value.copy(batchResult = result.value)
         refreshPricing()
       }
-      is HubResult.Failure -> _state.value = _state.value.copy(error = result.error.message)
+      is HubResult.Failure -> if (isCurrent(generation)) _state.value = _state.value.copy(error = result.error.message)
     }
   }
 
@@ -155,16 +194,22 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
    *  new Hub happened to answer — presenting one deployment's numbers as another's.
    */
   fun onConnectionChanged() {
+    connectionGeneration += 1
+    val generation = connectionGeneration
     rangeJob?.cancel()
+    rangeJob = null
     sseJob?.cancel()
+    sseJob = null
+    cancelRequests()
     _state.value = HubUiState(realtime = RealtimeStatus.Reconnecting)
     viewModelScope.launch {
       when (val result = repository.capabilities()) {
-        is HubResult.Success -> _state.value = _state.value.copy(authorization = result.value)
-        is HubResult.Failure -> _state.value = _state.value.copy(error = result.error.message)
+        is HubResult.Success -> if (isCurrent(generation)) _state.value = _state.value.copy(authorization = result.value)
+        is HubResult.Failure -> if (isCurrent(generation)) _state.value = _state.value.copy(error = result.error.message)
       }
+      if (!isCurrent(generation)) return@launch
       refreshAll()
-      startRealtime()
+      startRealtime(generation)
     }
   }
 
@@ -208,6 +253,7 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
     val rangeLabel = label ?: formatRangeLabel(startDate, endDate, startHour, endHour)
     val selection = CustomRangeSelection(startDate, endDate, startHour, endHour, rangeLabel)
     rangeJob?.cancel()
+    val generation = connectionGeneration
     rangeJob = viewModelScope.launch {
       _state.value = _state.value.copy(
         analyticsPeriod = AnalyticsPeriodKind.Custom,
@@ -215,12 +261,13 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
         customRangeLoading = true,
         error = null
       )
+      if (!isCurrent(generation)) return@launch
       when (val result = repository.usageRange(startDate, endDate, startHour, endHour)) {
-        is HubResult.Success -> _state.value = _state.value.copy(
+        is HubResult.Success -> if (isCurrent(generation)) _state.value = _state.value.copy(
           customRangeResult = result.value,
           customRangeLoading = false
         )
-        is HubResult.Failure -> _state.value = _state.value.copy(
+        is HubResult.Failure -> if (isCurrent(generation)) _state.value = _state.value.copy(
           customRangeResult = null,
           customRangeLoading = false,
           error = result.error.message
@@ -268,7 +315,7 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
     return tokens to costs
   }
 
-  fun restartRealtime() { sseJob?.cancel(); startRealtime() }
+  fun restartRealtime() { sseJob?.cancel(); sseJob = null; startRealtime() }
 
   /** Start or stop the live stream as the app moves between foreground and background.
    *
@@ -288,21 +335,24 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
     }
   }
 
-  private fun startRealtime() {
+  private fun startRealtime(generation: Long = connectionGeneration) {
     if (!repository.connection().isComplete) return
+    if (!isCurrent(generation) || sseJob?.isActive == true) return
     sseJob = viewModelScope.launch {
       var backoffMs = 1_000L
-      while (isActive) {
+      while (isActive && isCurrent(generation)) {
         _state.value = _state.value.copy(realtime = RealtimeStatus.Reconnecting)
         runCatching {
           repository.statsEvents().collect { event ->
-            event.stats?.let { _state.value = _state.value.copy(stats = it, realtime = RealtimeStatus.Live, error = null) }
+            if (isCurrent(generation)) {
+              event.stats?.let { _state.value = _state.value.copy(stats = it, realtime = RealtimeStatus.Live, error = null) }
+            }
             backoffMs = 1_000L
           }
         }.onFailure {
-          if (isActive) _state.value = _state.value.copy(realtime = RealtimeStatus.Disconnected)
+          if (isActive && isCurrent(generation)) _state.value = _state.value.copy(realtime = RealtimeStatus.Disconnected)
         }
-        if (isActive) {
+        if (isActive && isCurrent(generation)) {
           _state.value = _state.value.copy(realtime = RealtimeStatus.Reconnecting)
           delay(backoffMs)
           backoffMs = (backoffMs * 2).coerceAtMost(30_000L)

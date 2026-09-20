@@ -34,17 +34,17 @@ function rangeQueryToParts(query) {
   const from = query.get('from');
   const to = query.get('to');
   if (!from && !to) return {};
-  const parts = (value, hourFallback) => {
+  const parts = (value) => {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return null;
     const pad = (n) => String(n).padStart(2, '0');
     return {
       date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
-      hour: hourFallback ? 23 : date.getHours()
+      hour: date.getHours()
     };
   };
-  const start = from ? parts(from, false) : null;
-  const end = to ? parts(to, true) : null;
+  const start = from ? parts(from) : null;
+  const end = to ? parts(to) : null;
   if (from && !start) return null;
   if (to && !end) return null;
   return {
@@ -78,11 +78,21 @@ function createRequestRouter(deps) {
 
   // Routes the desktop client always serves itself, regardless of Hub state.
   // These are the device-local surfaces the Hub has no concept of.
-  function localRoute(path, method, options) {
+  async function localRoute(path, method, options) {
     if (path === '/stats' && READ_METHODS.has(method)) return call(deps.getStats, options);
     if (path === '/history' && READ_METHODS.has(method)) return call(deps.getHistory, options);
     if (path === '/rates' && READ_METHODS.has(method)) return call(deps.getRates, options);
     if (path === '/capabilities' && READ_METHODS.has(method)) return call(deps.getCapabilities, options);
+    if (path === '/health' && READ_METHODS.has(method)) {
+      if (typeof deps.getHealth === 'function') return call(deps.getHealth, options);
+      const caps = typeof deps.getCapabilities === 'function' ? await call(deps.getCapabilities, options) : {};
+      return {
+        ok: true,
+        role: 'desktop',
+        secretRequired: false,
+        capabilities: caps?.capabilities || {}
+      };
+    }
     if (path === '/session-detail' && READ_METHODS.has(method)) {
       return call(deps.getSessionDetail, options?.body || options);
     }
@@ -95,7 +105,13 @@ function createRequestRouter(deps) {
         error.code = 'invalid-range';
         throw error;
       }
-      return call(deps.getCustomRange, rangeInput);
+      const res = await call(deps.getCustomRange, rangeInput);
+      if (res && res.ok === false) {
+        const error = new Error(res.message || res.error || 'Custom range request failed');
+        error.code = res.error || 'range_failed';
+        throw error;
+      }
+      return res?.period || res;
     }
     return undefined;
   }
@@ -116,11 +132,11 @@ function createRequestRouter(deps) {
     const { path: cleanPath, query } = splitPath(path);
     const withQuery = options;
 
-    const local = localRoute(cleanPath, method, { ...withQuery, query });
+    const local = await localRoute(cleanPath, method, { ...withQuery, query });
     if (local !== undefined) return local;
 
     if (isHubOwned(cleanPath)) {
-      return call(deps.hubRequest, `${cleanPath}${query.toString() ? `?${query}` : ''}`, { ...options, method });
+      return call(deps.hubRequest, `/api${cleanPath}${query.toString() ? `?${query}` : ''}`, { ...options, method });
     }
 
     // Anything else is a Hub route we have no local equivalent for.

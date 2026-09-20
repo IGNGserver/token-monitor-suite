@@ -1,0 +1,44 @@
+{
+  "node": "v24.18.0",
+  "baseline": "HEAD",
+  "runs": 7,
+  "scenario": "isolated Node processes; no real provider or desktop workload",
+  "before": {
+    "directHttpModule": {
+      "ms": 192.973307,
+      "cpuMs": 224.611,
+      "retainedHeapBytes": 5834856,
+      "rssDeltaBytes": 30564352,
+      "modules": 110
+    },
+    "sessionPage200Of20000": {
+      "ms": 269.651047,
+      "heapDeltaBytes": 16479416,
+      "rows": 200,
+      "total": 20000
+    },
+    "format1000Rows": {
+      "formatRelativeMs": 46.77856799999999,
+      "formatResetMs": 133.540055
+    }
+  },
+  "after": {
+    "directHttpModule": {
+      "ms": 0.4137920000000008,
+      "cpuMs": 5.913,
+      "retainedHeapBytes": 108128,
+      "rssDeltaBytes": 1441792,
+      "modules": 0
+    },
+    "sessionPage200Of20000": {
+      "ms": 35.77345,
+      "heapDeltaBytes": 8893320,
+      "rows": 200,
+      "total": 20000
+    },
+    "format1000Rows": {
+      "formatRelativeMs": 1.9968239999999895,
+      "formatResetMs": 3.0460760000000136
+    }
+  }
+}

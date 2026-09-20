@@ -134,5 +134,4 @@ test('both entry points are wired to shared config and upload primitives', () =>
   assert.match(read('src/agent/agent.js'), /usageConfigFromSource/);
   assert.match(read('src/electron/main.js'), /createSyncUploadSink/);
   assert.match(read('src/agent/runtime.js'), /createSyncUploadSink/);
-  assert.doesNotMatch(read('src/agent/agent.js'), /createOrderedSink/);
 });

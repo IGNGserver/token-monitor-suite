@@ -11,6 +11,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const tar = require('tar');
 
 const { parseProjectVersion } = require('../src/shared/versioning');
@@ -83,6 +84,26 @@ fs.writeFileSync(
   path.join(stageDir, 'package.json'),
   `${JSON.stringify(headlessPackageJson(), null, 2)}\n`
 );
+
+// `npm ci` requires a lockfile. Generate it from the scoped manifest inside
+// the staged bundle so the documented target install is reproducible and does
+// not accidentally use the root Electron lockfile.
+const npmArgs = [
+  'install',
+  '--package-lock-only',
+  '--ignore-scripts',
+  '--omit=dev',
+  '--no-audit',
+  '--no-fund'
+];
+if (process.env.npm_execpath) {
+  execFileSync(process.execPath, [process.env.npm_execpath, ...npmArgs], { cwd: stageDir, stdio: 'inherit' });
+} else {
+  execFileSync('npm', npmArgs, { cwd: stageDir, stdio: 'inherit' });
+}
+if (!fs.existsSync(path.join(stageDir, 'package-lock.json'))) {
+  throw new Error('failed to create headless package-lock.json');
+}
 
 async function main() {
   await tar.c({ cwd: outDir, gzip: true, file: archivePath }, [stageName]);

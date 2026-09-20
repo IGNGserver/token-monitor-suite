@@ -5,7 +5,8 @@ const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, clipboard, dialog, ipcMain, net, powerMonitor, screen, session, shell } = require('electron');
-const { autoUpdater } = require('electron-updater');
+// The native downloader is needed only after the user requests an update.
+let autoUpdater;
 const { defaultDeviceId, loadDotEnv, parseBoolean, pidFilePath, sharedDataDir, normalizeHubUrl } = require('../shared/config');
 const {
   CredentialStore,
@@ -2493,6 +2494,7 @@ function setNativeAppUpdateState(patch = {}) {
 
 function configureNativeAppUpdater() {
   if (appUpdateNativeConfigured) return;
+  autoUpdater = require('electron-updater').autoUpdater;
   appUpdateNativeConfigured = true;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
@@ -3037,14 +3039,15 @@ async function requestHubRoute(path, options = {}) {
   const config = effectiveHubConfig();
   if (!config.url) throw Object.assign(new Error('Hub is not configured'), { code: 'hub_not_configured' });
   const method = String(options.method || 'GET').toUpperCase();
-  const needsSecret = method !== 'GET' || path.startsWith('/accounts') || path.startsWith('/subscriptions') || path.startsWith('/pricing');
+  const normalizedPath = path.startsWith('/api') ? path : `/api${path.startsWith('/') ? '' : '/'}${path}`;
+  const needsSecret = method !== 'GET' || normalizedPath.startsWith('/api/accounts') || normalizedPath.startsWith('/api/subscriptions') || normalizedPath.startsWith('/api/pricing');
   if (needsSecret && !config.secret) {
     throw Object.assign(new Error('Hub secret is not configured'), { code: 'hub_secret_not_configured' });
   }
   const headers = {};
   if (config.secret) headers.authorization = `Bearer ${config.secret}`;
   if (options.body !== undefined) headers['content-type'] = 'application/json';
-  const response = await fetchBufferedWithTimeout(fetch, `${config.url.replace(/\/$/, '')}${path}`, {
+  const response = await fetchBufferedWithTimeout(fetch, `${config.url.replace(/\/$/, '')}${normalizedPath}`, {
     method,
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -3063,6 +3066,30 @@ async function requestHubRoute(path, options = {}) {
   return body;
 }
 
+// Validate a newly entered Hub secret before replacing the process-owned
+// credential. Normal renderer requests deliberately cannot override that
+// credential, so secret rotation needs this separate, one-shot path.
+async function validateHubSecret(secret) {
+  const config = effectiveHubConfig();
+  if (!config.url) throw Object.assign(new Error('Hub is not configured'), { code: 'hub_not_configured' });
+  const candidate = String(secret || '').trim();
+  if (!candidate) throw Object.assign(new Error('Hub secret is not configured'), { code: 'hub_secret_not_configured' });
+  const response = await fetchBufferedWithTimeout(fetch, `${config.url.replace(/\/$/, '')}/api/capabilities`, {
+    headers: { authorization: `Bearer ${candidate}` }
+  }, HUB_REQUEST_TIMEOUT_MS);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(body.error || body.message || `Hub request failed (${response.status})`);
+    Object.assign(error, {
+      code: body.code || (response.status === 401 ? 'unauthorized' : 'hub_request_failed'),
+      status: response.status,
+      payload: body
+    });
+    throw error;
+  }
+  return body;
+}
+
 // Serves the shared UI's `/api/*` calls from this device. Local data comes from
 // the running collector/runtime; Hub-owned resources are proxied with the
 // process-held secret so the renderer never sees a credential.
@@ -3073,6 +3100,15 @@ const desktopRouter = createRequestRouter({
   getCustomRange: (options) => fetchCustomRangeStats(options?.body || options),
   getSessionDetail: (args) => fetchSessionDetail(args),
   getCapabilities: () => localCapabilitiesForRenderer(),
+  getHealth: () => {
+    const caps = localCapabilitiesForRenderer();
+    return {
+      ok: true,
+      role: 'desktop',
+      secretRequired: false,
+      capabilities: caps?.capabilities || {}
+    };
+  },
   getRates: () => ({
     rates: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     source: rateCache?.source || null,
@@ -3574,6 +3610,21 @@ app.whenReady().then(() => {
     try {
       const data = await desktopRouter.route(path, options);
       return { ok: true, data };
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          message: error?.message || String(error),
+          code: error?.code || null,
+          status: Number.isInteger(Number(error?.status)) ? Number(error.status) : null,
+          payload: error?.payload ?? null
+        }
+      };
+    }
+  });
+  ipcMain.handle('hub:validate-secret', async (_event, secret) => {
+    try {
+      return { ok: true, data: await validateHubSecret(secret) };
     } catch (error) {
       return {
         ok: false,

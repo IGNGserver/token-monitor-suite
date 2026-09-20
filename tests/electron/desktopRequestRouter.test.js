@@ -14,7 +14,7 @@ function router(overrides = {}) {
   const instance = createRequestRouter({
     getStats: () => ({ periods: {}, devices: [] }),
     getHistory: () => ({ daily: [] }),
-    getCustomRange: (input) => ({ totalTokens: 0, range: input }),
+    getCustomRange: (input) => ({ ok: true, period: { totalTokens: 100, range: input } }),
     getSessionDetail: (args) => ({ sessions: [], args }),
     getCapabilities: () => ({ capabilities: { stats: true } }),
     getRates: () => ({ rates: { USD: 1 } }),
@@ -42,6 +42,9 @@ test('device-local reads never touch the Hub', async () => {
   await instance.route('/api/history');
   await instance.route('/api/rates');
   await instance.route('/api/capabilities');
+  const health = await instance.route('/api/health');
+  assert.equal(health.ok, true);
+  assert.equal(health.secretRequired, false);
   assert.deepEqual(calls, [], 'local routes must not be proxied');
 });
 
@@ -54,11 +57,11 @@ test('Hub-owned resources are proxied with method and query preserved', async ()
   await instance.route('/api/devices/dev-1/rename', { method: 'POST', body: { deviceId: 'd2' } });
 
   assert.deepEqual(calls.map((c) => `${c.options.method} ${c.path}`), [
-    'GET /accounts',
-    'PATCH /accounts/abc-1',
-    'PUT /subscriptions',
-    'PUT /pricing/gpt-5',
-    'POST /devices/dev-1/rename'
+    'GET /api/accounts',
+    'PATCH /api/accounts/abc-1',
+    'PUT /api/subscriptions',
+    'PUT /api/pricing/gpt-5',
+    'POST /api/devices/dev-1/rename'
   ]);
 });
 
@@ -67,8 +70,9 @@ test('a custom range query is converted into the date+hour parts the collector w
   const result = await instance.route('/api/usage/range?from=2026-03-04T05:06:07.000Z&to=2026-03-06T08:09:10.000Z');
   assert.equal(result.range.startDate, '2026-03-04');
   assert.equal(result.range.endDate, '2026-03-06');
-  // `to` is inclusive of the whole end hour so the range covers that day.
-  assert.equal(result.range.endHour, 23);
+  // Preserve the selected end hour; widening it to 23 silently changed a
+  // precise datetime range into a full-day query.
+  assert.equal(result.range.endHour, new Date('2026-03-06T08:09:10.000Z').getHours());
   assert.equal(result.range.startHour, new Date('2026-03-04T05:06:07.000Z').getHours());
 });
 

@@ -5,8 +5,7 @@
 // limits page and the settings section all read from here.
 //
 // Everything in this module is display-layer derivation, deliberately kept out of
-// the wire shape — the same rule that keeps `creditsMeterPercent()` in
-// limitBalanceDisplay.js rather than in a collector.
+// the wire shape — display-only balance derivation stays out of collectors.
 (function exposeSubscriptionDisplay(root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -587,7 +586,7 @@
   // a balance attached, and treating them as balance accounts would hide the
   // very accounts most people want to record.
   //
-  // `metric` is the wire marker owned by limitBalanceDisplay.js — 'credits' is
+  // `metric` is the wire marker owned by the limit display layer — 'credits' is
   // remaining money, 'spend' is money already used, and a window with neither is
   // a real percentage quota.
   function isBalanceOnlyAccount(provider) {

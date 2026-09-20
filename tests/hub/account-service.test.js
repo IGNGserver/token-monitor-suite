@@ -100,6 +100,64 @@ test('Hub account service rejects duplicate provider identities and refreshes wi
   );
 });
 
+test('Hub account summaries read all limit snapshots in one batch', async () => {
+  const repository = new MemoryRepository();
+  const service = createHubAccountService({
+    store: repository,
+    credentialKey: 'hub-key',
+    probe: async (provider) => probeRow(provider, `${provider}-batch`)
+  });
+  await service.addAccount({ provider: 'deepseek', credential: { apiKey: 'deepseek-key' } });
+  await service.addAccount({ provider: 'openrouter', credential: { apiKey: 'openrouter-key' } });
+
+  let batchCalls = 0;
+  const batch = repository.listHubAccountSnapshots.bind(repository);
+  repository.listHubAccountSnapshots = async (ids) => {
+    batchCalls += 1;
+    assert.equal(ids.length, 2);
+    return batch(ids);
+  };
+  repository.getHubAccountSnapshot = async () => {
+    throw new Error('per-account snapshot lookup should not be used');
+  };
+
+  const summary = await service.getLimitsSummary();
+  assert.equal(summary.providers.length, 2);
+  assert.equal(batchCalls, 1);
+});
+
+test('a refresh that started before an account edit cannot publish its late result', async () => {
+  const repository = new MemoryRepository();
+  let clock = Date.parse('2026-09-12T00:00:00.000Z');
+  let refreshing = false;
+  let startedResolve;
+  let releaseProbe;
+  const started = new Promise((resolve) => { startedResolve = resolve; });
+  const service = createHubAccountService({
+    store: repository,
+    credentialKey: 'hub-key',
+    now: () => ++clock,
+    probe: async (provider) => {
+      if (refreshing) {
+        startedResolve();
+        await new Promise((resolve) => { releaseProbe = resolve; });
+      }
+      return probeRow(provider, refreshing ? 'late-refresh' : 'initial');
+    }
+  });
+  const account = await service.addAccount({ provider: 'deepseek', credential: { apiKey: 'original-key' } });
+  refreshing = true;
+  const refresh = service.refreshAccount(account.id);
+  await started;
+  const edited = await service.updateAccount(account.id, { name: 'edited-name' });
+  releaseProbe();
+
+  assert.equal(await refresh, null);
+  assert.equal(edited.name, 'edited-name');
+  assert.equal(repository.hubAccounts.get(account.id).name, 'edited-name');
+  assert.equal(decryptCredential(repository.hubCredentials.get(account.id), 'hub-key').apiKey, 'original-key');
+});
+
 test('disabling a Hub account clears its published quota snapshot until re-enabled', async () => {
   const repository = new MemoryRepository();
   let probeCount = 0;

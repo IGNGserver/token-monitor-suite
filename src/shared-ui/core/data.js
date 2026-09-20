@@ -591,10 +591,18 @@ export function projectRows(period, { incomplete = false } = {}) {
 export const MAX_SESSION_ROWS = 200;
 
 export function sessionRows(period, { limit = MAX_SESSION_ROWS } = {}) {
-  const rows = Object.entries(period?.sessions || {})
-    .map(([key, session]) => {
-      const value = Number(session?.totalTokens || 0);
-      if (value <= 0) return null;
+  const max = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Math.floor(Number(limit)) : MAX_SESSION_ROWS;
+  // Sort lightweight candidates before formatting the visible page. A local
+  // all-time archive can contain thousands of sessions; only 200 are displayed.
+  const candidates = Object.entries(period?.sessions || {})
+    .map(([key, session]) => ({
+      key, session, value: Number(session?.totalTokens || 0),
+      time: Date.parse(session?.lastUsedAt || session?.startedAt || 0)
+    }))
+    .filter(row => !(row.value <= 0))
+    .sort((a, b) => b.time - a.time || b.value - a.value);
+  const rows = candidates.slice(0, max)
+    .map(({ key, session, value }) => {
       const client = session?.client || '';
       const models = Object.keys(session?.models || {});
       return {
@@ -614,14 +622,11 @@ export function sessionRows(period, { limit = MAX_SESSION_ROWS } = {}) {
         lastUsedAt: session?.lastUsedAt || session?.startedAt || '',
         metrics: tokenMetricsForRow(period, 'session', key)
       };
-    })
-    .filter(Boolean)
-    .sort((a, b) => Date.parse(b.lastUsedAt || 0) - Date.parse(a.lastUsedAt || 0) || b.value - a.value);
-  const max = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Math.floor(Number(limit)) : MAX_SESSION_ROWS;
+    });
   return {
-    rows: rows.slice(0, max),
-    total: rows.length,
-    truncated: rows.length > max
+    rows,
+    total: candidates.length,
+    truncated: candidates.length > max
   };
 }
 

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, dialog, ipcMain, net, powerMonitor, screen, session, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, powerMonitor, screen, session, shell } = require('electron');
 // The native downloader is needed only after the user requests an update.
 let autoUpdater;
 const { defaultDeviceId, loadDotEnv, parseBoolean, pidFilePath, sharedDataDir, normalizeHubUrl } = require('../shared/config');
@@ -1090,6 +1090,22 @@ function applyWindowSettings() {
   if (typeof mainWindow.setResizable === 'function') mainWindow.setResizable(true);
 }
 
+function windowsTitleBarOverlayOptions(source = settings) {
+  const dark = source?.theme === 'dark'
+    || (source?.theme !== 'light' && Boolean(nativeTheme?.shouldUseDarkColors));
+  return {
+    color: dark ? '#0b0c0e' : '#f4f5f7',
+    symbolColor: dark ? '#e7ebf3' : '#20252d',
+    height: 36
+  };
+}
+
+function applyWindowsTitleBarOverlay(target = mainWindow, source = settings) {
+  if (process.platform !== 'win32' || !target || target.isDestroyed?.()) return;
+  if (typeof target.setTitleBarOverlay !== 'function') return;
+  try { target.setTitleBarOverlay(windowsTitleBarOverlayOptions(source)); } catch (_) {}
+}
+
 function nativeBlurEnabled(source = settings) {
   return source?.systemGlass !== false;
 }
@@ -1195,6 +1211,19 @@ function queueDesktopSnapshotCacheWrite() {
     }
   }, 250);
   desktopSnapshotCacheWriteTimer.unref?.();
+}
+
+function flushDesktopSnapshotCache() {
+  if (desktopSnapshotCacheWriteTimer !== null) {
+    clearTimeout(desktopSnapshotCacheWriteTimer);
+    desktopSnapshotCacheWriteTimer = null;
+  }
+  if (!desktopSnapshotCacheLoaded || !desktopSnapshotCache) return;
+  try {
+    desktopSnapshotCache = writeDesktopSnapshotCache(desktopSnapshotCachePath(), desktopSnapshotCache);
+  } catch (error) {
+    console.warn(`[snapshot-cache] final write failed: ${error.message}`);
+  }
 }
 
 function cacheLocalSnapshot({ history = null } = {}) {
@@ -1740,6 +1769,7 @@ async function refreshExchangeRates({ force = false } = {}) {
 
 function sendStatus(connected, extra) {
   streamConnected = Boolean(connected);
+  if (!streamConnected && settings?.hubMode === 'client') latestHubStatsLive = false;
   streamFailure = streamConnected ? null : ((extra && extra.reason) ? { reason: extra.reason, detail: extra.detail ?? null } : streamFailure);
   const streamApplicable = mode === 'sync' && settings?.hubMode === 'client';
   syncHealth.stream = {
@@ -3040,6 +3070,9 @@ function createWindow(boundsOverride, options = {}) {
     ...(typeof bounds.x === 'number' ? { x: bounds.x, y: bounds.y } : {}),
     ...WINDOW_LIMITS,
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' } : {}),
+    ...(process.platform === 'win32'
+      ? { titleBarStyle: 'hidden', titleBarOverlay: windowsTitleBarOverlayOptions(settings) }
+      : {}),
     show: false,
     backgroundColor: nativeWindowsBackdrop ? undefined : '#f4f5f7',
     icon: APP_ICON_PATH,
@@ -3057,6 +3090,7 @@ function createWindow(boundsOverride, options = {}) {
     }
   });
   mainWindow = win;
+  applyWindowsTitleBarOverlay(win);
   applyMacosNativeWindowButtons(win);
   applyWindowsChrome(win, { round: true });
   if (windowsSurface.useLegacyAccent) applyWindowsAccentBlur(win);
@@ -3686,6 +3720,7 @@ app.whenReady().then(() => {
     else if (!settings.discordRpcEnabled && previousDiscordRpcEnabled) stopDiscordRpc();
     else if (settings.discordRpcEnabled && settings.currency !== previousCurrency && latestStats) updateDiscordRpc(latestStats, settings.currency);
     applyWindowSettings();
+    applyWindowsTitleBarOverlay(mainWindow, settings);
     const nextNativeMaterial = nativeBlurEnabled();
     const nextWindowsSurface = windowsSurfaceProfile({
       platform: process.platform,
@@ -3948,6 +3983,7 @@ app.on('second-instance', focusExistingWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('before-quit', () => {
   quitRequested = true;
+  flushDesktopSnapshotCache();
   // Deliver a queued push before tearing down so the final numbers reach the
   // renderer instead of being dropped with the timer.
   flushPendingPush();

@@ -26,6 +26,52 @@ body {
   /* Fill the window rather than the viewport of a scrolling document. */
   height: 100%;
   min-height: 0;
+  position: relative;
+}
+
+/* Windows uses Electron's titleBarOverlay: the web content owns the strip and
+   the native minimize/maximize/close buttons sit over its right edge. Keeping
+   the strip in the app surface makes the native chrome share the same color and
+   material as the product instead of looking like a second window. */
+.desktop-window-strip {
+  display: none;
+}
+
+body.is-win32 .desktop-window-strip {
+  position: absolute;
+  z-index: 40;
+  inset: 0 0 auto;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 144px 0 16px;
+  overflow: hidden;
+  background: var(--bg-elevated);
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+body.is-win32 .desktop-window-title {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+body.is-win32 .desktop-window-context {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+body.is-win32 .sidebar {
+  padding-top: calc(54px + var(--safe-top));
+}
+
+body.is-win32 .main {
+  padding-top: calc(54px + var(--safe-top));
 }
 
 /* The topbar clears the macOS traffic lights when the inset title bar is used. */
@@ -41,6 +87,62 @@ body.is-mac .topbar input,
 body.is-mac .topbar a,
 body.is-mac .period-tabs {
   -webkit-app-region: no-drag;
+}
+
+.stream-status-detail {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.desktop-sync-status {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-soft) 78%, transparent);
+}
+
+.desktop-sync-head,
+.desktop-sync-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.desktop-sync-head {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.desktop-sync-source,
+.desktop-sync-row span,
+.desktop-sync-row strong {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.desktop-sync-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.desktop-sync-row[data-state="ok"] strong,
+.desktop-sync-row[data-state="live"] strong {
+  color: var(--good);
+}
+
+.desktop-sync-row[data-state="error"] strong,
+.desktop-sync-row[data-state="blocked"] strong,
+.desktop-sync-row[data-state="backoff"] strong {
+  color: var(--bad);
 }
 
 /* The sidebar is always present in a window this wide; the shared stylesheet

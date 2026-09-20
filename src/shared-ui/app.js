@@ -214,6 +214,7 @@ const els = {
   streamStatusDetail: document.getElementById('streamStatusDetail'),
   desktopSyncStatus: document.getElementById('desktopSyncStatus'),
   desktopSnapshotSource: document.getElementById('desktopSnapshotSource'),
+  brandSubtitle: document.getElementById('brandSubtitle'),
   settingsOpen: document.getElementById('settingsOpen'),
   settingsOpenTop: document.getElementById('settingsOpenTop'),
   menuToggle: document.getElementById('menuToggle'),
@@ -413,6 +414,7 @@ function formatDuration(milliseconds) {
 
 function renderDesktopSyncStatus() {
   if (!els.desktopSyncStatus || !isCapable('desktopSettings')) return;
+  els.desktopSyncStatus.classList.remove('hidden');
   const health = state.desktopSyncHealth || {};
   const channels = [
     ['local', health.local],
@@ -665,12 +667,13 @@ function viewUsesUsageScope(view = state.prefs.view) {
 }
 
 function viewKicker(view = state.prefs.view) {
-  if (view === 'settings') return tr('settings.webOnly');
+  if (view === 'settings') return tr(isCapable('desktopSettings') ? 'settings.desktopTitle' : 'settings.webOnly');
   if (view === 'limits') return tr('limits.health');
   return tr('page.overview.kicker');
 }
 
 function viewDescription(view = state.prefs.view) {
+  if (view === 'settings' && isCapable('desktopSettings')) return tr('settings.desktopDescription');
   return tr(`page.${view}.description`);
 }
 
@@ -683,6 +686,11 @@ function renderChrome() {
     return true;
   });
   if (!visibleViews.some((view) => view.id === state.prefs.view)) state.prefs.view = 'overview';
+  if (els.brandSubtitle) {
+    els.brandSubtitle.textContent = isCapable('desktopSettings')
+      ? tr('brand.desktopSubtitle')
+      : tr('brand.subtitle');
+  }
   els.primaryNav.innerHTML = visibleViews.map((view) => `
     <button type="button" class="nav-btn ${state.prefs.view === view.id ? 'active' : ''}" data-view="${view.id}">
       <span class="nav-ico">${uiIcon(view.icon)}</span>
@@ -1292,6 +1300,7 @@ function render() {
   const renderState = captureRenderState();
   if (state.prefs.view !== 'accounts') state.accountProviderMenuOpen = false;
   renderChrome();
+  if (typeof renderDesktopSyncStatus === 'function') renderDesktopSyncStatus();
   // A browser has to wait for its authorized Hub snapshot. The desktop host
   // has an independent local collector/cache and must keep navigation and
   // settings usable while a remote request is timing out.

@@ -41,6 +41,13 @@ test('the window has a usable minimum size for the sidebar layout', () => {
   assert.ok(minHeight >= 500, `minimum height ${minHeight} is too small for the content`);
 });
 
+test('Windows integrates native controls with the desktop surface', () => {
+  assert.match(main, /titleBarStyle:\s*'hidden'/, 'Windows should let the renderer own the title-bar surface');
+  assert.match(main, /titleBarOverlay:\s*windowsTitleBarOverlayOptions\(settings\)/, 'native Windows controls should overlay the shared surface');
+  assert.match(main, /setTitleBarOverlay\(windowsTitleBarOverlayOptions\(source\)\)/, 'theme changes should update the native overlay');
+  assert.match(main, /height:\s*36/, 'the renderer and native controls need one shared title-bar height');
+});
+
 test('the app no longer declares itself as a macOS accessory', () => {
   assert.equal(pkg.build.mac.extendInfo, undefined, 'LSUIElement must be gone or the app cannot be focused or Cmd-Tabbed to');
 });

@@ -35,11 +35,14 @@ function normalizeEntry(value) {
 
 function normalizeDesktopSnapshotCache(value) {
   if (!isRecord(value) || value.version !== DESKTOP_SNAPSHOT_CACHE_VERSION) return null;
+  const local = value.local == null ? null : normalizeEntry(value.local);
+  const hub = value.hub == null ? null : normalizeEntry(value.hub);
+  if ((value.local != null && !local) || (value.hub != null && !hub)) return null;
   return {
     version: DESKTOP_SNAPSHOT_CACHE_VERSION,
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : null,
-    local: normalizeEntry(value.local),
-    hub: normalizeEntry(value.hub)
+    local,
+    hub
   };
 }
 

@@ -48,11 +48,20 @@ test('the shell provides every element the shared UI binds at startup', () => {
     'app', 'primaryNav', 'streamStatus', 'streamStatusText', 'settingsOpen',
     'deviceFilter', 'periodTabs', 'customRangeBtn', 'refreshBtn', 'content',
     'heroStrip', 'totalTokens', 'totalCost', 'deviceCount', 'liveLabel',
+    'brandSubtitle', 'streamStatusDetail', 'desktopSyncStatus', 'desktopSnapshotSource',
     'authGate', 'settingsDrawer', 'rangePopover', 'rangeFrom', 'rangeTo',
     'rangeApply', 'rangeClear', 'rangeError', 'toast', 'navScrim'
   ];
   const missing = required.filter((id) => !html.includes(`id="${id}"`));
   assert.deepEqual(missing, [], `shell is missing required element ids: ${missing.join(', ')}`);
+});
+
+test('the desktop shell exposes a visible local/cache status surface', () => {
+  const html = read(path.join(rendererDir, 'index.html'));
+  assert.match(html, /class="desktop-window-strip"/, 'Windows needs a renderer-owned title-bar surface');
+  for (const channel of ['local', 'upload', 'rest', 'stream']) {
+    assert.match(html, new RegExp(`data-sync-channel="${channel}"`), `desktop sync status should show ${channel}`);
+  }
 });
 
 test('the boot module installs the transport before importing the shared UI', () => {

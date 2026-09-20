@@ -19,12 +19,16 @@
     -->
     <a class="skip-link" href="#content" data-i18n="nav.skip">Skip to content</a>
     <div id="app" class="app">
+      <div class="desktop-window-strip" aria-label="Token Monitor window">
+        <span class="desktop-window-title">Token Monitor</span>
+        <span class="desktop-window-context" data-i18n="brand.desktopSubtitle">Local collector</span>
+      </div>
       <aside class="sidebar" aria-label="Primary">
         <div class="brand">
           <img class="brand-mark" src="../../../assets/icon.png" width="28" height="28" alt="" />
           <div class="brand-copy">
             <strong>Token Monitor</strong>
-            <span data-i18n="brand.subtitle">Hub dashboard</span>
+            <span id="brandSubtitle" data-i18n="brand.desktopSubtitle">Local collector</span>
           </div>
         </div>
         <nav class="nav" id="primaryNav"></nav>
@@ -32,6 +36,19 @@
           <div id="streamStatus" class="stream-status" data-state="offline">
             <span class="stream-dot" aria-hidden="true"></span>
             <span id="streamStatusText">Offline</span>
+            <span id="streamStatusDetail" class="stream-status-detail"></span>
+          </div>
+          <div id="desktopSyncStatus" class="desktop-sync-status hidden" aria-live="polite">
+            <div class="desktop-sync-head">
+              <span data-i18n="desktop.sync.title">Desktop sync</span>
+              <span id="desktopSnapshotSource" class="desktop-sync-source">—</span>
+            </div>
+            <div class="desktop-sync-grid">
+              <div class="desktop-sync-row" data-sync-channel="local"><span data-i18n="settings.sync.healthLocal">Collection</span><strong data-sync-state>—</strong></div>
+              <div class="desktop-sync-row" data-sync-channel="upload"><span data-i18n="settings.sync.healthUpload">Upload</span><strong data-sync-state>—</strong></div>
+              <div class="desktop-sync-row" data-sync-channel="rest"><span data-i18n="settings.sync.healthRest">Snapshot</span><strong data-sync-state>—</strong></div>
+              <div class="desktop-sync-row" data-sync-channel="stream"><span data-i18n="settings.sync.healthStream">Stream</span><strong data-sync-state>—</strong></div>
+            </div>
           </div>
           <button type="button" id="settingsOpen" class="ghost-btn sidebar-settings" data-i18n="nav.settings">Settings</button>
         </div>

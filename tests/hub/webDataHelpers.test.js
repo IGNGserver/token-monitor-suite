@@ -75,11 +75,10 @@ test('hub web app wires status, heatmap, and active-days controls', () => {
   assert.match(app, /data-account-form/);
   assert.match(app, /data-account-refresh/);
   assert.match(app, /data-account-delete/);
-  assert.match(app, /data-account-provider-trigger/);
-  assert.match(app, /data-account-provider-option/);
-  assert.match(app, /data-account-provider-menu/);
+  assert.match(app, /data-account-provider-select/);
+  assert.match(app, /fluent-dropdown-option/);
   assert.match(app, /data-account-provider-input/);
-  assert.match(app, /accountProviderMenuOpen/);
+  assert.doesNotMatch(app, /data-account-provider-menu|accountProviderMenuOpen/);
   assert.doesNotMatch(app, /<select name="provider"/);
   assert.match(app, /historyRevision|deviceHistoryRevision/);
   assert.match(app, /data-subscription-form/);
@@ -125,9 +124,8 @@ test('hub account UI keeps the shared form system and reports OAuth failures', (
   assert.doesNotMatch(index, /[☰↻⚙←×]/u);
   assert.match(css, /\.field input, \.field select, \.field textarea/);
   assert.match(css, /\.account-oauth-redirect-input/);
-  assert.match(css, /\.account-select-trigger/);
-  assert.match(css, /\.account-select-menu/);
-  assert.match(css, /\.account-select-option\.selected/);
+  assert.match(css, /\.account-provider-dropdown/);
+  assert.match(css, /\.account-select-option-icon/);
   assert.match(css, /--panel: var\(--bg-elevated\)/);
   assert.match(css, /@media \(max-width: 860px\)/);
 

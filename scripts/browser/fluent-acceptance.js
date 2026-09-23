@@ -39,7 +39,7 @@ await page.locator('.settings-section-link').nth(1).click();assert.equal(await p
 for(const view of ['overview','usage','devices','limits','trends','management','settings']){await page.locator(`[data-view="${view}"]`).click();await page.waitForTimeout(120);assert.equal(await page.locator('.error-card').count(),0,view);console.log('PASS route',view)}
 await page.locator(".settings-section-link").first().click(); await page.locator('select[name="language"]').selectOption('zh-CN');await page.locator('[data-web-settings-form] fluent-button[type="submit"]').click();await page.waitForTimeout(100);await page.locator('[data-view="overview"]').click();await page.waitForTimeout(300);await page.screenshot({path:path.join(output, 'token-fluent-dark.png'),fullPage:true});
 await page.setViewportSize({width:390,height:844});await page.waitForTimeout(250);assert.equal(await page.locator('#navigationPane').getAttribute('inert'),'');await page.locator('#menuToggle').click();assert.equal(await page.locator('.main').getAttribute('inert'),'');await page.locator('[data-view="usage"]').click();assert.equal(await page.locator('.main').getAttribute('inert'),null);await page.waitForTimeout(300);await page.screenshot({path:path.join(output, 'token-fluent-mobile.png'),fullPage:true});
-console.log('WIDTH',await page.evaluate(()=>({doc:document.documentElement.scrollWidth,window:innerWidth})));assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);console.log('PASS mobile navigation and width');
+console.log('WIDTH',await page.evaluate(()=>({doc:document.documentElement.scrollWidth,window:window.innerWidth})));assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);console.log('PASS mobile navigation and width');
 await page.locator('#menuToggle').click();await page.keyboard.press('Escape');assert.equal(await page.locator('#menuToggle').getAttribute('aria-expanded'),'false');
 await page.emulateMedia({reducedMotion:'reduce',forcedColors:'active'});await page.locator('#menuToggle').click();await page.waitForTimeout(300);await page.screenshot({path:path.join(output, 'token-fluent-forced.png')});console.log('PASS forced colors/reduced motion render');
 assert.deepEqual(errors,[]); await page.close();
@@ -106,7 +106,7 @@ assert.deepEqual(errors,[]);console.log('PASS desktop file assets, IPC adapter, 
   for (const width of [320, 390, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.waitForTimeout(250);
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `overflow at ${width}`);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `overflow at ${width}`);
   }
   console.log('PASS five locales and 320/390/768/1024/1440px layouts');
   await page.close();

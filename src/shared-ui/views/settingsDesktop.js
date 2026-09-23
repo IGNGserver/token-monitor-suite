@@ -14,9 +14,9 @@ import { tr, escapeHtml, settingsOptionList } from '../core/viewContext.js';
 
 const SOFTWARE_GLASS = [['system', 'settings.appearance.glassEffectSystem'], ['off', 'settings.appearance.glassEffectTransparent']];
 const REDUCE_MOTION = [
-  ['system', 'settings.appearance.motionSystem'],
-  ['on', 'settings.appearance.motionOn'],
-  ['off', 'settings.appearance.motionOff']
+  ['system', 'desktop.settings.motionSystem'],
+  ['on', 'desktop.settings.motionOn'],
+  ['off', 'desktop.settings.motionOff']
 ];
 
 function optionLabels(pairs) {
@@ -25,10 +25,9 @@ function optionLabels(pairs) {
 
 function checkbox(name, labelKey, checked, { description = '', id = '' } = {}) {
   const idAttr = id ? ` id="${id}"` : '';
-  return `<label class="check-row">
-    <input type="checkbox" name="${name}"${idAttr}${checked ? ' checked' : ''} />
+  return `<fluent-switch class="check-row" name="${name}"${idAttr}${checked ? ' checked' : ''}>
     <span><span class="row-name">${escapeHtml(tr(labelKey))}</span>${description ? `<span class="row-sub">${escapeHtml(description)}</span>` : ''}</span>
-  </label>`;
+  </fluent-switch>`;
 }
 
 function numberField(name, labelKey, value, { min = 0, max = 100000, step = 1, id = '' } = {}) {
@@ -47,9 +46,7 @@ function selectField(name, labelKey, options, value, { id = '' } = {}) {
 
 function textField(name, labelKey, value, { id = '', placeholder = '' } = {}) {
   const idAttr = id ? ` id="${id}"` : '';
-  return `<label class="field"><span>${escapeHtml(tr(labelKey))}</span>
-    <input type="text" name="${name}"${idAttr} value="${escapeHtml(String(value ?? ''))}" spellcheck="false"${placeholder ? ` placeholder="${escapeHtml(placeholder)}"` : ''} />
-  </label>`;
+  return `<fluent-text-input class="field" type="text" name="${name}"${idAttr} value="${escapeHtml(String(value ?? ''))}" spellcheck="false"${placeholder ? ` placeholder="${escapeHtml(placeholder)}"` : ''}>${escapeHtml(tr(labelKey))}</fluent-text-input>`;
 }
 
 function tokenListField(name, ids, selected, labelKey) {
@@ -103,12 +100,12 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
     checkbox('exportAutoEnabled', 'desktop.settings.exportAuto', settings.exportAutoEnabled === true),
     `<div class="desktop-setting-row">
       <span class="row-sub" data-export-dir>${escapeHtml(settings.exportDir || tr('desktop.settings.exportDirNone'))}</span>
-      <button type="button" class="ghost-btn" data-desktop-action="pick-export-dir">${escapeHtml(tr('desktop.settings.chooseFolder'))}</button>
+      <fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="pick-export-dir">${escapeHtml(tr('desktop.settings.chooseFolder'))}</fluent-button>
     </div>`,
     selectField('exportIntervalMs', 'desktop.settings.exportInterval',
       (catalog.exportIntervals || []).map((ms) => [String(ms), `${Math.round(ms / 60000)} min`]),
       String(settings.exportIntervalMs ?? 60000)),
-    `<div class="drawer-actions"><button type="button" class="ghost-btn" data-desktop-action="export-now">${escapeHtml(tr('desktop.settings.exportNow'))}</button></div>`
+    `<div class="drawer-actions"><fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="export-now">${escapeHtml(tr('desktop.settings.exportNow'))}</fluent-button></div>`
   ].join('')));
 
   // --- Window & appearance ------------------------------------------------
@@ -158,11 +155,11 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
   generalRows.push(checkbox('discordRpcEnabled', 'desktop.settings.discordRpc', settings.discordRpcEnabled === true));
   generalRows.push(`<div class="desktop-setting-row">
       <span class="row-sub">${escapeHtml(tr('desktop.settings.appVersion'))}: <strong data-app-version>—</strong></span>
-      <button type="button" class="ghost-btn" data-desktop-action="check-updates">${escapeHtml(tr('desktop.settings.checkUpdates'))}</button>
+      <fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="check-updates">${escapeHtml(tr('desktop.settings.checkUpdates'))}</fluent-button>
     </div>`);
   generalRows.push(`<div class="desktop-setting-row">
       <span class="row-sub">${escapeHtml(tr('desktop.settings.openConfigHint'))}</span>
-      <button type="button" class="ghost-btn" data-desktop-action="open-user-data">${escapeHtml(tr('desktop.settings.openConfig'))}</button>
+      <fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="open-user-data">${escapeHtml(tr('desktop.settings.openConfig'))}</fluent-button>
     </div>`);
   groups.push(group('general', 'desktop.settings.groupGeneral', generalRows.join('')));
 
@@ -230,20 +227,19 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
 
   // --- Hub connection -----------------------------------------------------
   const hubRows = [];
-  hubRows.push(`<div class="mode-toggle-group" role="radiogroup">
-      <label class="mode-toggle"><input type="radio" name="hubMode" value="local"${(settings.hubMode || 'local') === 'local' ? ' checked' : ''} /><span>${escapeHtml(tr('desktop.settings.hubLocal'))}</span></label>
-      <label class="mode-toggle"><input type="radio" name="hubMode" value="client"${settings.hubMode === 'client' ? ' checked' : ''} /><span>${escapeHtml(tr('desktop.settings.hubClient'))}</span></label>
-    </div>`);
+  const hubMode = settings.hubMode === 'client' ? 'client' : 'local';
+  hubRows.push(`<fluent-radio-group class="mode-toggle-group" name="hubMode" value="${hubMode}" orientation="horizontal" aria-label="${escapeHtml(tr('desktop.settings.groupSync'))}">
+      <label class="mode-toggle" for="hub-mode-local"><fluent-radio id="hub-mode-local" value="local" aria-labelledby="hub-mode-local-label"${hubMode === 'local' ? ' checked' : ''}></fluent-radio><span id="hub-mode-local-label">${escapeHtml(tr('desktop.settings.hubLocal'))}</span></label>
+      <label class="mode-toggle" for="hub-mode-client"><fluent-radio id="hub-mode-client" value="client" aria-labelledby="hub-mode-client-label"${hubMode === 'client' ? ' checked' : ''}></fluent-radio><span id="hub-mode-client-label">${escapeHtml(tr('desktop.settings.hubClient'))}</span></label>
+    </fluent-radio-group>`);
   hubRows.push(textField('hubUrl', 'desktop.settings.hubUrl', settings.hubUrl || '', { placeholder: 'http://hub-host:17321' }));
   hubRows.push(`<div class="desktop-setting-block desktop-hub-secret" data-hub-secret>
-    <label class="field"><span>${escapeHtml(tr('settings.secret'))}</span>
-      <input type="password" data-hub-secret-input autocomplete="new-password" spellcheck="false" placeholder="${escapeHtml(settings.hubAdminConfigured ? tr('desktop.settings.hubSecretConfigured') : tr('desktop.settings.hubSecretMissing'))}" />
-    </label>
+    <fluent-text-input class="field" type="password" data-hub-secret-input autocomplete="new-password" spellcheck="false" placeholder="${escapeHtml(settings.hubAdminConfigured ? tr('desktop.settings.hubSecretConfigured') : tr('desktop.settings.hubSecretMissing'))}">${escapeHtml(tr('settings.secret'))}</fluent-text-input>
     <div class="desktop-setting-row">
       <span class="row-sub">${escapeHtml(tr('desktop.settings.hubSecretHint'))}</span>
       <span class="drawer-actions">
-        <button type="button" class="ghost-btn" data-desktop-action="save-hub-secret">${escapeHtml(tr('desktop.settings.saveHubSecret'))}</button>
-        ${settings.hubAdminConfigured ? `<button type="button" class="ghost-btn" data-desktop-action="clear-hub-secret">${escapeHtml(tr('desktop.settings.clearHubSecret'))}</button>` : ''}
+        <fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="save-hub-secret">${escapeHtml(tr('desktop.settings.saveHubSecret'))}</fluent-button>
+        ${settings.hubAdminConfigured ? `<fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="clear-hub-secret">${escapeHtml(tr('desktop.settings.clearHubSecret'))}</fluent-button>` : ''}
       </span>
     </div>
   </div>`);
@@ -310,8 +306,8 @@ export function readDesktopSettingsPatch(form) {
   }
   const barsShow = form.querySelector('[name="showLimitUsed"]');
   if (barsShow) patch.showLimitUsed = String(barsShow.value || '') === 'used';
-  const hubMode = form.querySelector('[name="hubMode"]:checked');
-  if (hubMode) patch.hubMode = hubMode.value;
+  const hubMode = form.querySelector('fluent-radio-group[name="hubMode"]');
+  if (hubMode) patch.hubMode = String(hubMode.value || '');
 
   // Every token list round-trips as the CSV the settings document stores. The
   // selected order is the document order, which is what the drag controls used to

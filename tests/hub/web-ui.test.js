@@ -96,7 +96,7 @@ test('hub serves the web UI on the same port without a secret', async () => {
     assert.equal(sw.status, 200);
     assert.match(sw.headers.get('content-type') || '', /javascript/);
     const swSource = await sw.text();
-    assert.match(swSource, /token-monitor-web-v6/);
+    assert.match(swSource, /token-monitor-web-v7-fluent/);
     for (const modulePath of [
       '/ui/core/viewContext.js',
       '/ui/views/home.js',

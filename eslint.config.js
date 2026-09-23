@@ -9,7 +9,7 @@ module.exports = [
   // Respect .gitignore (node_modules, dist, build, tmp, _site, .agents, .claude, data, …)
   includeIgnoreFile(path.resolve(__dirname, '.gitignore')),
   // site/ is a standalone GitHub Pages property with its own browser conventions
-  { ignores: ['site/**'] },
+  { ignores: ['site/**', 'src/shared-ui/vendor/**'] },
 
   js.configs.recommended,
 

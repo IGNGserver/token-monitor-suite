@@ -40,6 +40,7 @@ const {
   initialRendererViewStateQuery
 } = require('./viewState');
 const { createAppMenu } = require('./appMenu');
+const { createApplicationTray, TRAY_ICON_PATH } = require('./tray');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const { requireSafeHubTransport } = require('../shared/hubTransport');
@@ -269,6 +270,8 @@ const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends']
 const SHARED_UI_VIEW_IDS = new Set(['overview', 'usage', 'devices', 'limits', 'trends', 'accounts', 'management', 'settings']);
 
 let mainWindow = null;
+let applicationTray = null;
+let refreshApplicationTrayMenu = () => {};
 let settingsPath = null;
 let settings = null;
 let persistedSettingsSnapshot = null;
@@ -3113,12 +3116,14 @@ function createWindow(boundsOverride, options = {}) {
   });
   win.on('resized', persistBoundsSoon);
   win.on('moved', persistBoundsSoon);
-  // Closing is quitting. The widget-era build used to hide into a tray popover or an
-  // accessory-mode window; a normal app closes when the user closes it, and the
-  // collector lifecycle is tied to the process either way.
+  // Keep the collector alive when the user closes the window. The explicit Quit
+  // action (tray menu, app menu, update hand-off or signal) sets quitRequested
+  // first and is therefore still allowed to destroy the window and process.
   win.on('close', (event) => {
     if (quitRequested) return;
-    void event;
+    if (!applicationTray || applicationTray.isDestroyed?.()) return;
+    event.preventDefault();
+    win.hide();
   });
   win.webContents.on('before-input-event', handleZoomShortcut);
   loadWindowFile(win, {
@@ -3551,6 +3556,24 @@ app.whenReady().then(() => {
     });
   });
   createWindow();
+  try {
+    const trayHandle = createApplicationTray({
+      iconPath: APP_ICON_PATH,
+      templateIconPath: TRAY_ICON_PATH,
+      getWindow: () => mainWindow,
+      onOpenSettings: () => openSharedUiView('settings'),
+      onQuit: () => app.quit(),
+      translate: (key, params) => translate(resolveLocale(settings?.language || 'auto'), key, params)
+    });
+    applicationTray = trayHandle.tray;
+    refreshApplicationTrayMenu = trayHandle.refreshMenu;
+  } catch (error) {
+    // A missing desktop shell (for example, a Linux session without a tray
+    // host) must not prevent the collector window from starting. In that rare
+    // case close behaves like a normal quit because there is no safe recovery
+    // surface to leave the user with.
+    console.log(`[tray] unavailable: ${error?.message || error}`);
+  }
   syncLoginItemSettingFromOs();
   cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
   // A normal application has a menu bar. It also gives the shared UI a
@@ -3746,6 +3769,7 @@ app.whenReady().then(() => {
       if (settings.discordRpcEnabled && latestStats) updateDiscordRpc(latestStats, settings.currency);
       refreshExchangeRates();              // async: fetch if stale, then re-push
     }
+    refreshApplicationTrayMenu();
     pushSettingsToRenderer();
     return settingsForRenderer();
   });
@@ -3974,7 +3998,10 @@ app.whenReady().then(() => {
   });
   startMode();
   startSyncNetworkMonitor();
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else focusExistingWindow();
+  });
   maybeRunBackgroundUpdateCheck();
   startAppUpdateBackgroundChecks();
 });

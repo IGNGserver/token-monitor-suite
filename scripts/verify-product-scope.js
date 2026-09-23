@@ -74,11 +74,12 @@ function verifyProductScope() {
   // The sync UI now lives in the shared package, which both hosts render, so the
   // two-mode boundary is asserted there rather than in a desktop-only file.
   const desktopSettingsView = read('src/shared-ui/views/settingsDesktop.js');
-  // Match only the radio inputs: the view also queries '[name="hubMode"]:checked'
-  // when reading the form, which is not a mode choice.
-  const modeChoices = desktopSettingsView.match(/<input[^>]*name="hubMode"[^>]*>/g) || [];
+  // Keep the two-mode boundary tied to the actual Fluent RadioGroup rather
+  // than counting unrelated form fields that happen to share the name.
+  const modeGroup = desktopSettingsView.match(/<fluent-radio-group\b[^>]*name="hubMode"[^>]*>([\s\S]*?)<\/fluent-radio-group>/);
+  expect(Boolean(modeGroup), 'the sync settings UI must expose a Fluent radio group');
+  const modeChoices = modeGroup ? modeGroup[1].match(/<fluent-radio\b[^>]*>/g) || [] : [];
   expect(modeChoices.length === 2, 'the sync settings UI must contain exactly two mode choices');
-  expect(modeChoices.every((tag) => /type="radio"/.test(tag)), 'both mode choices must be radio inputs');
   const modeValues = modeChoices.map((tag) => (tag.match(/value="([^"]+)"/) || [])[1]).sort();
   expect(JSON.stringify(modeValues) === JSON.stringify(['client', 'local']), 'the only supported modes are local and client');
   expect(!desktopSettingsView.includes('value="host"'), 'the sync settings UI must not expose Host mode');

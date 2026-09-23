@@ -45,7 +45,7 @@ export function renderTools() {
   const toolList = tools.map((row) => {
     const active = row.key === selected.key ? ' selected' : '';
     return `
-      <button type="button" class="tool-select-row${active}" data-select-tool="${escapeHtml(row.key)}">
+      <fluent-dropdown-option class="tool-select-row${active}" value="${escapeHtml(row.key)}" text="${escapeHtml(row.name)}" aria-label="${escapeHtml(`${row.name}, ${formatNumber(row.value)} tokens, ${formatCost(row.cost, appState().prefs.currency)}`)}" data-select-tool="${escapeHtml(row.key)}"${active ? ' selected' : ''}>
         <div class="row-main">
           <img class="client-icon" src="${clientIconPath(row.key)}" alt="" onerror="this.style.display='none'" />
           <div class="row-copy">
@@ -57,14 +57,14 @@ export function renderTools() {
           <div class="row-value">${formatNumber(row.value)}</div>
           <div class="row-cost">${formatCost(row.cost, appState().prefs.currency)}</div>
         </div>
-      </button>`;
+      </fluent-dropdown-option>`;
   }).join('');
 
   return `
     <div class="grid-2 tools-layout">
       <section class="panel">
         <div class="panel-head"><h2 class="panel-title">${tr('nav.tool')}</h2></div>
-        <div class="stack tool-select-list">${toolList}</div>
+        <fluent-listbox class="tool-select-list" aria-label="${escapeHtml(tr('nav.tool'))}">${toolList}</fluent-listbox>
       </section>
       <section class="panel">
         <div class="panel-head">
@@ -117,9 +117,9 @@ export function renderUsageSubnav() {
   const current = ['tools', 'models', 'projects', 'sessions'].includes(appState().prefs.usageTab)
     ? appState().prefs.usageTab
     : 'tools';
-  return `<nav class="page-tabs" aria-label="${escapeHtml(tr('nav.usage'))}" role="tablist">
-    ${['tools', 'models', 'projects', 'sessions'].map((tab) => `<button type="button" role="tab" aria-selected="${current === tab ? 'true' : 'false'}" class="page-tab${current === tab ? ' active' : ''}" data-usage-tab="${tab}">${escapeHtml(tr(`usage.tabs.${tab}`))}</button>`).join('')}
-  </nav>`;
+  return `<tm-tablist class="page-tabs" aria-label="${escapeHtml(tr('nav.usage'))}" role="tablist">
+    ${['tools', 'models', 'projects', 'sessions'].map((tab) => `<fluent-tab id="usage-tab-${tab}" role="tab" aria-controls="usage-tabpanel" aria-selected="${current === tab ? 'true' : 'false'}" class="page-tab${current === tab ? ' active' : ''}" data-usage-tab="${tab}">${escapeHtml(tr(`usage.tabs.${tab}`))}</fluent-tab>`).join('')}
+  </tm-tablist>`;
 }
 
 export function usageRowSummary(row, { icon = false, detail = '' } = {}) {
@@ -184,6 +184,5 @@ export function renderUsage() {
       : tab === 'projects'
         ? renderUsageProjects(period)
         : renderUsageSessions(period);
-  return `<section class="page-intro"><div><div class="eyebrow">${escapeHtml(tr('page.overview.kicker'))}</div><h2>${escapeHtml(tr('nav.usage'))}</h2><p>${escapeHtml(tr('page.usage.description'))}</p></div>${renderUsageSubnav()}</section>${renderHistoryScopeNotice()}${renderUsageMetricStrip(period)}${body}`;
+  return `<section class="page-intro usage-page-intro">${renderUsageSubnav()}</section><section class="usage-tabpanel" id="usage-tabpanel" role="tabpanel" aria-labelledby="usage-tab-${tab}" tabindex="0">${renderHistoryScopeNotice()}${renderUsageMetricStrip(period)}${body}</section>`;
 }
-

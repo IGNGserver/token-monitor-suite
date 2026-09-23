@@ -111,7 +111,7 @@ export function renderDevices() {
                   </td>
                   <td>
                     <div class="device-actions">
-                      ${appState().authorization?.scopes?.includes('admin') ? `<button type="button" class="ghost-btn" data-rename-device="${escapeHtml(row.key)}">${tr('devices.rename')}</button><button type="button" class="danger-btn" data-delete-device="${escapeHtml(row.key)}">${tr('devices.delete')}</button>` : '—'}
+                      ${appState().authorization?.scopes?.includes('admin') ? `<fluent-button appearance="transparent" type="button" class="ghost-btn" data-rename-device="${escapeHtml(row.key)}">${tr('devices.rename')}</fluent-button><fluent-button appearance="secondary" type="button" class="danger-btn" data-delete-device="${escapeHtml(row.key)}">${tr('devices.delete')}</fluent-button>` : '—'}
                     </div>
                   </td>
                 </tr>
@@ -131,9 +131,9 @@ export function renderDevices() {
         </div>
         ${detailMeta ? `<div class="device-detail-meta muted tiny">${escapeHtml(detailMeta)}</div>` : ''}
         <div class="toolbar-row">
-          <div class="seg" role="group" aria-label="${tr('devices.period')}">
-            ${segButtons([['today', tr('period.today')], ['month', tr('period.month')], ['allTime', tr('period.allTime')]], detailPeriod, 'device-period')}
-          </div>
+          <fluent-radio-group class="seg" name="devicePeriod" data-selection="devicePeriod" value="${detailPeriod}" orientation="horizontal" aria-label="${tr('devices.period')}">
+            ${segButtons([['today', tr('period.today')], ['month', tr('period.month')], ['allTime', tr('period.allTime')]], detailPeriod, 'devicePeriod')}
+          </fluent-radio-group>
         </div>
         <div class="summary-grid" style="margin:12px 0 16px">
           <div class="summary-chip"><span class="summary-label">${tr('stats.tokens')}</span><strong>${formatNumber(breakdown.totalTokens)}</strong></div>

@@ -119,7 +119,7 @@ test('hub account UI keeps the shared form system and reports OAuth failures', (
 
   assert.match(app, /const UI_ICON_PATHS/);
   assert.match(app, /data-account-mode="\$\{escapeHtml\(effectiveMode\)\}"/);
-  assert.match(app, /event\.target\.closest\('button\[data-account-mode\]'\)/);
+  assert.match(app, /event\.target\.closest\('fluent-button\[data-account-mode\]'\)/);
   assert.match(app, /void saveAccountFromForm\(accountForm\)\.catch/);
   assert.match(app, /account-form-error/);
   assert.doesNotMatch(index, /[☰↻⚙←×]/u);

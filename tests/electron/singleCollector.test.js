@@ -116,8 +116,8 @@ test('stats pushes are coalesced instead of broadcast per tick', () => {
   );
 
   const flushBody = functionBody(mainSource, 'flushPush');
-  // The tray refresh used to live here too; the desktop client is a normal app
-  // with no tray, so only the window broadcast remains.
+  // Tray presentation is independent of the stats push; only the window
+  // broadcast belongs in this coalesced renderer path.
   assert.match(flushBody, /mainWindow\.webContents\.send\('stats:push'/, 'the flush performs the broadcast');
   // The history revision is still computed across the whole coalesced window. It
   // used to gate a notification to the standalone trends window; that window is

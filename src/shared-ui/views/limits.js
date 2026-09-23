@@ -223,7 +223,7 @@ export function renderLimits() {
       <span class="panel-meta tiny">${tr('limits.accountsCount', { count: cards.length })}</span>
     </div>`;
   const healthPanel = appState().prefs.limitTab === 'health' ? renderStatus() : '';
-  return `<section class="page-intro"><div><div class="eyebrow">${escapeHtml(tr('limits.health'))}</div><h2>${escapeHtml(tr('nav.limits'))}</h2><p>${escapeHtml(tr('page.limits.description'))}</p></div></section>${healthSummary}${healthPanel}${filter}${renderLimitCards(cards)}`;
+  return `${healthSummary}${healthPanel}${filter}${renderLimitCards(cards)}`;
 }
 
 export function renderStatus() {

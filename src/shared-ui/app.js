@@ -1,3 +1,4 @@
+import { finishFluentRender, setupFluentInteractions, syncFluentMotion, animateNavigation } from './core/fluent.js';
 import {
   capabilities,
   clearSecret,
@@ -314,7 +315,6 @@ const state = {
   accountEditId: '',
   accountFormMode: 'simple',
   accountSelectedProvider: 'deepseek',
-  accountProviderMenuOpen: false,
   oauthSession: null,
   oauthLoading: false,
   limitProvider: '',
@@ -509,10 +509,18 @@ function applyTheme() {
   const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   const theme = pref === 'system' ? (systemDark ? 'dark' : 'light') : pref;
   document.documentElement.dataset.theme = theme;
+  const motionPreference = isCapable('desktopSettings')
+    ? state.desktopSettings?.reduceMotion
+    : state.prefs.reduceMotion;
+  syncFluentMotion(motionPreference || 'system');
   const meta = document.querySelector('meta[name="theme-color"]:not([media])')
     || document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', theme === 'dark' ? '#0b0c0e' : '#f4f5f7');
+  if (meta) meta.setAttribute('content', theme === 'dark' ? '#292929' : '#f5f5f5');
 }
+
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if ((state.prefs.theme || 'system') === 'system') applyTheme();
+});
 
 function applyLocale() {
   state.locale = resolveLocale(state.prefs.language);
@@ -524,6 +532,7 @@ function applyLocale() {
 
 function showAuth(show) {
   els.authGate.classList.toggle('hidden', !show);
+  els.app.toggleAttribute('inert', show);
   if (show) {
     els.secretInput.value = state.secret || '';
     els.authError.classList.add('hidden');
@@ -531,7 +540,7 @@ function showAuth(show) {
   }
 }
 
-const OVERLAY_FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const OVERLAY_FOCUSABLE = 'a[href], button:not([disabled]), fluent-button:not([disabled]), fluent-tab, fluent-radio-group:not([disabled]), fluent-dropdown:not([disabled]), fluent-switch:not([disabled]), fluent-text-input:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 function overlayFocusable(root) {
   if (!root) return [];
@@ -547,7 +556,9 @@ function restoreOverlayFocus(key) {
 }
 
 function trapOverlayFocus(event) {
-  const root = !els.rangePopover.classList.contains('hidden')
+  const root = !els.authGate.classList.contains('hidden')
+    ? els.authGate.querySelector('.auth-card')
+    : !els.rangePopover.classList.contains('hidden')
     ? els.rangePopover.querySelector('.popover-card')
     : !els.settingsDrawer.classList.contains('hidden')
       ? els.settingsDrawer.querySelector('.drawer-panel')
@@ -599,7 +610,16 @@ function isMobileNav() {
 }
 
 function openNav(open) {
+  const wasOpen = state.navOpen;
   state.navOpen = Boolean(open) && isMobileNav();
+  const pane = document.getElementById('navigationPane');
+  pane?.toggleAttribute('inert', isMobileNav() && !state.navOpen);
+  document.querySelector('.main')?.toggleAttribute('inert', state.navOpen);
+  pane?.setAttribute('role', state.navOpen ? 'dialog' : 'complementary');
+  if (state.navOpen) pane?.setAttribute('aria-modal', 'true');
+  else pane?.removeAttribute('aria-modal');
+  if (state.navOpen && !wasOpen) requestAnimationFrame(() => pane?.querySelector('a')?.focus());
+  if (wasOpen && !state.navOpen) els.menuToggle?.focus();
   els.app.classList.toggle('nav-open', state.navOpen);
   document.body.classList.toggle('nav-open', state.navOpen);
   if (els.navScrim) els.navScrim.classList.toggle('hidden', !state.navOpen);
@@ -691,25 +711,35 @@ function renderChrome() {
       ? tr('brand.desktopSubtitle')
       : tr('brand.subtitle');
   }
-  els.primaryNav.innerHTML = visibleViews.map((view) => `
-    <button type="button" class="nav-btn ${state.prefs.view === view.id ? 'active' : ''}" data-view="${view.id}">
-      <span class="nav-ico">${uiIcon(view.icon)}</span>
-      <span class="nav-label">${tr(`nav.${view.id}`)}</span>
-    </button>
-  `).join('');
+  els.primaryNav.setAttribute('aria-label', tr('nav.primary'));
+  document.querySelector('.scope-commandbar')?.setAttribute('aria-label', tr('filters.scope'));
+  const navGroups = [
+    ['nav.groupInsights', ['overview', 'usage', 'trends']],
+    ['nav.groupResources', ['devices', 'limits']],
+    ['nav.groupAdministration', ['accounts', 'management', 'settings']]
+  ];
+  els.primaryNav.innerHTML = navGroups.map(([label, ids]) => {
+    const items = visibleViews.filter((view) => ids.includes(view.id));
+    if (!items.length) return '';
+    return `<div class="nav-group"><span class="nav-group-label">${tr(label)}</span>${items.map((view) => `
+      <a id="nav-${view.id}" href="${isCapable('desktopSettings') ? '#' : ''}${VIEW_PATHS[view.id]}" class="nav-btn ${state.prefs.view === view.id ? 'active' : ''}" data-view="${view.id}" ${state.prefs.view === view.id ? 'aria-current="page"' : ''}>
+        <span class="nav-ico">${uiIcon(view.icon)}</span><span class="nav-label">${tr(`nav.${view.id}`)}</span>
+      </a>`).join('')}</div>`;
+  }).join('');
   const scoped = viewUsesUsageScope();
+  document.querySelector('.scope-commandbar')?.classList.toggle('hidden', !scoped);
   els.deviceFilter?.closest('.device-filter')?.classList.toggle('hidden', !scoped);
   els.periodTabs?.classList.toggle('hidden', !scoped);
   els.customRangeBtn?.classList.toggle('hidden', !scoped || capabilities.usageRange === false);
 
-  els.periodTabs.innerHTML = [
-    ...PERIODS.map((period) => `
-      <button type="button" role="tab" aria-selected="${!state.customPeriod && state.prefs.period === period ? 'true' : 'false'}" class="period-tab ${!state.customPeriod && state.prefs.period === period ? 'active' : ''}" data-period="${period}">
-        ${tr(`period.${period}`)}
-      </button>
-    `),
-    state.customPeriod ? `<button type="button" role="tab" aria-selected="true" class="period-tab active" data-period="custom">${tr('period.custom')}</button>` : ''
-  ].join('');
+  const selectedPeriod = state.customPeriod ? 'custom' : state.prefs.period;
+  const periodOptions = PERIODS.map((period) => [period, tr(`period.${period}`)]);
+  if (state.customPeriod) periodOptions.push(['custom', tr('period.custom')]);
+  els.periodTabs.dataset.selection = 'period';
+  els.periodTabs.setAttribute('name', 'period');
+  els.periodTabs.setAttribute('aria-label', tr('period.label'));
+  els.periodTabs.innerHTML = segButtons(periodOptions, selectedPeriod, 'period');
+  els.periodTabs.value = selectedPeriod;
 
   els.pageTitle.textContent = tr(`nav.${state.prefs.view}`);
   const allDevices = state.stats?.devices || [];
@@ -816,7 +846,7 @@ function rememberFormDraft(target) {
   }));
   state.formDrafts.set(key, {
     dirty: true,
-    fields: formFieldSnapshot(form),
+    fields: { ...previous?.fields, ...formFieldSnapshot(form) },
     topUpRows: hasTopUpLedger ? topUpRows : (previous?.topUpRows || []),
     topUpRowsPresent: hasTopUpLedger || Boolean(previous?.topUpRowsPresent)
   });
@@ -851,18 +881,12 @@ function restoreFormDrafts() {
 }
 
 function describeActiveElement(element) {
+  const selection = element?.control || element;
   if (!element || element === document.body || element === document.documentElement) return null;
   if (element.id) return { kind: 'id', id: element.id };
   const form = element.closest?.('form[data-draft-key]');
   if (form) {
-    if (element.matches('[data-account-provider-trigger]')) return { kind: 'account-provider-trigger', key: draftKeyForForm(form) };
-    if (element.matches('[data-account-provider-option]')) {
-      return {
-        kind: 'account-provider-option',
-        key: draftKeyForForm(form),
-        provider: element.getAttribute('data-account-provider-option') || ''
-      };
-    }
+    if (element.matches('[data-account-provider-select]')) return { kind: 'account-provider-select', key: draftKeyForForm(form) };
     if (element.name) {
       const controls = [...form.querySelectorAll('[name]')].filter((control) => control.name === element.name);
       return {
@@ -870,21 +894,16 @@ function describeActiveElement(element) {
         key: draftKeyForForm(form),
         name: element.name,
         index: Math.max(0, controls.indexOf(element)),
-        selectionStart: typeof element.selectionStart === 'number' ? element.selectionStart : null,
-        selectionEnd: typeof element.selectionEnd === 'number' ? element.selectionEnd : null,
-        selectionDirection: element.selectionDirection || 'none'
+        selectionStart: typeof selection.selectionStart === 'number' ? selection.selectionStart : null,
+        selectionEnd: typeof selection.selectionEnd === 'number' ? selection.selectionEnd : null,
+        selectionDirection: selection.selectionDirection || 'none'
       };
     }
   }
   const dataAttributes = [
     'data-view',
-    'data-period',
     'data-select-tool',
-    'data-select-device',
-    'data-device-period',
-    'data-stack',
-    'data-range',
-    'data-trends-metric'
+    'data-select-device'
   ];
   for (const attribute of dataAttributes) {
     if (element.hasAttribute?.(attribute)) return { kind: 'data', attribute, value: element.getAttribute(attribute) || '' };
@@ -895,16 +914,10 @@ function describeActiveElement(element) {
 function findActiveElement(snapshot) {
   if (!snapshot) return null;
   if (snapshot.kind === 'id') return document.getElementById(snapshot.id);
-  if (snapshot.kind === 'account-provider-trigger') {
+  if (snapshot.kind === 'account-provider-select') {
     return [...els.content.querySelectorAll('form[data-draft-key]')]
       .find((form) => draftKeyForForm(form) === snapshot.key)
-      ?.querySelector('[data-account-provider-trigger]') || null;
-  }
-  if (snapshot.kind === 'account-provider-option') {
-    const form = [...els.content.querySelectorAll('form[data-draft-key]')]
-      .find((entry) => draftKeyForForm(entry) === snapshot.key);
-    return [...(form?.querySelectorAll('[data-account-provider-option]') || [])]
-      .find((option) => option.getAttribute('data-account-provider-option') === snapshot.provider) || null;
+      ?.querySelector('[data-account-provider-select]') || null;
   }
   if (snapshot.kind === 'form-control') {
     const form = [...els.content.querySelectorAll('form[data-draft-key]')]
@@ -924,7 +937,7 @@ function captureRenderState() {
   els.content.querySelectorAll('form[data-draft-key]').forEach((form) => {
     const key = draftKeyForForm(form);
     const draft = state.formDrafts.get(key);
-    if (draft?.dirty) draft.fields = formFieldSnapshot(form);
+    if (draft?.dirty) draft.fields = { ...draft.fields, ...formFieldSnapshot(form) };
   });
   const active = document.activeElement;
   return {
@@ -934,15 +947,17 @@ function captureRenderState() {
 }
 
 function restoreRenderState(snapshot) {
+  finishFluentRender(els.content, state.prefs.view);
   restoreFormDrafts();
   const active = findActiveElement(snapshot?.active);
   if (active && !active.disabled) {
     active.focus({ preventScroll: true });
+    const selection = active.control || active;
     if (snapshot.active.kind === 'form-control'
       && typeof snapshot.active.selectionStart === 'number'
-      && typeof active.setSelectionRange === 'function') {
+      && typeof selection.setSelectionRange === 'function') {
       try {
-        active.setSelectionRange(snapshot.active.selectionStart, snapshot.active.selectionEnd, snapshot.active.selectionDirection);
+        selection.setSelectionRange(snapshot.active.selectionStart, snapshot.active.selectionEnd, snapshot.active.selectionDirection);
       } catch (_) {
         // Some input types reject selection ranges; focus preservation still applies.
       }
@@ -953,10 +968,15 @@ function restoreRenderState(snapshot) {
   }
 }
 
-function segButtons(options, current, dataAttr) {
-  return options.map(([value, label]) => `
-    <button type="button" class="seg-btn ${String(current) === String(value) ? 'active' : ''}" data-${dataAttr}="${value}">${label}</button>
-  `).join('');
+function segButtons(options, current, groupName) {
+  return options.map(([value, label]) => {
+    const selected = String(current) === String(value);
+    const id = `choice-${groupName}-${String(value).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+    return `<label class="choice-option${selected ? ' selected' : ''}" for="${id}">
+      <fluent-radio id="${id}" value="${escapeHtml(value)}" aria-labelledby="${id}-label"${selected ? ' checked' : ''}></fluent-radio>
+      <span id="${id}-label">${escapeHtml(label)}</span>
+    </label>`;
+  }).join('');
 }
 
 function shareBarHtml(rows) {
@@ -984,11 +1004,11 @@ function shareBarHtml(rows) {
 }
 
 function loadingHtml() {
-  return `<div class="loading-stack" aria-live="polite"><div class="skeleton skeleton-title"></div><div class="skeleton-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div><div class="skeleton skeleton-panel"></div><span class="muted tiny">${tr('loading')}</span></div>`;
+  return `<fluent-spinner size="small">${tr('loading')}</fluent-spinner><div class="loading-stack" aria-live="polite"><div class="skeleton skeleton-title"></div><div class="skeleton-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div><div class="skeleton skeleton-panel"></div><span class="muted tiny">${tr('loading')}</span></div>`;
 }
 
 function managementError(title, error, retryAction) {
-  return `<section class="error-card"><div class="error-kicker">${escapeHtml(title)}</div><h2>${escapeHtml(tr('error.title'))}</h2><p>${escapeHtml(error?.message || tr('error.generic'))}</p><button type="button" class="primary-btn" data-management-retry="${retryAction}">${tr('actions.retry')}</button></section>`;
+  return `<section class="error-card"><div class="error-kicker">${escapeHtml(title)}</div><h2>${escapeHtml(tr('error.title'))}</h2><p>${escapeHtml(error?.message || tr('error.generic'))}</p><fluent-button appearance="primary" type="button" class="primary-btn" data-management-retry="${retryAction}">${tr('actions.retry')}</fluent-button></section>`;
 }
 
 function renderHero() {
@@ -1103,7 +1123,7 @@ function subscriptionTopUpRowHtml(row) {
   return `<div class="topup-row" data-topup-row data-topup-id="${escapeHtml(id)}">
     <label class="field"><span>${tr('subscriptions.topupDate')}</span><input name="topupDate_${escapeHtml(id)}" data-topup-date type="date" value="${date}" /></label>
     <label class="field"><span>${tr('subscriptions.topupAmount')}</span><input name="topupAmount_${escapeHtml(id)}" data-topup-amount type="number" min="0" step="0.01" value="${amount}" /></label>
-    <button type="button" class="ghost-btn topup-remove" data-topup-remove>${tr('subscriptions.topupRemove')}</button>
+    <fluent-button appearance="transparent" type="button" class="ghost-btn topup-remove" data-topup-remove>${tr('subscriptions.topupRemove')}</fluent-button>
   </div>`;
 }
 
@@ -1130,7 +1150,7 @@ function renderSubscriptions() {
     ? Object.entries(totals).map(([currency, minor]) => `<div class="summary-chip"><span class="summary-label">${escapeHtml(tr('subscriptions.monthly'))} · ${currency}</span><strong>${escapeHtml(formatSubscriptionMoney(minor, currency))}</strong></div>`).join('')
     : `<div class="summary-chip"><span class="summary-label">${tr('subscriptions.monthly')}</span><strong>—</strong></div>`;
   const conflictNotice = state.subscriptionsConflict
-    ? `<div class="notice warn management-conflict" role="alert"><span>${escapeHtml(tr('subscriptions.conflict'))}</span><button type="button" class="ghost-btn" data-subscription-reload-latest>${tr('subscriptions.reloadLatest')}</button></div>`
+    ? `<div class="notice warn management-conflict" role="alert"><span>${escapeHtml(tr('subscriptions.conflict'))}</span><fluent-button appearance="transparent" type="button" class="ghost-btn" data-subscription-reload-latest>${tr('subscriptions.reloadLatest')}</fluent-button></div>`
     : '';
   const list = records.length
     ? `<div class="management-list">${records.map((record) => {
@@ -1151,29 +1171,29 @@ function renderSubscriptions() {
           <div class="row-copy"><div class="row-name">${escapeHtml(record.provider || tr('subscriptions.untitled'))}</div><div class="row-sub">${escapeHtml(detail || tr('subscriptions.noDetails'))}</div></div>
         </div>
         <div class="row-metrics"><div class="row-value">${escapeHtml(formatSubscriptionMoney(recordAmount, record.currency))}</div><div class="row-cost">${escapeHtml(record.currency || 'USD')}</div></div>
-        ${canManage ? `<div class="management-actions"><button type="button" class="ghost-btn" data-subscription-edit="${escapeHtml(record.id)}">${tr('actions.edit')}</button><button type="button" class="danger-btn" data-subscription-delete="${escapeHtml(record.id)}">${tr('actions.delete')}</button></div>` : ''}
+        ${canManage ? `<div class="management-actions"><fluent-button appearance="transparent" type="button" class="ghost-btn" data-subscription-edit="${escapeHtml(record.id)}">${tr('actions.edit')}</fluent-button><fluent-button appearance="secondary" type="button" class="danger-btn" data-subscription-delete="${escapeHtml(record.id)}">${tr('actions.delete')}</fluent-button></div>` : ''}
       </article>`;
     }).join('')}</div>`
     : emptyHtml('subscriptions.empty');
   const form = `<form class="management-form" data-subscription-form data-draft-key="${escapeHtml(subscriptionDraftKey)}">
-    <div class="form-section-head"><div><h3>${editing ? tr('subscriptions.edit') : tr('subscriptions.add')}</h3><p class="muted tiny">${tr('subscriptions.formHint')}</p></div>${editing ? `<button type="button" class="ghost-btn" data-subscription-reset>${tr('actions.cancel')}</button>` : ''}</div>
+    <div class="form-section-head"><div><h3>${editing ? tr('subscriptions.edit') : tr('subscriptions.add')}</h3><p class="muted tiny">${tr('subscriptions.formHint')}</p></div>${editing ? `<fluent-button appearance="transparent" type="button" class="ghost-btn" data-subscription-reset>${tr('actions.cancel')}</fluent-button>` : ''}</div>
     <div class="form-grid">
-      <label class="field"><span>${tr('subscriptions.provider')}</span><input name="provider" required value="${subscriptionField(editing, 'provider')}" placeholder="codex" /></label>
+      <fluent-text-input class="field" name="provider" required value="${subscriptionField(editing, 'provider')}" placeholder="codex">${tr('subscriptions.provider')}</fluent-text-input>
       <label class="field"><span>${tr('subscriptions.kind')}</span><select name="kind" data-subscription-kind><option value="subscription"${!formIsTopUp ? ' selected' : ''}>${tr('subscriptions.plan')}</option><option value="topup"${formIsTopUp ? ' selected' : ''}>${tr('subscriptions.topup')}</option></select></label>
-      <label class="field"><span>${tr('subscriptions.planName')}</span><input name="planName" value="${subscriptionField(editing, 'planName')}" placeholder="Pro" /></label>
+      <fluent-text-input class="field" name="planName" value="${subscriptionField(editing, 'planName')}" placeholder="Pro">${tr('subscriptions.planName')}</fluent-text-input>
       ${!formIsTopUp ? `<label class="field"><span>${tr('subscriptions.amount')}</span><input name="amount" type="number" min="0" step="0.01" value="${escapeHtml(amount || '')}" required /></label>` : ''}
       <label class="field"><span>${tr('subscriptions.currency')}</span><select name="currency">${['USD', 'CNY', 'TWD', 'HKD'].map((code) => `<option value="${code}"${(editing?.currency || 'USD') === code ? ' selected' : ''}>${code}</option>`).join('')}</select></label>
       <label class="field"><span>${tr('subscriptions.interval')}</span><select name="interval"><option value="month"${editing?.interval !== 'year' ? ' selected' : ''}>${tr('subscriptions.monthly')}</option><option value="year"${editing?.interval === 'year' ? ' selected' : ''}>${tr('subscriptions.yearly')}</option></select></label>
       <label class="field"><span>${tr('subscriptions.intervalCount')}</span><input name="intervalCount" type="number" min="1" max="24" step="1" value="${subscriptionField(editing, 'intervalCount', '1')}" /></label>
-      ${formIsTopUp ? `<div class="field field-wide topup-ledger" data-topup-ledger><div class="topup-ledger-head"><span>${tr('subscriptions.topupLedger')}</span><button type="button" class="ghost-btn" data-topup-add>${tr('subscriptions.topupAdd')}</button></div>${topUpRows.map(subscriptionTopUpRowHtml).join('')}</div>` : `<label class="field"><span>${tr('subscriptions.startDate')}</span><input name="startDate" type="date" value="${subscriptionField(editing, 'startDate')}" /></label>`}
+      ${formIsTopUp ? `<div class="field field-wide topup-ledger" data-topup-ledger><div class="topup-ledger-head"><span>${tr('subscriptions.topupLedger')}</span><fluent-button appearance="transparent" type="button" class="ghost-btn" data-topup-add>${tr('subscriptions.topupAdd')}</fluent-button></div>${topUpRows.map(subscriptionTopUpRowHtml).join('')}</div>` : `<label class="field"><span>${tr('subscriptions.startDate')}</span><input name="startDate" type="date" value="${subscriptionField(editing, 'startDate')}" /></label>`}
       <label class="field"><span>${tr('subscriptions.nextRenewal')}</span><input name="nextRenewalOverride" type="date" value="${subscriptionField(editing, 'nextRenewalOverride')}" /></label>
       <label class="field"><span>${tr('subscriptions.endDate')}</span><input name="endDate" type="date" value="${subscriptionField(editing, 'endDate')}" /></label>
-      <label class="field"><span>${tr('subscriptions.accountEmail')}</span><input name="accountEmail" type="email" value="${subscriptionField(editing?.binding, 'accountEmail')}" /></label>
-      <label class="field"><span>${tr('subscriptions.profileName')}</span><input name="profileName" value="${subscriptionField(editing?.binding, 'profileName')}" /></label>
-      <label class="field field-wide"><span>${tr('subscriptions.note')}</span><input name="note" value="${subscriptionField(editing, 'note')}" /></label>
+      <fluent-text-input class="field" name="accountEmail" type="email" value="${subscriptionField(editing?.binding, 'accountEmail')}">${tr('subscriptions.accountEmail')}</fluent-text-input>
+      <fluent-text-input class="field" name="profileName" value="${subscriptionField(editing?.binding, 'profileName')}">${tr('subscriptions.profileName')}</fluent-text-input>
+      <fluent-text-input class="field field-wide" name="note" value="${subscriptionField(editing, 'note')}">${tr('subscriptions.note')}</fluent-text-input>
     </div>
     <label class="check-row"><input name="autoRenew" type="checkbox"${editing?.autoRenew !== false ? ' checked' : ''} /><span>${tr('subscriptions.autoRenew')}</span></label>
-    <div class="drawer-actions"><button type="submit" class="primary-btn"${state.subscriptionsSaving ? ' disabled' : ''}>${state.subscriptionsSaving ? tr('actions.saving') : tr('actions.save')}</button></div>
+    <div class="drawer-actions"><fluent-button appearance="primary" type="submit" class="primary-btn"${state.subscriptionsSaving ? ' disabled' : ''}>${state.subscriptionsSaving ? tr('actions.saving') : tr('actions.save')}</fluent-button></div>
   </form>`;
   const management = canManage ? panel(tr('subscriptions.manage'), form) : '';
   return `${renderCompletenessNotice(viewStats(), state.prefs.period)}${conflictNotice}${panel(tr('subscriptions.title'), `<div class="summary-grid subscription-summary">${summary}</div>${list}`)}${management}`;
@@ -1187,7 +1207,7 @@ function renderPricing() {
     ? `<div class="pricing-list">${entries.map((entry) => pricingForm(entry)).join('')}</div>`
     : emptyHtml('pricing.empty');
   const add = pricingForm(null);
-  return `${panel(tr('pricing.title'), `<div class="toolbar-row view-toolbar"><span class="muted tiny">${tr('pricing.hint')}</span><button type="button" class="ghost-btn" data-pricing-refresh-all>${tr('pricing.refreshAll')}</button></div>${rows}`)}${panel(tr('pricing.add'), add)}`;
+  return `${panel(tr('pricing.title'), `<div class="toolbar-row view-toolbar"><span class="muted tiny">${tr('pricing.hint')}</span><fluent-button appearance="transparent" type="button" class="ghost-btn" data-pricing-refresh-all>${tr('pricing.refreshAll')}</fluent-button></div>${rows}`)}${panel(tr('pricing.add'), add)}`;
 }
 
 function pricingForm(entry) {
@@ -1195,7 +1215,7 @@ function pricingForm(entry) {
   const value = (field) => escapeHtml(entry?.[field] ?? '');
   const draftKey = `pricing:${model || 'new'}`;
   return `<form class="pricing-form" data-pricing-form data-pricing-model="${escapeHtml(model)}" data-draft-key="${escapeHtml(draftKey)}">
-    <div class="pricing-form-head"><div><h3>${escapeHtml(model || tr('pricing.newModel'))}</h3><p class="muted tiny">${entry?.source ? `${escapeHtml(entry.source)} · ${escapeHtml(entry.updatedAt || '')}` : tr('pricing.formHint')}</p></div>${entry ? `<button type="button" class="ghost-btn" data-pricing-upstream="${escapeHtml(model)}">${tr('pricing.fetch')}</button>` : ''}</div>
+    <div class="pricing-form-head"><div><h3>${escapeHtml(model || tr('pricing.newModel'))}</h3><p class="muted tiny">${entry?.source ? `${escapeHtml(entry.source)} · ${escapeHtml(entry.updatedAt || '')}` : tr('pricing.formHint')}</p></div>${entry ? `<fluent-button appearance="transparent" type="button" class="ghost-btn" data-pricing-upstream="${escapeHtml(model)}">${tr('pricing.fetch')}</fluent-button>` : ''}</div>
     <div class="form-grid pricing-grid">
       <label class="field${entry ? '' : ' field-wide'}"><span>${tr('pricing.model')}</span><input name="model" required value="${escapeHtml(model)}" placeholder="gpt-5"${entry ? ' readonly' : ''} /></label>
       <label class="field"><span>${tr('pricing.input')}</span><input name="inputPricePerMillion" type="number" min="0" step="any" required value="${value('inputPricePerMillion')}" /></label>
@@ -1203,7 +1223,7 @@ function pricingForm(entry) {
       <label class="field"><span>${tr('pricing.cacheRead')}</span><input name="cacheReadPricePerMillion" type="number" min="0" step="any" required value="${value('cacheReadPricePerMillion')}" /></label>
       <label class="field"><span>${tr('pricing.cacheWrite')}</span><input name="cacheWritePricePerMillion" type="number" min="0" step="any" required value="${value('cacheWritePricePerMillion')}" /></label>
     </div>
-    <div class="drawer-actions"><button type="submit" class="primary-btn"${state.pricingSaving ? ' disabled' : ''}>${state.pricingSaving ? tr('actions.saving') : tr('actions.save')}</button></div>
+    <div class="drawer-actions"><fluent-button appearance="primary" type="submit" class="primary-btn"${state.pricingSaving ? ' disabled' : ''}>${state.pricingSaving ? tr('actions.saving') : tr('actions.save')}</fluent-button></div>
   </form>`;
 }
 
@@ -1213,10 +1233,10 @@ function renderManagementSubnav() {
     : 'subscriptions';
   const admin = state.authorization?.scopes?.includes('admin');
   const pricingVisible = state.authorization?.capabilities?.pricing !== false && admin;
-  return `<nav class="page-tabs" aria-label="${escapeHtml(tr('nav.management'))}" role="tablist">
-    <button type="button" role="tab" aria-selected="${current === 'subscriptions' ? 'true' : 'false'}" class="page-tab${current === 'subscriptions' ? ' active' : ''}" data-management-tab="subscriptions">${escapeHtml(tr('management.tabs.subscriptions'))}</button>
-    ${pricingVisible ? `<button type="button" role="tab" aria-selected="${current === 'pricing' ? 'true' : 'false'}" class="page-tab${current === 'pricing' ? ' active' : ''}" data-management-tab="pricing">${escapeHtml(tr('management.tabs.pricing'))}</button>` : ''}
-  </nav>`;
+  return `<tm-tablist class="page-tabs" aria-label="${escapeHtml(tr('nav.management'))}" role="tablist">
+    <fluent-tab id="management-tab-subscriptions" role="tab" aria-controls="management-tabpanel" aria-selected="${current === 'subscriptions' ? 'true' : 'false'}" class="page-tab${current === 'subscriptions' ? ' active' : ''}" data-management-tab="subscriptions">${escapeHtml(tr('management.tabs.subscriptions'))}</fluent-tab>
+    ${pricingVisible ? `<fluent-tab id="management-tab-pricing" role="tab" aria-controls="management-tabpanel" aria-selected="${current === 'pricing' ? 'true' : 'false'}" class="page-tab${current === 'pricing' ? ' active' : ''}" data-management-tab="pricing">${escapeHtml(tr('management.tabs.pricing'))}</fluent-tab>` : ''}
+  </tm-tablist>`;
 }
 
 function renderManagement() {
@@ -1225,7 +1245,7 @@ function renderManagement() {
   const tab = state.prefs.managementTab === 'pricing' && pricingVisible ? 'pricing' : 'subscriptions';
   if (state.prefs.managementTab !== tab) state.prefs.managementTab = tab;
   const body = tab === 'pricing' ? renderPricing() : renderSubscriptions();
-  return `<section class="page-intro"><div><div class="eyebrow">${escapeHtml(tr('page.overview.kicker'))}</div><h2>${escapeHtml(tr('nav.management'))}</h2><p>${escapeHtml(tr('page.management.description'))}</p></div>${renderManagementSubnav()}</section>${body}`;
+  return `<section class="page-intro management-page-intro">${renderManagementSubnav()}</section><section class="management-tabpanel" id="management-tabpanel" role="tabpanel" aria-labelledby="management-tab-${tab}" tabindex="0">${body}</section>`;
 }
 
 function settingsOptionList(options, selected) {
@@ -1238,13 +1258,16 @@ async function saveWebSettingsForm(form) {
   state.prefs.language = String(values.get('language') || 'auto');
   state.prefs.theme = String(values.get('theme') || 'system');
   state.prefs.currency = String(values.get('currency') || 'USD');
+  if (!isCapable('desktopSettings')) state.prefs.reduceMotion = String(values.get('reduceMotion') || 'system');
   state.prefs.homeLimitAccountCount = clampHomeLimitAccountCount(values.get('homeLimitAccountCount'), 3);
   savePrefs({
     language: state.prefs.language,
     theme: state.prefs.theme,
+    reduceMotion: state.prefs.reduceMotion,
     currency: state.prefs.currency,
     homeLimitAccountCount: state.prefs.homeLimitAccountCount
   });
+  clearFormDraft('preferences');
   const nextSecret = String(values.get('secret') || '').trim();
   const secretChanged = nextSecret !== state.secret;
   applyTheme();
@@ -1298,7 +1321,6 @@ function render() {
   }
   renderPending = false;
   const renderState = captureRenderState();
-  if (state.prefs.view !== 'accounts') state.accountProviderMenuOpen = false;
   renderChrome();
   if (typeof renderDesktopSyncStatus === 'function') renderDesktopSyncStatus();
   // A browser has to wait for its authorized Hub snapshot. The desktop host
@@ -1311,7 +1333,7 @@ function render() {
     return;
   }
   if (state.error && !state.stats && !desktopHost) {
-    els.content.innerHTML = `<section class="error-card"><div class="error-kicker">Token Monitor</div><h2>${escapeHtml(tr('error.title'))}</h2><p>${escapeHtml(state.error.message || tr('error.generic'))}</p><button type="button" class="primary-btn" data-retry-dashboard>${tr('actions.retry')}</button></section>`;
+    els.content.innerHTML = `<section class="error-card"><div class="error-kicker">Token Monitor</div><h2>${escapeHtml(tr('error.title'))}</h2><p>${escapeHtml(state.error.message || tr('error.generic'))}</p><fluent-button appearance="primary" type="button" class="primary-btn" data-retry-dashboard>${tr('actions.retry')}</fluent-button></section>`;
     restoreRenderState(renderState);
     return;
   }
@@ -1351,7 +1373,7 @@ function render() {
     // diagnostic in the console without exposing internal details or secrets
     // in the page, and give the user a retry path.
     console.error('[token-monitor] view render failed', error);
-    html = `<section class="error-card" role="alert"><div class="error-kicker">Token Monitor</div><h2>${escapeHtml(tr('error.title'))}</h2><p>${escapeHtml(tr('error.generic'))}</p><button type="button" class="primary-btn" data-retry-dashboard>${tr('actions.retry')}</button></section>`;
+    html = `<section class="error-card" role="alert"><div class="error-kicker">Token Monitor</div><h2>${escapeHtml(tr('error.title'))}</h2><p>${escapeHtml(tr('error.generic'))}</p><fluent-button appearance="primary" type="button" class="primary-btn" data-retry-dashboard>${tr('actions.retry')}</fluent-button></section>`;
   }
   els.content.innerHTML = html;
   restoreRenderState(renderState);
@@ -1556,22 +1578,6 @@ async function loadAccounts({ force = false } = {}) {
 }
 
 
-
-function setAccountProviderMenuOpen(open) {
-  const wrapper = els.content.querySelector('[data-account-provider-select]');
-  if (!wrapper) {
-    state.accountProviderMenuOpen = false;
-    return;
-  }
-  state.accountProviderMenuOpen = Boolean(open);
-  wrapper.classList.toggle('is-open', state.accountProviderMenuOpen);
-  const trigger = wrapper.querySelector('[data-account-provider-trigger]');
-  const menu = wrapper.querySelector('[data-account-provider-menu]');
-  trigger?.setAttribute('aria-expanded', state.accountProviderMenuOpen ? 'true' : 'false');
-  if (menu) {
-    menu.hidden = !state.accountProviderMenuOpen;
-  }
-}
 
 async function saveAccountFromForm(form) {
   const values = new FormData(form);
@@ -2196,6 +2202,7 @@ function switchView(viewId, { updateHistory = true, replace = false, tab = '' } 
     });
   }
   openNav(false);
+  if (changed) animateNavigation(els.content);
   if (validView === 'management' && state.prefs.managementTab === 'subscriptions') void loadSubscriptions().then(() => render());
   if (validView === 'management' && state.prefs.managementTab === 'pricing') void loadPricing().then(() => render());
   if (validView === 'accounts') void loadAccounts().then(() => render());
@@ -2208,6 +2215,7 @@ function switchView(viewId, { updateHistory = true, replace = false, tab = '' } 
 }
 
 function bindEvents() {
+  setupFluentInteractions();
   window.addEventListener('popstate', () => {
     const route = routeFromLocation();
     switchView(route.view, {
@@ -2219,6 +2227,8 @@ function bindEvents() {
   els.primaryNav.addEventListener('click', (event) => {
     const btn = event.target.closest('[data-view]');
     if (!btn) return;
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
     switchView(btn.dataset.view);
   });
 
@@ -2230,16 +2240,16 @@ function bindEvents() {
     });
   }
 
-  els.periodTabs.addEventListener('click', (event) => {
-    const btn = event.target.closest('[data-period]');
-    if (!btn) return;
-    if (btn.dataset.period === 'custom') {
+  els.periodTabs.addEventListener('change', () => {
+    const period = String(els.periodTabs.value || '');
+    if (period === 'custom') {
       openRange(true);
       return;
     }
+    if (!PERIODS.includes(period)) return;
     state.customPeriod = null;
     state.customRange = null;
-    state.prefs.period = btn.dataset.period;
+    state.prefs.period = period;
     savePrefs({ period: state.prefs.period });
     render();
   });
@@ -2371,7 +2381,6 @@ function bindEvents() {
       state.accountEditId = accountEdit.dataset.accountEdit || '';
       state.accountFormError = '';
       state.accountFormMode = 'simple';
-      state.accountProviderMenuOpen = false;
       render();
       return;
     }
@@ -2381,7 +2390,6 @@ function bindEvents() {
       state.accountEditId = '';
       state.accountFormError = '';
       state.accountFormMode = 'simple';
-      state.accountProviderMenuOpen = false;
       render();
       return;
     }
@@ -2390,40 +2398,12 @@ function bindEvents() {
       void deleteAccount(accountDelete.dataset.accountDelete);
       return;
     }
-    const accountMode = event.target.closest('button[data-account-mode]');
+    const accountMode = event.target.closest('fluent-button[data-account-mode]');
     if (accountMode) {
       state.accountFormMode = accountMode.dataset.accountMode;
       state.accountFormError = '';
       render();
       return;
-    }
-    const accountProviderTrigger = event.target.closest('[data-account-provider-trigger]');
-    if (accountProviderTrigger) {
-      event.preventDefault();
-      setAccountProviderMenuOpen(!state.accountProviderMenuOpen);
-      return;
-    }
-    const accountProviderOption = event.target.closest('[data-account-provider-option]');
-    if (accountProviderOption) {
-      event.preventDefault();
-      const provider = String(accountProviderOption.dataset.accountProviderOption || '').trim().toLowerCase();
-      const previousProvider = state.accountSelectedProvider;
-      state.accountSelectedProvider = provider || 'deepseek';
-      state.accountProviderMenuOpen = false;
-      if (previousProvider === state.accountSelectedProvider) {
-        setAccountProviderMenuOpen(false);
-        return;
-      }
-      state.oauthSession = null;
-      state.accountFormError = '';
-      state.accountFormMode = state.accountSelectedProvider === 'codex' || state.accountSelectedProvider === 'antigravity'
-        ? 'oauth'
-        : 'simple';
-      render();
-      return;
-    }
-    if (state.accountProviderMenuOpen && !event.target.closest('[data-account-provider-select]')) {
-      setAccountProviderMenuOpen(false);
     }
     const accountOAuthStart = event.target.closest('[data-account-oauth-start]');
     if (accountOAuthStart) {
@@ -2556,20 +2536,6 @@ function bindEvents() {
       });
       return;
     }
-    const heatmapMetric = event.target.closest('[data-heatmap-metric]');
-    if (heatmapMetric) {
-      state.prefs.heatmapMetric = heatmapMetric.dataset.heatmapMetric === 'tokens' ? 'tokens' : 'cost';
-      savePrefs({ heatmapMetric: state.prefs.heatmapMetric });
-      render();
-      return;
-    }
-    const activeDaysWindow = event.target.closest('[data-active-days-window]');
-    if (activeDaysWindow) {
-      state.prefs.activeDaysWindow = activeDaysWindow.dataset.activeDaysWindow === 'year' ? 'year' : 'all';
-      savePrefs({ activeDaysWindow: state.prefs.activeDaysWindow });
-      render();
-      return;
-    }
     const selectTool = event.target.closest('[data-select-tool]');
     if (selectTool) {
       state.prefs.selectedToolId = selectTool.dataset.selectTool || '';
@@ -2584,35 +2550,6 @@ function bindEvents() {
       render();
       return;
     }
-    const devicePeriod = event.target.closest('[data-device-period]');
-    if (devicePeriod) {
-      state.prefs.deviceDetailPeriod = devicePeriod.dataset.devicePeriod || 'today';
-      savePrefs({ deviceDetailPeriod: state.prefs.deviceDetailPeriod });
-      render();
-      return;
-    }
-    const stack = event.target.closest('[data-stack]');
-    if (stack) {
-      state.prefs.trendsStack = stack.dataset.stack;
-      savePrefs({ trendsStack: state.prefs.trendsStack });
-      render();
-      return;
-    }
-    const range = event.target.closest('[data-range]');
-    if (range) {
-      state.prefs.trendsRange = range.dataset.range;
-      savePrefs({ trendsRange: state.prefs.trendsRange });
-      render();
-      return;
-    }
-    const trendMetric = event.target.closest('[data-trends-metric]');
-    if (trendMetric) {
-      state.prefs.trendsMetric = ['tokens', 'cost', 'activeTime'].includes(trendMetric.dataset.trendsMetric)
-        ? trendMetric.dataset.trendsMetric
-        : 'tokens';
-      savePrefs({ trendsMetric: state.prefs.trendsMetric });
-      render();
-    }
   });
 
   els.content.addEventListener('input', (event) => {
@@ -2620,6 +2557,38 @@ function bindEvents() {
   });
 
   els.content.addEventListener('change', (event) => {
+    const choice = event.target.closest?.('fluent-radio-group[data-selection]');
+    if (choice) {
+      const value = String(choice.value || '');
+      const preferences = {
+        heatmapMetric: ['tokens', 'cost'].includes(value) ? value : 'tokens',
+        activeDaysWindow: value === 'year' ? 'year' : 'all',
+        devicePeriod: ['today', 'month', 'allTime'].includes(value) ? value : 'today',
+        trendsStack: value === 'model' ? 'model' : 'client',
+        trendsRange: ['7', '30', '90', '365', 'all'].includes(value) ? value : '30',
+        trendsMetric: ['tokens', 'cost', 'activeTime'].includes(value) ? value : 'tokens'
+      };
+      const setting = choice.dataset.selection;
+      if (Object.hasOwn(preferences, setting)) {
+        state.prefs[setting] = preferences[setting];
+        savePrefs({ [setting]: state.prefs[setting] });
+        render();
+      }
+      return;
+    }
+    const accountProvider = event.target.closest?.('[data-account-provider-select]');
+    if (accountProvider) {
+      const provider = String(accountProvider.value || '').trim().toLowerCase();
+      const providerInput = accountProvider.closest('form')?.querySelector('[data-account-provider-input]');
+      if (providerInput) providerInput.value = provider;
+      if (!provider || provider === state.accountSelectedProvider) return;
+      state.accountSelectedProvider = provider;
+      state.oauthSession = null;
+      state.accountFormError = '';
+      state.accountFormMode = provider === 'codex' || provider === 'antigravity' ? 'oauth' : 'simple';
+      render();
+      return;
+    }
     rememberFormDraft(event.target);
     const subscriptionKind = event.target.closest('[data-subscription-kind]');
     if (subscriptionKind) {
@@ -2631,39 +2600,6 @@ function bindEvents() {
       state.limitProvider = provider.value || '';
       render();
       return;
-    }
-  });
-
-  els.content.addEventListener('keydown', (event) => {
-    const trigger = event.target.closest('[data-account-provider-trigger]');
-    if (trigger) {
-      if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        setAccountProviderMenuOpen(true);
-        els.content.querySelector('[data-account-provider-option]')?.focus();
-      } else if (event.key === 'Escape') {
-        event.preventDefault();
-        setAccountProviderMenuOpen(false);
-      }
-      return;
-    }
-    const option = event.target.closest('[data-account-provider-option]');
-    if (!option) return;
-    const options = [...els.content.querySelectorAll('[data-account-provider-option]')];
-    const index = options.indexOf(option);
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      const nextIndex = event.key === 'ArrowDown'
-        ? (index + 1) % options.length
-        : (index - 1 + options.length) % options.length;
-      options[nextIndex]?.focus();
-    } else if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      option.click();
-    } else if (event.key === 'Escape') {
-      event.preventDefault();
-      setAccountProviderMenuOpen(false);
-      els.content.querySelector('[data-account-provider-trigger]')?.focus();
     }
   });
 
@@ -2716,6 +2652,8 @@ function bindEvents() {
   });
 
   els.refreshBtn.addEventListener('click', async () => {
+    els.refreshBtn.disabled = true;
+    els.refreshBtn.setAttribute('aria-busy', 'true');
     try {
       await refreshStats();
       state.history = null;
@@ -2732,6 +2670,9 @@ function bindEvents() {
         state.error = error;
         render();
       }
+    } finally {
+      els.refreshBtn.disabled = false;
+      els.refreshBtn.removeAttribute('aria-busy');
     }
   });
 
@@ -2763,12 +2704,6 @@ function bindEvents() {
         return;
       }
       openNav(false);
-      setAccountProviderMenuOpen(false);
-    }
-  });
-  document.addEventListener('click', (event) => {
-    if (state.accountProviderMenuOpen && !event.target.closest('[data-account-provider-select]')) {
-      setAccountProviderMenuOpen(false);
     }
   });
   window.addEventListener('resize', () => {
@@ -2906,6 +2841,7 @@ async function saveDesktopSettings(patch) {
   try {
     const next = await desktop.updateSettings(patch);
     if (next) state.desktopSettings = next;
+    syncFluentMotion(state.desktopSettings?.reduceMotion || 'system');
     return true;
   } catch (error) {
     showToast(error?.message || tr('error.generic'));
@@ -3034,6 +2970,7 @@ async function init() {
     const desktop = getTransport().desktop;
     desktop?.onSettingsPush?.((next) => {
       state.desktopSettings = next || {};
+      syncFluentMotion(state.desktopSettings.reduceMotion || 'system');
       render();
     });
     desktop?.onOpenSettings?.(() => switchView('settings'));

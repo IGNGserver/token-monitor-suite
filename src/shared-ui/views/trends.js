@@ -300,21 +300,18 @@ export function renderTrends() {
     ${renderHistoryScopeNotice()}
     ${trendSummary}
     <div class="toolbar-row">
-      <div class="seg">
-        <button type="button" class="seg-btn ${appState().prefs.trendsStack === 'client' ? 'active' : ''}" data-stack="client">${tr('trends.stack.client')}</button>
-        <button type="button" class="seg-btn ${appState().prefs.trendsStack === 'model' ? 'active' : ''}" data-stack="model">${tr('trends.stack.model')}</button>
-      </div>
-      <div class="seg">
-        ${['7', '30', '90', '365', 'all'].map((range) => `
-          <button type="button" class="seg-btn ${String(appState().prefs.trendsRange) === range ? 'active' : ''}" data-range="${range}">${range === 'all' ? 'All' : `${range}d`}</button>
-        `).join('')}
-      </div>
-      <div class="seg" role="group" aria-label="${tr('home.heatmapMetric')}">
-        ${segButtons([['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')]], heatMetric, 'heatmap-metric')}
-      </div>
-      <div class="seg" role="group" aria-label="${tr('trends.metric')}">
-        ${segButtons([['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')], ['activeTime', tr('home.activeTime')]], trendMetric, 'trends-metric')}
-      </div>
+      <fluent-radio-group class="seg" name="trendsStack" data-selection="trendsStack" value="${appState().prefs.trendsStack === 'model' ? 'model' : 'client'}" orientation="horizontal" aria-label="${tr('trends.stack')}">
+        ${segButtons([['client', tr('trends.stack.client')], ['model', tr('trends.stack.model')]], appState().prefs.trendsStack === 'model' ? 'model' : 'client', 'trendsStack')}
+      </fluent-radio-group>
+      <fluent-radio-group class="seg" name="trendsRange" data-selection="trendsRange" value="${String(appState().prefs.trendsRange)}" orientation="horizontal" aria-label="${tr('trends.range')}">
+        ${segButtons(['7', '30', '90', '365', 'all'].map((range) => [range, range === 'all' ? tr('trends.range.all') : tr('trends.range.days', { count: range })]), String(appState().prefs.trendsRange), 'trendsRange')}
+      </fluent-radio-group>
+      <fluent-radio-group class="seg" name="heatmapMetric" data-selection="heatmapMetric" value="${heatMetric}" orientation="horizontal" aria-label="${tr('home.heatmapMetric')}">
+        ${segButtons([['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')]], heatMetric, 'heatmapMetric')}
+      </fluent-radio-group>
+      <fluent-radio-group class="seg" name="trendsMetric" data-selection="trendsMetric" value="${trendMetric}" orientation="horizontal" aria-label="${tr('trends.metric')}">
+        ${segButtons([['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')], ['activeTime', tr('home.activeTime')]], trendMetric, 'trendsMetric')}
+      </fluent-radio-group>
     </div>
     ${panel(tr('nav.trends'), renderStackedBars(daily, appState().prefs.trendsStack, trendMetric))}
     ${panel(tr('home.heatmap'), renderHeatmap(daily, heatMetric))}

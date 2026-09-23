@@ -82,6 +82,7 @@ body.is-mac .topbar {
 
 /* Interactive children must opt out of the drag region or they cannot be clicked. */
 body.is-mac .topbar button,
+body.is-mac .topbar fluent-button,
 body.is-mac .topbar select,
 body.is-mac .topbar input,
 body.is-mac .topbar a,
@@ -145,14 +146,6 @@ body.is-mac .period-tabs {
   color: var(--bad);
 }
 
-/* The sidebar is always present in a window this wide; the shared stylesheet
-   collapses it to a bottom bar under 860px, which the window floor prevents. */
-@media (max-width: 860px) {
-  .app {
-    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-  }
-}
-
 /* Desktop-only settings groups, rendered inside the shared settings page. */
 .desktop-settings-group {
   margin-top: 14px;
@@ -190,3 +183,8 @@ body.is-mac .period-tabs {
   display: grid;
   gap: 14px;
 }
+
+/* Desktop owns a bounded viewport. Keep every settings section and data row
+   reachable without allowing the native window itself to scroll. */
+.main { height: 100%; overflow-y: auto; overscroll-behavior: contain; }
+body.is-mac fluent-button, body.is-mac fluent-text-input { -webkit-app-region: no-drag; }

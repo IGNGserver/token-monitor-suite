@@ -17,20 +17,20 @@ val TokenMonitorTypography = Typography(
   headlineMedium = TextStyle(
     fontFamily = FontFamily.SansSerif,
     fontWeight = FontWeight.SemiBold,
-    fontSize = 26.sp,
+    fontSize = 24.sp,
     lineHeight = 32.sp
   ),
   headlineSmall = TextStyle(
     fontFamily = FontFamily.SansSerif,
     fontWeight = FontWeight.SemiBold,
-    fontSize = 22.sp,
+    fontSize = 20.sp,
     lineHeight = 28.sp
   ),
   titleLarge = TextStyle(
     fontFamily = FontFamily.SansSerif,
     fontWeight = FontWeight.SemiBold,
     fontSize = 20.sp,
-    lineHeight = 26.sp
+    lineHeight = 28.sp
   ),
   titleMedium = TextStyle(
     fontFamily = FontFamily.SansSerif,

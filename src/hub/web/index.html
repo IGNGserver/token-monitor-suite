@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#f4f5f7" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0b0c0e" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f5f5f5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#292929" media="(prefers-color-scheme: dark)" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Token Monitor" />
@@ -20,7 +20,7 @@
   <body>
     <a class="skip-link" href="#content" data-i18n="nav.skip">Skip to content</a>
     <div id="app" class="app">
-      <aside class="sidebar" aria-label="Primary">
+      <aside class="sidebar" id="navigationPane" aria-label="Primary">
         <div class="brand">
           <img class="brand-mark" src="/icons/icon-192.png" width="28" height="28" alt="" />
           <div class="brand-copy">
@@ -34,30 +34,29 @@
             <span class="stream-dot" aria-hidden="true"></span>
             <span id="streamStatusText">Offline</span>
           </div>
-          <button type="button" id="settingsOpen" class="ghost-btn sidebar-settings" data-i18n="nav.settings">Settings</button>
+          <fluent-button appearance="transparent" type="button" id="settingsOpen" class="ghost-btn sidebar-settings" data-i18n="nav.settings">Settings</fluent-button>
         </div>
       </aside>
 
       <div class="main">
         <header class="topbar">
           <div class="topbar-left">
-            <button type="button" id="menuToggle" class="icon-btn mobile-only" aria-label="Menu" aria-controls="primaryNav" aria-expanded="false" data-i18n-aria="nav.menu"><span class="ui-icon-slot" data-ui-icon="menu"></span></button>
+            <fluent-button appearance="transparent" icon-only type="button" id="menuToggle" class="icon-btn mobile-only" aria-label="Menu" aria-controls="navigationPane" aria-expanded="false" data-i18n-aria="nav.menu"><span class="ui-icon-slot" data-ui-icon="menu"></span></fluent-button>
             <div>
               <h1 id="pageTitle" class="page-title">Home</h1>
               <p id="pageMeta" class="page-meta">—</p>
             </div>
           </div>
-          <div class="topbar-actions">
+          <div class="page-commands"><fluent-button appearance="transparent" icon-only type="button" id="refreshBtn" class="icon-btn" title="Refresh" aria-label="Refresh"><span class="ui-icon-slot" data-ui-icon="refresh"></span></fluent-button><fluent-button appearance="transparent" icon-only type="button" id="settingsOpenTop" class="icon-btn mobile-only" title="Settings" aria-label="Settings" data-i18n-aria="nav.settings"><span class="ui-icon-slot" data-ui-icon="settings"></span></fluent-button></div>
+        </header>
+        <div class="topbar-actions scope-commandbar" role="group" aria-label="Filters and actions">
             <label class="device-filter">
               <span data-i18n="filters.device">Device</span>
-              <select id="deviceFilter" aria-label="Device filter"><option value="" data-i18n="filters.allDevices">All devices</option></select>
+              <select id="deviceFilter"><option value="" data-i18n="filters.allDevices">All devices</option></select>
             </label>
-            <div class="period-tabs" id="periodTabs" role="tablist" aria-label="Period"></div>
-            <button type="button" id="customRangeBtn" class="icon-btn" title="Custom range" aria-label="Custom range" aria-controls="rangePopover" aria-expanded="false"><span class="ui-icon-slot" data-ui-icon="range"></span></button>
-            <button type="button" id="refreshBtn" class="icon-btn" title="Refresh" aria-label="Refresh"><span class="ui-icon-slot" data-ui-icon="refresh"></span></button>
-            <button type="button" id="settingsOpenTop" class="icon-btn mobile-only" title="Settings" aria-label="Settings" data-i18n-aria="nav.settings"><span class="ui-icon-slot" data-ui-icon="settings"></span></button>
-          </div>
-        </header>
+            <fluent-radio-group class="period-tabs" id="periodTabs" orientation="horizontal"></fluent-radio-group>
+            <fluent-button appearance="transparent" icon-only type="button" id="customRangeBtn" class="icon-btn" title="Custom range" aria-label="Custom range" aria-controls="rangePopover" aria-expanded="false"><span class="ui-icon-slot" data-ui-icon="range"></span></fluent-button>
+        </div>
 
         <section class="hero" id="heroStrip">
           <div class="hero-card">
@@ -87,16 +86,13 @@
         <img src="/icons/icon-192.png" width="48" height="48" alt="" />
         <h2 id="authTitle" data-i18n="auth.title">Connect to hub</h2>
         <p class="muted" data-i18n="auth.desc">Enter the shared secret configured on this hub. Leave blank only when the hub runs without authentication.</p>
-        <label class="field">
-          <span data-i18n="auth.secret">Shared secret</span>
-          <input id="secretInput" type="password" autocomplete="current-password" spellcheck="false" />
-        </label>
+        <fluent-text-input class="field" id="secretInput" type="password" autocomplete="current-password" spellcheck="false" ><span data-i18n="auth.secret">Shared secret</span></fluent-text-input>
         <label class="check-row">
           <input id="rememberSecret" type="checkbox" checked />
           <span data-i18n="auth.remember">Remember on this device</span>
         </label>
         <p id="authError" class="form-error hidden"></p>
-        <button type="submit" class="primary-btn" data-i18n="auth.connect">Open dashboard</button>
+        <fluent-button appearance="primary" type="submit" class="primary-btn" data-i18n="auth.connect">Open dashboard</fluent-button>
       </form>
     </div>
 
@@ -105,7 +101,7 @@
       <aside class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" tabindex="-1">
         <header class="drawer-head">
           <h2 id="settingsTitle" data-i18n="settings.quick">Quick settings</h2>
-          <button type="button" class="icon-btn" data-close-settings aria-label="Close"><span class="ui-icon-slot" data-ui-icon="close"></span></button>
+          <fluent-button appearance="transparent" icon-only type="button" class="icon-btn" data-close-settings aria-label="Close"><span class="ui-icon-slot" data-ui-icon="close"></span></fluent-button>
         </header>
         <div class="drawer-body">
           <label class="field">
@@ -140,13 +136,10 @@
             <span data-i18n="settings.homeLimitAccountCount">Home limit accounts</span>
             <input id="homeLimitAccountCount" type="number" min="1" max="12" step="1" value="3" />
           </label>
-          <label class="field">
-            <span data-i18n="settings.secret">Hub secret</span>
-            <input id="settingsSecret" type="password" autocomplete="off" spellcheck="false" />
-          </label>
+          <fluent-text-input class="field" id="settingsSecret" type="password" autocomplete="off" spellcheck="false" ><span data-i18n="settings.secret">Hub secret</span></fluent-text-input>
           <div class="drawer-actions">
-            <button type="button" id="saveSettingsBtn" class="primary-btn" data-i18n="settings.save">Save</button>
-            <button type="button" id="signOutBtn" class="ghost-btn" data-i18n="settings.signOut">Clear secret</button>
+            <fluent-button appearance="primary" type="button" id="saveSettingsBtn" class="primary-btn" data-i18n="settings.save">Save</fluent-button>
+            <fluent-button appearance="transparent" type="button" id="signOutBtn" class="ghost-btn" data-i18n="settings.signOut">Clear secret</fluent-button>
           </div>
           <p class="muted tiny" id="aboutLine">Token Monitor hub web</p>
         </div>
@@ -157,7 +150,7 @@
       <div class="popover-card" tabindex="-1">
         <header class="popover-head">
           <h3 id="rangeTitle" data-i18n="range.title">Custom range</h3>
-          <button type="button" class="icon-btn" id="rangeClose" aria-label="Close"><span class="ui-icon-slot" data-ui-icon="close"></span></button>
+          <fluent-button appearance="transparent" icon-only type="button" class="icon-btn" id="rangeClose" aria-label="Close"><span class="ui-icon-slot" data-ui-icon="close"></span></fluent-button>
         </header>
         <div class="popover-body">
           <label class="field">
@@ -170,8 +163,8 @@
           </label>
           <p id="rangeError" class="form-error hidden"></p>
           <div class="drawer-actions">
-            <button type="button" id="rangeApply" class="primary-btn" data-i18n="range.apply">Apply</button>
-            <button type="button" id="rangeClear" class="ghost-btn" data-i18n="range.clear">Clear</button>
+            <fluent-button appearance="primary" type="button" id="rangeApply" class="primary-btn" data-i18n="range.apply">Apply</fluent-button>
+            <fluent-button appearance="transparent" type="button" id="rangeClear" class="ghost-btn" data-i18n="range.clear">Clear</fluent-button>
           </div>
         </div>
       </div>
@@ -183,8 +176,8 @@
         <span id="pwaBannerText" data-i18n="pwa.hint">Add this dashboard as an app for faster mobile access.</span>
       </div>
       <div class="pwa-banner-actions">
-        <button type="button" id="pwaInstallBtn" class="primary-btn" data-i18n="pwa.install">Install</button>
-        <button type="button" id="pwaDismissBtn" class="ghost-btn" data-i18n="pwa.dismiss">Not now</button>
+        <fluent-button appearance="primary" type="button" id="pwaInstallBtn" class="primary-btn" data-i18n="pwa.install">Install</fluent-button>
+        <fluent-button appearance="transparent" type="button" id="pwaDismissBtn" class="ghost-btn" data-i18n="pwa.dismiss">Not now</fluent-button>
       </div>
     </div>
     <div id="toast" class="toast hidden" role="status"></div>

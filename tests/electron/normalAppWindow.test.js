@@ -52,12 +52,21 @@ test('the app no longer declares itself as a macOS accessory', () => {
   assert.equal(pkg.build.mac.extendInfo, undefined, 'LSUIElement must be gone or the app cannot be focused or Cmd-Tabbed to');
 });
 
-test('closing the window quits instead of hiding to a tray or popover', () => {
+test('closing the window hides to the tray while explicit quit remains allowed', () => {
   const start = main.indexOf("win.on('close'");
   assert.ok(start >= 0, 'a close handler should exist');
   const body = main.slice(start, start + 500);
-  assert.doesNotMatch(body, /hidePopover\(\)/, 'close must not collapse into a tray popover');
-  assert.doesNotMatch(body, /win\.hide\(\)/, 'close must not hide the window');
+  assert.match(body, /event\.preventDefault\(\)/, 'close must be intercepted');
+  assert.match(body, /win\.hide\(\)/, 'close must hide the window');
+  assert.match(body, /if \(quitRequested\) return;/, 'explicit quit must bypass the tray behavior');
+  assert.match(main, /createApplicationTray\(/, 'the app must provide a tray recovery path');
+});
+
+test('macOS activation restores a hidden window', () => {
+  const start = main.indexOf("app.on('activate'");
+  assert.ok(start >= 0, 'an activation handler should exist');
+  const body = main.slice(start, start + 260);
+  assert.match(body, /focusExistingWindow\(\)/, 'Dock activation must show the hidden window');
 });
 
 test('the packaged app ships the shared UI', () => {

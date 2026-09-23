@@ -91,10 +91,10 @@ export function renderAccounts() {
           </div>
         </div>
         ${canManage ? `<div class="management-actions">
-          <button type="button" class="ghost-btn" data-account-refresh="${escapeHtml(record.id)}" ${appState().accountsSaving ? 'disabled' : ''}>${tr('accounts.refresh')}</button>
-          <button type="button" class="ghost-btn" data-account-toggle="${escapeHtml(record.id)}" ${appState().accountsSaving ? 'disabled' : ''}>${record.enabled === false ? tr('accounts.enabled') : tr('accounts.statusDisabled')}</button>
-          <button type="button" class="ghost-btn" data-account-edit="${escapeHtml(record.id)}">${tr('actions.edit')}</button>
-          <button type="button" class="danger-btn" data-account-delete="${escapeHtml(record.id)}">${tr('actions.delete')}</button>
+          <fluent-button appearance="transparent" type="button" class="ghost-btn" data-account-refresh="${escapeHtml(record.id)}" ${appState().accountsSaving ? 'disabled' : ''}>${tr('accounts.refresh')}</fluent-button>
+          <fluent-button appearance="transparent" type="button" class="ghost-btn" data-account-toggle="${escapeHtml(record.id)}" ${appState().accountsSaving ? 'disabled' : ''}>${record.enabled === false ? tr('accounts.enabled') : tr('accounts.statusDisabled')}</fluent-button>
+          <fluent-button appearance="transparent" type="button" class="ghost-btn" data-account-edit="${escapeHtml(record.id)}">${tr('actions.edit')}</fluent-button>
+          <fluent-button appearance="secondary" type="button" class="danger-btn" data-account-delete="${escapeHtml(record.id)}">${tr('actions.delete')}</fluent-button>
         </div>` : ''}
       </article>`;
     }).join('')}</div>`
@@ -103,28 +103,20 @@ export function renderAccounts() {
   const isEditing = Boolean(editing);
   const selectedProvider = HUB_ACCOUNT_PROVIDERS.find((provider) => provider.id === currentProvider)
     || { id: currentProvider, label: clientLabel(currentProvider) };
-  const providerMenuOpen = !isEditing && appState().accountProviderMenuOpen;
   const providerOptionsHtml = HUB_ACCOUNT_PROVIDERS.map((provider) => {
     const selected = provider.id === currentProvider;
-    return `<button type="button" class="account-select-option${selected ? ' selected' : ''}" role="option" aria-selected="${selected ? 'true' : 'false'}" data-account-provider-option="${escapeHtml(provider.id)}">
-      <img class="account-select-option-icon" src="${escapeHtml(clientIconPath(provider.id))}" alt="" aria-hidden="true" onerror="this.style.display='none'" />
-      <span>${escapeHtml(provider.label || clientLabel(provider.id))}</span>
-      ${selected ? `<span class="account-select-option-check">${uiIcon('check')}</span>` : ''}
-    </button>`;
+    const label = provider.label || clientLabel(provider.id);
+    return `<fluent-dropdown-option class="account-select-option" value="${escapeHtml(provider.id)}" text="${escapeHtml(label)}"${selected ? ' selected' : ''}>
+      <img slot="start" class="account-select-option-icon" src="${escapeHtml(clientIconPath(provider.id))}" alt="" aria-hidden="true" onerror="this.style.display='none'" />
+    </fluent-dropdown-option>`;
   }).join('');
   const providerSelectHtml = `
-    <div class="account-provider-select${providerMenuOpen ? ' is-open' : ''}" data-account-provider-select data-value="${escapeHtml(currentProvider)}">
+    <div class="field account-provider-field">
+      <label id="account-provider-label">${escapeHtml(tr('accounts.provider'))}</label>
+      <fluent-dropdown class="account-provider-dropdown" value="${escapeHtml(selectedProvider.id)}" aria-labelledby="account-provider-label" data-account-provider-select${isEditing ? ' disabled' : ''}>
+        <fluent-listbox aria-label="${escapeHtml(tr('accounts.provider'))}">${providerOptionsHtml}</fluent-listbox>
+      </fluent-dropdown>
       <input type="hidden" name="provider" value="${escapeHtml(currentProvider)}" data-account-provider-input />
-      <button type="button" class="account-select-trigger" data-account-provider-trigger aria-haspopup="listbox" aria-expanded="${providerMenuOpen ? 'true' : 'false'}" aria-controls="account-provider-menu" ${isEditing ? 'disabled' : ''}>
-        <span class="account-select-current">
-          <img class="account-select-current-icon" src="${escapeHtml(clientIconPath(selectedProvider.id))}" alt="" aria-hidden="true" onerror="this.style.display='none'" />
-          <span>${escapeHtml(selectedProvider.label || clientLabel(selectedProvider.id))}</span>
-        </span>
-        <span class="account-select-chevron">${uiIcon('chevronDown')}</span>
-      </button>
-      <div id="account-provider-menu" class="account-select-menu" data-account-provider-menu role="listbox" aria-label="${escapeHtml(tr('accounts.provider'))}"${providerMenuOpen ? '' : ' hidden'}>
-        ${providerOptionsHtml}
-      </div>
     </div>`;
   const formTitle = isEditing ? tr('accounts.edit') : tr('accounts.add');
   const isOAuthCandidate = !isEditing && (currentProvider === 'codex' || currentProvider === 'antigravity');
@@ -142,9 +134,9 @@ export function renderAccounts() {
       // the OAuth token and the collector renews it from the refresh token, so the
       // account keeps working. The web cookie is Cloudflare-gated and short-lived.
       simpleFieldsHtml = `
-        <label class="field field-wide"><span>${tr('accounts.accessToken')}</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.claudeAccessTokenPlaceholder'))}" /></label>
-        <label class="field field-wide"><span>${tr('accounts.claudeRefreshToken')}</span><input name="refreshToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.claudeRefreshTokenPlaceholder'))}" /></label>
-        <label class="field field-wide"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="sessionKey=... / cookie" /></label>
+        <fluent-text-input class="field field-wide" name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.claudeAccessTokenPlaceholder'))}">${tr('accounts.accessToken')}</fluent-text-input>
+        <fluent-text-input class="field field-wide" name="refreshToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.claudeRefreshTokenPlaceholder'))}">${tr('accounts.claudeRefreshToken')}</fluent-text-input>
+        <fluent-text-input class="field field-wide" name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="sessionKey=... / cookie">${tr('accounts.cookie')}</fluent-text-input>
         <p class="muted tiny notice warn" style="margin-top:4px">${escapeHtml(tr('accounts.claudeRiskNotice'))}</p>
       `;
       break;
@@ -154,7 +146,7 @@ export function renderAccounts() {
     case 'ollama':
     case 'sakana':
       simpleFieldsHtml = `
-        <label class="field field-wide"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="sessionKey=... / cookie" ${isEditing ? '' : 'required'} /></label>
+        <fluent-text-input class="field field-wide" name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="sessionKey=... / cookie" ${isEditing ? '' : 'required'}>${tr('accounts.cookie')}</fluent-text-input>
       `;
       break;
     case 'commandcode':
@@ -163,8 +155,8 @@ export function renderAccounts() {
       // it does not expire the way a session cookie does. The cookie stays
       // available for accounts configured before the key path existed.
       simpleFieldsHtml = `
-        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.commandcodeKeyPlaceholder'))}" /></label>
-        <label class="field field-wide"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="sessionKey=... / cookie" /></label>
+        <fluent-text-input class="field field-wide" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.commandcodeKeyPlaceholder'))}">${tr('accounts.apiKey')}</fluent-text-input>
+        <fluent-text-input class="field field-wide" name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="sessionKey=... / cookie">${tr('accounts.cookie')}</fluent-text-input>
         <p class="muted tiny" style="grid-column:1 / -1;margin-top:2px">${escapeHtml(tr('accounts.commandcodeCredentialHelp'))}</p>
       `;
       break;
@@ -172,137 +164,137 @@ export function renderAccounts() {
       // Gemini Code Assist uses an OAuth access/refresh pair (Standard/Enterprise
       // only; the consumer tiers were retired on 2026-06-18).
       simpleFieldsHtml = `
-        <label class="field field-wide"><span>${tr('accounts.accessToken')}</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.geminiAccessTokenPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
-        <label class="field field-wide"><span>${tr('accounts.claudeRefreshToken')}</span><input name="refreshToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.geminiRefreshTokenPlaceholder'))}" /></label>
+        <fluent-text-input class="field field-wide" name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.geminiAccessTokenPlaceholder'))}" ${isEditing ? '' : 'required'}>${tr('accounts.accessToken')}</fluent-text-input>
+        <fluent-text-input class="field field-wide" name="refreshToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.geminiRefreshTokenPlaceholder'))}">${tr('accounts.claudeRefreshToken')}</fluent-text-input>
         <p class="muted tiny notice warn" style="margin-top:4px">${escapeHtml(tr('accounts.geminiRetiredNotice'))}</p>
       `;
       break;
     case 'kilocode':
       // Kilo Code authenticates with a Bearer API key (or the CLI login token).
       simpleFieldsHtml = `
-        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.kiloKeyPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
+        <fluent-text-input class="field field-wide" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.kiloKeyPlaceholder'))}" ${isEditing ? '' : 'required'}>${tr('accounts.apiKey')}</fluent-text-input>
       `;
       break;
     case 'cline':
       // ClinePass authenticates with a Bearer API key from app.cline.bot.
       simpleFieldsHtml = `
-        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.clineKeyPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
+        <fluent-text-input class="field field-wide" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.clineKeyPlaceholder'))}" ${isEditing ? '' : 'required'}>${tr('accounts.apiKey')}</fluent-text-input>
       `;
       break;
     case 'droid':
       // Droid (Factory) takes a WorkOS access token; the refresh token is
       // optional and lets the Hub renew instead of expiring every ~7 days.
       simpleFieldsHtml = `
-        <label class="field field-wide"><span>${tr('accounts.accessToken')}</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.droidTokenPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
-        <label class="field field-wide"><span>${tr('accounts.claudeRefreshToken')}</span><input name="refreshToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.droidRefreshTokenPlaceholder'))}" /></label>
+        <fluent-text-input class="field field-wide" name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.droidTokenPlaceholder'))}" ${isEditing ? '' : 'required'}>${tr('accounts.accessToken')}</fluent-text-input>
+        <fluent-text-input class="field field-wide" name="refreshToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.droidRefreshTokenPlaceholder'))}">${tr('accounts.claudeRefreshToken')}</fluent-text-input>
       `;
       break;
     case 'warp':
       // Warp takes a `wk-` API key (Settings → Platform → API keys). A raw Cookie
       // header value is accepted too, so the same field serves both.
       simpleFieldsHtml = `
-        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.warpKeyPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
+        <fluent-text-input class="field field-wide" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.warpKeyPlaceholder'))}" ${isEditing ? '' : 'required'}>${tr('accounts.apiKey')}</fluent-text-input>
       `;
       break;
     case 'grok':
       // Grok bills through a bearer token; ~/.grok/auth.json stores it under `key`.
       simpleFieldsHtml = `
-        <label class="field field-wide"><span>${tr('accounts.accessToken')}</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.grokTokenPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
+        <fluent-text-input class="field field-wide" name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.grokTokenPlaceholder'))}" ${isEditing ? '' : 'required'}>${tr('accounts.accessToken')}</fluent-text-input>
       `;
       break;
     case 'cursor':
       // Cursor's quota endpoints take the WorkosCursorSessionToken cookie value.
       simpleFieldsHtml = `
-        <label class="field field-wide"><span>WorkosCursorSessionToken</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.cursorTokenPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
+        <fluent-text-input class="field field-wide" name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.cursorTokenPlaceholder'))}" ${isEditing ? '' : 'required'}>WorkosCursorSessionToken</fluent-text-input>
       `;
       break;
     case 'amp':
       // Amp authenticates with the API key its own CLI stores in
       // ~/.local/share/amp/secrets.json under `apiKey@https://ampcode.com/`.
       simpleFieldsHtml = `
-        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.ampApiKeyPlaceholder'))}" ${isEditing ? '' : 'required'} /></label>
+        <fluent-text-input class="field field-wide" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.ampApiKeyPlaceholder'))}" ${isEditing ? '' : 'required'}>${tr('accounts.apiKey')}</fluent-text-input>
       `;
       break;
     case 'codex':
       simpleFieldsHtml = `
         <label class="field field-wide"><span>${tr('accounts.codexAuthJson')}</span><textarea name="authJson" rows="3" spellcheck="false" autocomplete="off" placeholder="${escapeHtml(tr('accounts.codexAuthJsonPlaceholder'))}"></textarea></label>
-        <label class="field"><span>${tr('accounts.accessToken')}</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.codexAccessTokenPlaceholder'))}" /></label>
-        <label class="field"><span>Account ID (optional)</span><input name="accountId" value="${accountCredentialField(editing, 'accountId')}" spellcheck="false" placeholder="chatgpt_account_id" /></label>
+        <fluent-text-input class="field" name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.codexAccessTokenPlaceholder'))}">${tr('accounts.accessToken')}</fluent-text-input>
+        <fluent-text-input class="field" name="accountId" value="${accountCredentialField(editing, 'accountId')}" spellcheck="false" placeholder="chatgpt_account_id">Account ID (optional)</fluent-text-input>
       `;
       break;
     case 'antigravity':
       simpleFieldsHtml = `
-        <label class="field"><span>${tr('accounts.agyEndpoint')}</span><input name="endpoint" type="url" value="${accountCredentialField(editing, 'endpoint')}" spellcheck="false" placeholder="http://hub-accessible-host:port" ${isEditing ? '' : 'required'} /></label>
-        <label class="field"><span>${tr('accounts.agyCsrfToken')}</span><input name="csrfToken" type="password" autocomplete="off" spellcheck="false" placeholder="csrf token" ${isEditing ? '' : 'required'} /></label>
+        <fluent-text-input class="field" name="endpoint" type="url" value="${accountCredentialField(editing, 'endpoint')}" spellcheck="false" placeholder="http://hub-accessible-host:port" ${isEditing ? '' : 'required'}>${tr('accounts.agyEndpoint')}</fluent-text-input>
+        <fluent-text-input class="field" name="csrfToken" type="password" autocomplete="off" spellcheck="false" placeholder="csrf token" ${isEditing ? '' : 'required'}>${tr('accounts.agyCsrfToken')}</fluent-text-input>
         <p class="muted tiny" style="grid-column:1 / -1;margin-top:2px">${escapeHtml(tr('accounts.agyEndpointHint'))}</p>
       `;
       break;
     case 'qoder':
       simpleFieldsHtml = `
-        <label class="field"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="cookie" ${isEditing ? '' : 'required'} /></label>
+        <fluent-text-input class="field" name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="cookie" ${isEditing ? '' : 'required'}>${tr('accounts.cookie')}</fluent-text-input>
         <label class="field"><span>${tr('accounts.site')}</span><select name="site"><option value="global"${accountCredentialField(editing, 'site', 'global') === 'global' ? ' selected' : ''}>Global</option><option value="cn"${accountCredentialField(editing, 'site') === 'cn' ? ' selected' : ''}>China (CN)</option></select></label>
       `;
       break;
     case 'mimo':
       simpleFieldsHtml = `
-        <label class="field"><span>${tr('accounts.mimoServiceToken')}</span><input name="serviceToken" type="password" autocomplete="off" spellcheck="false" placeholder="api-platform_serviceToken" /></label>
-        <label class="field"><span>${tr('accounts.mimoUserId')}</span><input name="userId" autocomplete="off" spellcheck="false" placeholder="1000..." /></label>
-        <label class="field field-wide"><span>${tr('accounts.cookie')} (Header)</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="userId=...; api-platform_serviceToken=..." /></label>
+        <fluent-text-input class="field" name="serviceToken" type="password" autocomplete="off" spellcheck="false" placeholder="api-platform_serviceToken">${tr('accounts.mimoServiceToken')}</fluent-text-input>
+        <fluent-text-input class="field" name="userId" autocomplete="off" spellcheck="false" placeholder="1000...">${tr('accounts.mimoUserId')}</fluent-text-input>
+        <fluent-text-input class="field field-wide" name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="userId=...; api-platform_serviceToken=...">${tr('accounts.cookie')} (Header)</fluent-text-input>
         <p class="muted tiny" style="grid-column:1 / -1;margin-top:2px">${escapeHtml(tr('accounts.mimoHint'))}</p>
       `;
       break;
     case 'copilot':
       simpleFieldsHtml = `
-        <label class="field"><span>${tr('accounts.accessToken')}</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="ghu_... / token" ${isEditing ? '' : 'required'} /></label>
-        <label class="field"><span>Enterprise Host (optional)</span><input name="enterpriseHost" value="${accountCredentialField(editing, 'enterpriseHost')}" spellcheck="false" placeholder="github.mycompany.com" /></label>
+        <fluent-text-input class="field" name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="ghu_... / token" ${isEditing ? '' : 'required'}>${tr('accounts.accessToken')}</fluent-text-input>
+        <fluent-text-input class="field" name="enterpriseHost" value="${accountCredentialField(editing, 'enterpriseHost')}" spellcheck="false" placeholder="github.mycompany.com">Enterprise Host (optional)</fluent-text-input>
       `;
       break;
     case 'volcengine':
       simpleFieldsHtml = `
-        <label class="field"><span>${tr('accounts.accessKeyId')}</span><input name="accessKeyId" value="${accountCredentialField(editing, 'accessKeyId')}" spellcheck="false" placeholder="AKLT..." /></label>
-        <label class="field"><span>${tr('accounts.secretAccessKey')}</span><input name="secretAccessKey" type="password" autocomplete="off" spellcheck="false" placeholder="Secret Access Key" /></label>
-        <label class="field"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Ark API Key (alternative)" /></label>
-        <label class="field"><span>${tr('accounts.region')}</span><input name="region" value="${accountCredentialField(editing, 'region')}" spellcheck="false" placeholder="cn-beijing" /></label>
+        <fluent-text-input class="field" name="accessKeyId" value="${accountCredentialField(editing, 'accessKeyId')}" spellcheck="false" placeholder="AKLT...">${tr('accounts.accessKeyId')}</fluent-text-input>
+        <fluent-text-input class="field" name="secretAccessKey" type="password" autocomplete="off" spellcheck="false" placeholder="Secret Access Key">${tr('accounts.secretAccessKey')}</fluent-text-input>
+        <fluent-text-input class="field" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Ark API Key (alternative)">${tr('accounts.apiKey')}</fluent-text-input>
+        <fluent-text-input class="field" name="region" value="${accountCredentialField(editing, 'region')}" spellcheck="false" placeholder="cn-beijing">${tr('accounts.region')}</fluent-text-input>
       `;
       break;
     case 'zaiteam':
       simpleFieldsHtml = `
-        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="API Key" ${isEditing ? '' : 'required'} /></label>
-        <label class="field"><span>Organization ID</span><input name="organizationId" value="${accountCredentialField(editing, 'organizationId')}" spellcheck="false" placeholder="org_..." ${isEditing ? '' : 'required'} /></label>
-        <label class="field"><span>Project ID</span><input name="projectId" value="${accountCredentialField(editing, 'projectId')}" spellcheck="false" placeholder="proj_..." ${isEditing ? '' : 'required'} /></label>
+        <fluent-text-input class="field field-wide" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="API Key" ${isEditing ? '' : 'required'}>${tr('accounts.apiKey')}</fluent-text-input>
+        <fluent-text-input class="field" name="organizationId" value="${accountCredentialField(editing, 'organizationId')}" spellcheck="false" placeholder="org_..." ${isEditing ? '' : 'required'}>Organization ID</fluent-text-input>
+        <fluent-text-input class="field" name="projectId" value="${accountCredentialField(editing, 'projectId')}" spellcheck="false" placeholder="proj_..." ${isEditing ? '' : 'required'}>Project ID</fluent-text-input>
       `;
       break;
     case 'thirdparty':
       simpleFieldsHtml = `
         <label class="field"><span>${tr('accounts.thirdPartyAdapter')}</span><select name="adapter"><option value="newapi"${accountCredentialField(editing, 'adapter', 'newapi') === 'newapi' ? ' selected' : ''}>New API / OneAPI</option><option value="custom"${accountCredentialField(editing, 'adapter') === 'custom' ? ' selected' : ''}>Custom</option></select></label>
-        <label class="field"><span>${tr('accounts.thirdPartyBaseUrl')}</span><input name="baseUrl" type="url" value="${accountCredentialField(editing, 'baseUrl')}" spellcheck="false" placeholder="https://api.example.com" ${isEditing ? '' : 'required'} /></label>
-        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." ${isEditing ? '' : 'required'} /></label>
+        <fluent-text-input class="field" name="baseUrl" type="url" value="${accountCredentialField(editing, 'baseUrl')}" spellcheck="false" placeholder="https://api.example.com" ${isEditing ? '' : 'required'}>${tr('accounts.thirdPartyBaseUrl')}</fluent-text-input>
+        <fluent-text-input class="field field-wide" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." ${isEditing ? '' : 'required'}>${tr('accounts.apiKey')}</fluent-text-input>
       `;
       break;
     case 'zai':
       simpleFieldsHtml = `
-        <label class="field"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="API Key" ${isEditing ? '' : 'required'} /></label>
+        <fluent-text-input class="field" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="API Key" ${isEditing ? '' : 'required'}>${tr('accounts.apiKey')}</fluent-text-input>
         <label class="field"><span>${tr('accounts.region')}</span><select name="region"><option value="global"${accountCredentialField(editing, 'region', 'global') === 'global' ? ' selected' : ''}>Global</option><option value="cn"${accountCredentialField(editing, 'region') === 'cn' ? ' selected' : ''}>China (BigModel)</option></select></label>
       `;
       break;
     case 'kimi':
       simpleFieldsHtml = `
-        <label class="field"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." /></label>
-        <label class="field"><span>Web Access Token</span><input name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="Access token" /></label>
-        <label class="field field-wide"><span>${tr('accounts.claudeRefreshToken')}</span><input name="refreshToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.kimiRefreshTokenPlaceholder'))}" /></label>
+        <fluent-text-input class="field" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-...">${tr('accounts.apiKey')}</fluent-text-input>
+        <fluent-text-input class="field" name="accessToken" type="password" autocomplete="off" spellcheck="false" placeholder="Access token">Web Access Token</fluent-text-input>
+        <fluent-text-input class="field field-wide" name="refreshToken" type="password" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(tr('accounts.kimiRefreshTokenPlaceholder'))}">${tr('accounts.claudeRefreshToken')}</fluent-text-input>
         <p class="muted tiny" style="grid-column:1 / -1;margin-top:2px">${escapeHtml(tr('accounts.kimiKeyHelp'))}</p>
       `;
       break;
     case 'opencode':
       simpleFieldsHtml = `
-        <label class="field"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="API Key" /></label>
-        <label class="field"><span>${tr('accounts.cookie')}</span><input name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="Cookie / Token" /></label>
+        <fluent-text-input class="field" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="API Key">${tr('accounts.apiKey')}</fluent-text-input>
+        <fluent-text-input class="field" name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="Cookie / Token">${tr('accounts.cookie')}</fluent-text-input>
       `;
       break;
     default:
       // deepseek, openrouter, minimax
       simpleFieldsHtml = `
-        <label class="field field-wide"><span>${tr('accounts.apiKey')}</span><input name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." ${isEditing ? '' : 'required'} /></label>
+        <fluent-text-input class="field field-wide" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." ${isEditing ? '' : 'required'}>${tr('accounts.apiKey')}</fluent-text-input>
       `;
       break;
   }
@@ -320,13 +312,13 @@ export function renderAccounts() {
           ${session ? `
             <div class="account-oauth-link-row">
               <input type="text" readonly value="${escapeHtml(session.authUrl)}" class="account-oauth-link-input" />
-              <button type="button" class="primary-btn" data-account-oauth-open="${escapeHtml(session.authUrl)}">${tr('accounts.oauthOpenLink')}</button>
-              <button type="button" class="ghost-btn" data-account-oauth-copy="${escapeHtml(session.authUrl)}">${tr('accounts.oauthCopyLink')}</button>
+              <fluent-button appearance="primary" type="button" class="primary-btn" data-account-oauth-open="${escapeHtml(session.authUrl)}">${tr('accounts.oauthOpenLink')}</fluent-button>
+              <fluent-button appearance="transparent" type="button" class="ghost-btn" data-account-oauth-copy="${escapeHtml(session.authUrl)}">${tr('accounts.oauthCopyLink')}</fluent-button>
             </div>
           ` : `
-            <button type="button" class="primary-btn" data-account-oauth-start="${escapeHtml(currentProvider)}" ${appState().oauthLoading ? 'disabled' : ''}>
+            <fluent-button appearance="primary" type="button" class="primary-btn" data-account-oauth-start="${escapeHtml(currentProvider)}" ${appState().oauthLoading ? 'disabled' : ''}>
               ${appState().oauthLoading ? tr('accounts.oauthStarting') : tr('accounts.oauthStart')}
-            </button>
+            </fluent-button>
           `}
         </div>
         ${session ? `
@@ -348,8 +340,7 @@ export function renderAccounts() {
   } else if (simpleModeActive) {
     credentialInputsHtml = `<div class="form-grid account-simple-fields">${simpleFieldsHtml}</div>`;
   } else {
-    credentialInputsHtml = `<label class="field field-wide">
-        <span>${tr('accounts.modeJson')}</span>
+    credentialInputsHtml = `<label class="field field-wide"><span>${tr('accounts.modeJson')}</span>
         <textarea name="credentialJson" rows="4" spellcheck="false" autocomplete="off" placeholder='{"apiKey":"sk-..."}'></textarea>
       </label>`;
   }
@@ -364,11 +355,11 @@ export function renderAccounts() {
       </div>
       <div class="account-form-head-actions">
         <div class="mode-toggle-group">
-          ${isOAuthCandidate ? `<button type="button" class="ghost-btn ${oauthModeActive ? 'active' : ''}" data-account-mode="oauth">${tr('accounts.oauthModeToggle')}</button>` : ''}
-          <button type="button" class="ghost-btn ${!oauthModeActive && simpleModeActive ? 'active' : ''}" data-account-mode="simple">${tr('accounts.modeSimple')}</button>
-          <button type="button" class="ghost-btn ${!oauthModeActive && !simpleModeActive ? 'active' : ''}" data-account-mode="json">${tr('accounts.modeJson')}</button>
+          ${isOAuthCandidate ? `<fluent-button appearance="transparent" type="button" class="ghost-btn ${oauthModeActive ? 'active' : ''}" data-account-mode="oauth">${tr('accounts.oauthModeToggle')}</fluent-button>` : ''}
+          <fluent-button appearance="transparent" type="button" class="ghost-btn ${!oauthModeActive && simpleModeActive ? 'active' : ''}" data-account-mode="simple">${tr('accounts.modeSimple')}</fluent-button>
+          <fluent-button appearance="transparent" type="button" class="ghost-btn ${!oauthModeActive && !simpleModeActive ? 'active' : ''}" data-account-mode="json">${tr('accounts.modeJson')}</fluent-button>
         </div>
-        ${isEditing ? `<button type="button" class="ghost-btn" data-account-reset>${tr('actions.cancel')}</button>` : ''}
+        ${isEditing ? `<fluent-button appearance="transparent" type="button" class="ghost-btn" data-account-reset>${tr('actions.cancel')}</fluent-button>` : ''}
       </div>
     </div>
     <div class="form-grid">
@@ -376,14 +367,8 @@ export function renderAccounts() {
         <span>${tr('accounts.provider')}</span>
         ${providerSelectHtml}
       </div>
-      <label class="field">
-        <span>${tr('accounts.name')}</span>
-        <input name="name" required value="${accountField(editing, 'name')}" placeholder="${currentProvider}-1" maxlength="128" />
-      </label>
-      <label class="field field-wide">
-        <span>${tr('accounts.label')}</span>
-        <input name="label" value="${accountField(editing, 'label')}" placeholder="Production / Personal" maxlength="256" />
-      </label>
+      <fluent-text-input class="field" name="name" required value="${accountField(editing, 'name')}" placeholder="${currentProvider}-1" maxlength="128">${tr('accounts.name')}</fluent-text-input>
+      <fluent-text-input class="field field-wide" name="label" value="${accountField(editing, 'label')}" placeholder="Production / Personal" maxlength="256">${tr('accounts.label')}</fluent-text-input>
       ${isEditing ? `
       <label class="check-row field-wide">
         <input name="enabled" type="checkbox" ${editing?.enabled !== false ? 'checked' : ''} />
@@ -406,9 +391,9 @@ export function renderAccounts() {
     </div>` : ''}
     ${appState().accountFormError ? `<p class="form-error account-form-error" role="alert">${escapeHtml(appState().accountFormError)}</p>` : ''}
     <div class="drawer-actions">
-      <button type="submit" class="primary-btn" ${appState().accountsSaving ? 'disabled' : ''}>
+      <fluent-button appearance="primary" type="submit" class="primary-btn" ${appState().accountsSaving ? 'disabled' : ''}>
         ${appState().accountsSaving ? tr('actions.saving') : tr('actions.save')}
-      </button>
+      </fluent-button>
     </div>
   </form>`;
 
@@ -420,5 +405,5 @@ export function renderAccounts() {
 }
 
 export function renderAccountsPage() {
-  return `<section class="page-intro"><div><div class="eyebrow">${escapeHtml(tr('page.overview.kicker'))}</div><h2>${escapeHtml(tr('nav.accounts'))}</h2><p>${escapeHtml(tr('page.accounts.description'))}</p></div></section>${renderAccounts()}`;
+  return `${renderAccounts()}`;
 }

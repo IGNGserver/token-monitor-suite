@@ -16,6 +16,7 @@ const ROOT = path.resolve(__dirname, '..');
 // adds src/electron/renderer/desktop.css, and the Hub's old dashboard stylesheets
 // were folded into the shared package.
 const STYLESHEETS = [
+  'src/shared-ui/styles/fluent-tokens.css',
   'src/shared-ui/styles/app.css',
   'src/electron/renderer/desktop.css'
 ];
@@ -36,7 +37,8 @@ function stripComments(text) {
 // an additive layer over the shared stylesheet, so its references are resolved
 // against the union of both rather than against itself alone.
 const LAYER_BASE = Object.freeze({
-  'src/electron/renderer/desktop.css': ['src/shared-ui/styles/app.css']
+  'src/shared-ui/styles/app.css': ['src/shared-ui/styles/fluent-tokens.css'],
+  'src/electron/renderer/desktop.css': ['src/shared-ui/styles/app.css', 'src/shared-ui/styles/fluent-tokens.css']
 });
 
 function collectDefinitions(css, seed = new Set()) {

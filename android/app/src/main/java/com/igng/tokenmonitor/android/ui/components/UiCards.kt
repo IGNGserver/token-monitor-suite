@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.igng.tokenmonitor.android.data.model.PeriodDto
 import com.igng.tokenmonitor.android.ui.RealtimeStatus
+import com.igng.tokenmonitor.android.ui.theme.TokenMonitorSpacing
 
 @Composable
 fun AppCard(
@@ -48,7 +49,7 @@ fun AppCard(
       shape = MaterialTheme.shapes.large,
       colors = colors,
       elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-      content = { Column(Modifier.padding(16.dp), content = content) }
+      content = { Column(Modifier.padding(TokenMonitorSpacing.large), content = content) }
     )
   } else {
     Card(
@@ -56,7 +57,7 @@ fun AppCard(
       shape = MaterialTheme.shapes.large,
       colors = colors,
       elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-      content = { Column(Modifier.padding(16.dp), content = content) }
+      content = { Column(Modifier.padding(TokenMonitorSpacing.large), content = content) }
     )
   }
 }
@@ -103,7 +104,7 @@ fun MetricHeroCard(
       style = MaterialTheme.typography.labelLarge,
       color = MaterialTheme.colorScheme.primary
     )
-    Spacer(Modifier.height(8.dp))
+    Spacer(Modifier.height(TokenMonitorSpacing.small))
     Row(
       Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
@@ -116,14 +117,14 @@ fun MetricHeroCard(
           fontWeight = FontWeight.SemiBold,
           maxLines = 1
         )
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(TokenMonitorSpacing.xxSmall))
         Text(
           formatTokens(period?.totalTokens ?: 0L),
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           maxLines = 1
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(TokenMonitorSpacing.xSmallNudge))
         Text(
           formatUsd(period?.costUsd ?: 0.0),
           style = MaterialTheme.typography.titleMedium,
@@ -132,7 +133,7 @@ fun MetricHeroCard(
         )
       }
       if (trailing != null) {
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(TokenMonitorSpacing.small))
         // Keep the donut intrinsic-sized so the hero card does not stretch empty space.
         Box(contentAlignment = Alignment.Center) { trailing() }
       }
@@ -153,13 +154,13 @@ fun CompactMetricCard(
       containerColor = MaterialTheme.colorScheme.surface
     )
   ) {
-    Column(Modifier.padding(14.dp)) {
+    Column(Modifier.padding(TokenMonitorSpacing.medium)) {
       Text(
         title,
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant
       )
-      Spacer(Modifier.height(6.dp))
+      Spacer(Modifier.height(TokenMonitorSpacing.xSmallNudge))
       Text(
         formatTokensShort(period?.totalTokens ?: 0L),
         style = MaterialTheme.typography.titleLarge,

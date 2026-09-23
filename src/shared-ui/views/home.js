@@ -59,7 +59,7 @@ export function renderHome() {
     ? `<div class="stack">${tools.map((row) => {
         const pct = Math.round((row.value / totalTokens) * 100);
         return `
-          <button type="button" class="home-interactive-row" data-jump-view="tool" data-jump-tool="${escapeHtml(row.key)}">
+          <fluent-button appearance="secondary" type="button" class="home-interactive-row" data-jump-view="tool" data-jump-tool="${escapeHtml(row.key)}">
             <div class="row">
               <div class="row-main">
                 <img class="client-icon" src="${clientIconPath(row.key)}" alt="" onerror="this.style.display='none'" />
@@ -73,7 +73,7 @@ export function renderHome() {
               </div>
             </div>
             <div class="share-meter"><span style="width:${Math.max(2, Math.min(100, pct))}%; background:${row.color}"></span></div>
-          </button>
+          </fluent-button>
         `;
       }).join('')}</div>`
     : emptyHtml('empty.usage');
@@ -83,7 +83,7 @@ export function renderHome() {
     ? `<div class="stack">${models.map((row) => {
         const pct = Math.round((row.value / totalTokens) * 100);
         return `
-          <button type="button" class="home-interactive-row" data-jump-view="model" data-jump-usage-tab="models">
+          <fluent-button appearance="secondary" type="button" class="home-interactive-row" data-jump-view="model" data-jump-usage-tab="models">
             <div class="row">
               <div class="row-main">
                 <span class="swatch" style="background:${row.color}"></span>
@@ -97,7 +97,7 @@ export function renderHome() {
               </div>
             </div>
             <div class="share-meter"><span style="width:${Math.max(2, Math.min(100, pct))}%; background:${row.color}"></span></div>
-          </button>
+          </fluent-button>
         `;
       }).join('')}</div>`
     : emptyHtml('empty.usage');
@@ -105,7 +105,7 @@ export function renderHome() {
   // Devices: cards with status & quick jump
   const devicesBody = devices.length
     ? `<div class="stack">${devices.map((row) => `
-        <button type="button" class="home-interactive-row" data-jump-view="device" data-jump-device="${escapeHtml(row.key)}">
+        <fluent-button appearance="secondary" type="button" class="home-interactive-row" data-jump-view="device" data-jump-device="${escapeHtml(row.key)}">
           <div class="row">
             <div class="row-main">
               <span class="swatch" style="background:${row.color}"></span>
@@ -119,7 +119,7 @@ export function renderHome() {
               <div class="row-cost">${formatCost(row.cost, appState().prefs.currency)}</div>
             </div>
           </div>
-        </button>
+        </fluent-button>
       `).join('')}</div>`
     : emptyHtml('empty.usage');
 
@@ -131,7 +131,7 @@ export function renderHome() {
         const toneClass = `meter-${tone}`;
         const pct = remaining == null ? 0 : Math.max(0, Math.min(100, Math.round(remaining)));
         return `
-          <button type="button" class="home-limit-card" data-jump-view="limits">
+          <fluent-button appearance="secondary" type="button" class="home-limit-card" data-jump-view="limits">
             <div class="home-limit-head">
               <div class="home-limit-identity">
                 <img class="client-icon" src="${clientIconPath(card.provider)}" alt="" onerror="this.style.display='none'" />
@@ -141,7 +141,7 @@ export function renderHome() {
             </div>
             <div class="home-limit-bar ${toneClass}"><span style="width:${pct}%"></span></div>
             <div class="home-limit-sub">${escapeHtml(clientLabel(card.provider))}${card.plan ? ` · ${escapeHtml(card.plan)}` : ''}</div>
-          </button>
+          </fluent-button>
         `;
       }).join('')}</div>`
     : emptyHtml('empty.limits');
@@ -149,7 +149,7 @@ export function renderHome() {
   const activeTime = Number(summary?.activeTimeMs || 0);
   const completeness = renderCompletenessNotice(stats, appState().prefs.period);
 
-  const viewAllAction = (targetView) => `<button type="button" class="panel-head-action" data-jump-view="${targetView}"><span>${tr(`nav.${targetView}`)}</span>${uiIcon('arrowUpRight')}</button>`;
+  const viewAllAction = (targetView) => `<fluent-button appearance="secondary" type="button" class="panel-head-action" data-jump-view="${targetView}"><span>${tr(`nav.${targetView}`)}</span>${uiIcon('arrowUpRight')}</fluent-button>`;
 
   const sparklineHeader = `
     <div class="home-sparkline-head">
@@ -171,12 +171,12 @@ export function renderHome() {
   const heatmapBody = (summary || heatDaily.length)
     ? `
       <div class="toolbar-row">
-        <div class="seg" role="group" aria-label="${tr('home.heatmapMetric')}">
+        <fluent-radio-group class="seg" name="heatmapMetric" data-selection="heatmapMetric" value="${heatMetric}" orientation="horizontal" aria-label="${tr('home.heatmapMetric')}">
           ${segButtons([['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')]], heatMetric, 'heatmap-metric')}
-        </div>
-        <div class="seg" role="group" aria-label="${tr('home.activeDaysWindow')}">
+        </fluent-radio-group>
+        <fluent-radio-group class="seg" name="activeDaysWindow" data-selection="activeDaysWindow" value="${activeDaysWindow}" orientation="horizontal" aria-label="${tr('home.activeDaysWindow')}">
           ${segButtons([['all', tr('home.activeDaysWindow.all')], ['year', tr('home.activeDaysWindow.year')]], activeDaysWindow, 'active-days-window')}
-        </div>
+        </fluent-radio-group>
       </div>
       ${renderHeatmap(heatDaily, heatMetric)}
     `
@@ -185,12 +185,10 @@ export function renderHome() {
   return `
     ${completeness}
     ${renderHistoryScopeNotice()}
-    ${panel(tr('home.activity'), sparklineBlock, daily.length ? `${daily.length}d` : '')}
-    <div class="grid-2">
-      ${panel(tr('home.tools'), toolsBody, '', viewAllAction('tool'))}
-      ${panel(tr('home.models'), modelsBody, '', viewAllAction('model'))}
-      ${panel(tr('home.devices'), devicesBody, '', viewAllAction('device'))}
-      ${panel(tr('home.limits'), limitsBody, '', viewAllAction('limits'))}
+    <div class="overview-workspace">
+      <div class="overview-activity">${panel(tr('home.activity'), sparklineBlock, daily.length ? `${daily.length}d` : '')}</div>
+      <aside class="overview-health">${panel(tr('home.limits'), limitsBody, '', viewAllAction('limits'))}${panel(tr('home.devices'), devicesBody, '', viewAllAction('device'))}</aside>
+      <div class="overview-breakdowns">${panel(tr('home.tools'), toolsBody, '', viewAllAction('tool'))}${panel(tr('home.models'), modelsBody, '', viewAllAction('model'))}</div>
     </div>
     ${panel(tr('home.summary'), heatmapBody)}
   `;

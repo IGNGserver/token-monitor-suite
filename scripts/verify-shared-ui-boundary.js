@@ -22,6 +22,8 @@ const SHARED_UI = path.join(ROOT, 'src', 'shared-ui');
 // do not override a method, so it is exempt alongside the two implementations.
 // The boot modules live outside this tree by design.
 const ALLOWED_HOST_ACCESS = new Set([
+  // Byte-identical upstream component runtime; app code still uses transport.
+  path.join('vendor', 'fluent.js'),
   path.join('transport', 'index.js'),
   path.join('transport', 'httpTransport.js'),
   path.join('transport', 'ipcTransport.js')

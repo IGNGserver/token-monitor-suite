@@ -83,10 +83,10 @@ test('setAutostartEnabled(true) writes a native .deb executable path without APP
 });
 
 test('isAutostartEnabled still reads an entry written with the retired login marker', () => {
-  // Nothing starts hidden in a tray any more, so the marker is no longer
-  // written. An install that opted in once still has it in its autostart file,
-  // and that must keep reading as "start at login: on" rather than flipping off
-  // underneath the user after an update.
+  // Startup no longer has a separate hidden-in-tray marker. An install that
+  // opted in once still has the retired marker in its autostart file, and that
+  // must keep reading as "start at login: on" rather than flipping off under
+  // the user after an update.
   const configHome = tmpConfigHome();
   const env = { XDG_CONFIG_HOME: configHome, APPIMAGE: '/opt/Token Monitor.AppImage' };
   fs.mkdirSync(path.join(configHome, 'autostart'), { recursive: true });

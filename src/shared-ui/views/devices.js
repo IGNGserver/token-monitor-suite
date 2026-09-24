@@ -22,7 +22,6 @@ import { tr, escapeHtml, appState, viewHelper } from '../core/viewContext.js';
 import { usageMetricCard } from './rows.js';
 
 const emptyHtml = (key) => viewHelper('emptyHtml')(key);
-const panel = (...args) => viewHelper('panel')(...args);
 const viewStats = (...args) => viewHelper('viewStats')(...args);
 const renderTokenMix = (...args) => viewHelper('renderTokenMix')(...args);
 const shareBarHtml = (...args) => viewHelper('shareBarHtml')(...args);

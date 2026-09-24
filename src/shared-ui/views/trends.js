@@ -354,7 +354,6 @@ export function renderTrends() {
     ? []
     : historyDaily(history, appState().prefs.trendsRange === 'all' ? 0 : appState().prefs.trendsRange);
   const hasHistory = daily.length > 0;
-  const heatMetric = appState().prefs.trendsMetric === 'cost' ? 'cost' : 'tokens';
   const trendMetric = ['tokens', 'cost', 'activeTime'].includes(appState().prefs.trendsMetric) ? appState().prefs.trendsMetric : 'tokens';
   const rangeSummary = daily.reduce((summary, day) => ({
     tokens: summary.tokens + Number(day?.tokens || 0),

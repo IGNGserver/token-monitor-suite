@@ -24,10 +24,16 @@ function optionLabels(pairs) {
 }
 
 function checkbox(name, labelKey, checked, { description = '', id = '' } = {}) {
-  const idAttr = id ? ` id="${id}"` : '';
-  return `<fluent-switch class="check-row" name="${name}"${idAttr}${checked ? ' checked' : ''}>
-    <span><span class="row-name">${escapeHtml(tr(labelKey))}</span>${description ? `<span class="row-sub">${escapeHtml(description)}</span>` : ''}</span>
-  </fluent-switch>`;
+  const controlId = id || `desktop-setting-${name}`;
+  const labelId = `${controlId}-label`;
+  const descriptionId = description ? `${controlId}-description` : '';
+  return `<div class="desktop-setting-switch-row">
+    <div class="desktop-setting-switch-copy">
+      <span class="desktop-setting-switch-label" id="${escapeHtml(labelId)}">${escapeHtml(tr(labelKey))}</span>
+      ${description ? `<span class="desktop-setting-switch-description" id="${escapeHtml(descriptionId)}">${escapeHtml(description)}</span>` : ''}
+    </div>
+    <fluent-switch id="${escapeHtml(controlId)}" name="${escapeHtml(name)}" role="switch" aria-labelledby="${escapeHtml(labelId)}"${descriptionId ? ` aria-describedby="${escapeHtml(descriptionId)}"` : ''}${checked ? ' checked' : ''}></fluent-switch>
+  </div>`;
 }
 
 function numberField(name, labelKey, value, { min = 0, max = 100000, step = 1, id = '' } = {}) {
@@ -37,10 +43,10 @@ function numberField(name, labelKey, value, { min = 0, max = 100000, step = 1, i
   </label>`;
 }
 
-function selectField(name, labelKey, options, value, { id = '' } = {}) {
+function dropdownField(name, labelKey, options, value, { id = '' } = {}) {
   const idAttr = id ? ` id="${id}"` : '';
   return `<label class="field"><span>${escapeHtml(tr(labelKey))}</span>
-    <select name="${name}"${idAttr}>${settingsOptionList(options, value)}</select>
+    <fluent-dropdown name="${name}"${idAttr}>${settingsOptionList(options, value)}</fluent-dropdown>
   </label>`;
 }
 
@@ -76,16 +82,16 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
   // --- Collection ---------------------------------------------------------
   const collectionRows = [];
   collectionRows.push(tokenListField('clients', clients, settings.clients, 'desktop.settings.trackedClients'));
-  collectionRows.push(selectField('collectionMode', 'desktop.settings.collectionMode',
+  collectionRows.push(dropdownField('collectionMode', 'desktop.settings.collectionMode',
     [['live', tr('desktop.settings.modeLive')], ['smart', tr('desktop.settings.modeSmart')], ['interval', tr('desktop.settings.modeInterval')]],
     settings.collectionMode || 'live', { id: 'collectionModeInput' }));
-  collectionRows.push(selectField('collectionIntervalMs', 'desktop.settings.collectionInterval',
+  collectionRows.push(dropdownField('collectionIntervalMs', 'desktop.settings.collectionInterval',
     (catalog.collectionModeIntervals || [5 * 60 * 1000, 10 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000])
       .map((ms) => [String(ms), `${Math.round(ms / 60000)} min`]),
     String(settings.collectionIntervalMs ?? 300000), { id: 'collectionIntervalInput' }));
   collectionRows.push(checkbox('projectsEnabled', 'desktop.settings.projectsEnabled', settings.projectsEnabled === true));
   collectionRows.push(checkbox('historyEnabled', 'desktop.settings.historyEnabled', settings.historyEnabled !== false));
-  collectionRows.push(selectField('historyIntervalMs', 'desktop.settings.historyInterval',
+  collectionRows.push(dropdownField('historyIntervalMs', 'desktop.settings.historyInterval',
     (catalog.historyIntervals || []).map((ms) => [String(ms), `${Math.round(ms / 60000)} min`]),
     String(settings.historyIntervalMs ?? 900000)));
   collectionRows.push(checkbox('sessionUsageArchiveEnabled', 'desktop.settings.sessionArchive', settings.sessionUsageArchiveEnabled !== false));
@@ -102,7 +108,7 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
       <span class="row-sub" data-export-dir>${escapeHtml(settings.exportDir || tr('desktop.settings.exportDirNone'))}</span>
       <fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="pick-export-dir">${escapeHtml(tr('desktop.settings.chooseFolder'))}</fluent-button>
     </div>`,
-    selectField('exportIntervalMs', 'desktop.settings.exportInterval',
+    dropdownField('exportIntervalMs', 'desktop.settings.exportInterval',
       (catalog.exportIntervals || []).map((ms) => [String(ms), `${Math.round(ms / 60000)} min`]),
       String(settings.exportIntervalMs ?? 60000)),
     `<div class="drawer-actions"><fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="export-now">${escapeHtml(tr('desktop.settings.exportNow'))}</fluent-button></div>`
@@ -110,13 +116,13 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
 
   // --- Window & appearance ------------------------------------------------
   const appearanceRows = [];
-  appearanceRows.push(selectField('systemGlass', 'desktop.settings.systemGlass', optionLabels(SOFTWARE_GLASS), settings.systemGlass === false ? 'off' : 'system'));
+  appearanceRows.push(dropdownField('systemGlass', 'desktop.settings.systemGlass', optionLabels(SOFTWARE_GLASS), settings.systemGlass === false ? 'off' : 'system'));
   if (isMac) {
-    appearanceRows.push(selectField('macosGlassStyle', 'desktop.settings.macosGlassStyle',
+    appearanceRows.push(dropdownField('macosGlassStyle', 'desktop.settings.macosGlassStyle',
       [['vibrancy', tr('desktop.settings.glassVibrancy')], ['liquid-glass', tr('desktop.settings.glassLiquid')]],
       settings.macosGlassStyle || 'vibrancy'));
   }
-  appearanceRows.push(selectField('reduceMotion', 'desktop.settings.reduceMotion', optionLabels(REDUCE_MOTION), settings.reduceMotion || 'system'));
+  appearanceRows.push(dropdownField('reduceMotion', 'desktop.settings.reduceMotion', optionLabels(REDUCE_MOTION), settings.reduceMotion || 'system'));
   appearanceRows.push(checkbox('showToolIcons', 'desktop.settings.showToolIcons', settings.showToolIcons !== false));
   appearanceRows.push(checkbox('showLiveDot', 'desktop.settings.showLiveDot', settings.showLiveDot !== false));
   appearanceRows.push(checkbox('showCompactTotalTokens', 'desktop.settings.showCompactTotalTokens', settings.showCompactTotalTokens === true));
@@ -134,7 +140,7 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
   groups.push(group('limitsDisplay', 'desktop.settings.groupLimitsDisplay', [
     checkbox('showLimitSource', 'desktop.settings.showLimitSource', settings.showLimitSource === true),
     checkbox('maskLimitAccountEmails', 'desktop.settings.maskLimitAccountEmails', settings.maskLimitAccountEmails === true),
-    selectField('showLimitUsed', 'desktop.settings.limitBarsShow',
+    dropdownField('showLimitUsed', 'desktop.settings.limitBarsShow',
       [['remaining', tr('desktop.settings.barsRemaining')], ['used', tr('desktop.settings.barsUsed')]],
       settings.showLimitUsed === true ? 'used' : 'remaining')
   ].join('')));
@@ -187,13 +193,13 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
   prefRows.push(numberField('homeLimitAccountCount', 'desktop.settings.homeLimitAccountCount', settings.homeLimitAccountCount ?? 3, { min: 1, max: 12 }));
   prefRows.push(tokenListField('serviceProviderDisplayOrder', catalog.serviceProviders || [], settings.serviceProviderDisplayOrder, 'desktop.settings.serviceProviderOrder'));
   prefRows.push(tokenListField('hiddenServiceProviders', catalog.hiddenServiceProviders || [], settings.hiddenServiceProviders, 'desktop.settings.hiddenServiceProviders'));
-  prefRows.push(selectField('serviceStatusRefreshMs', 'desktop.settings.serviceStatusRefresh',
+  prefRows.push(dropdownField('serviceStatusRefreshMs', 'desktop.settings.serviceStatusRefresh',
     [0, 60000, 120000, 300000, 900000, 1800000].map((ms) => [String(ms), ms === 0 ? tr('desktop.settings.refreshOff') : `${Math.round(ms / 60000)} min`]),
     String(settings.serviceStatusRefreshMs ?? 60000)));
-  prefRows.push(selectField('heatmapMetric', 'desktop.settings.heatmapMetric',
+  prefRows.push(dropdownField('heatmapMetric', 'desktop.settings.heatmapMetric',
     [['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')]],
     settings.heatmapMetric || 'cost'));
-  prefRows.push(selectField('homeActiveDaysWindow', 'desktop.settings.activeDaysWindow',
+  prefRows.push(dropdownField('homeActiveDaysWindow', 'desktop.settings.activeDaysWindow',
     [['all', tr('desktop.settings.activeDaysAll')], ['year', tr('desktop.settings.activeDaysYear')]],
     settings.homeActiveDaysWindow || 'all'));
   groups.push(group('preferences', 'desktop.settings.groupPreferences', prefRows.join('')));
@@ -243,7 +249,7 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
       </span>
     </div>
   </div>`);
-  hubRows.push(selectField('syncUploadIntervalMs', 'desktop.settings.syncUploadInterval',
+  hubRows.push(dropdownField('syncUploadIntervalMs', 'desktop.settings.syncUploadInterval',
     (catalog.syncUploadIntervals || []).map((ms) => [String(ms), ms === 0 ? tr('desktop.settings.syncLive') : `${Math.round(ms / 60000)} min`]),
     String(settings.syncUploadIntervalMs ?? 600000)));
   hubRows.push(checkbox('allowInsecureHubHttp', 'desktop.settings.allowInsecureHttp', settings.allowInsecureHubHttp === true,

@@ -65,7 +65,7 @@ export function escapeHtml(value) {
 export function settingsOptionList(options, selected) {
   const ctx = requireContext();
   if (typeof ctx.settingsOptionList === 'function') return ctx.settingsOptionList(options, selected);
-  return options.map(([value, label]) => `<option value="${ctx.escapeHtml(value)}"${String(value) === String(selected) ? ' selected' : ''}>${ctx.escapeHtml(label)}</option>`).join('');
+  return `<fluent-listbox>${options.map(([value, label]) => `<fluent-option value="${ctx.escapeHtml(value)}"${String(value) === String(selected) ? ' selected' : ''}>${ctx.escapeHtml(label)}</fluent-option>`).join('')}</fluent-listbox>`;
 }
 
 /** Strip the shared settingsOptionList dependency for callers that pass raw pairs. */

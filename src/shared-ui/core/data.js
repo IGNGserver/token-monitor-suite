@@ -1,3 +1,20 @@
+export const ALL_DEVICES_OPTION_VALUE = 'scope:all';
+export const ALL_PROVIDERS_OPTION_VALUE = 'scope:all-providers';
+const DEVICE_OPTION_PREFIX = 'scope:device:';
+
+export function deviceOptionValue(deviceId) {
+  return `${DEVICE_OPTION_PREFIX}${String(deviceId ?? '')}`;
+}
+
+export function deviceIdFromOptionValue(value) {
+  const optionValue = String(value ?? '');
+  return optionValue === ALL_DEVICES_OPTION_VALUE
+    ? ''
+    : optionValue.startsWith(DEVICE_OPTION_PREFIX)
+      ? optionValue.slice(DEVICE_OPTION_PREFIX.length)
+      : '';
+}
+
 export const CLIENT_LABELS = {
   claude: 'Claude Code',
   'claude-desktop': 'Claude Desktop',

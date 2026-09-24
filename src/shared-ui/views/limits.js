@@ -8,6 +8,7 @@ import {
   formatReset
 } from '../core/format.js';
 import {
+  ALL_PROVIDERS_OPTION_VALUE,
   clientIconPath,
   clientLabel,
   limitCards,
@@ -224,10 +225,12 @@ export function renderLimits() {
     <div class="toolbar-row view-toolbar">
       <label class="field inline-field">
         <span>${tr('limits.filter')}</span>
-        <select data-limit-provider>
-          <option value="">${tr('filters.allProviders')}</option>
-          ${providers.map((provider) => `<option value="${escapeHtml(provider)}"${provider === appState().limitProvider ? ' selected' : ''}>${escapeHtml(clientLabel(provider))}</option>`).join('')}
-        </select>
+        <fluent-dropdown data-limit-provider>
+          <fluent-listbox>
+            <fluent-option value="${ALL_PROVIDERS_OPTION_VALUE}"${appState().limitProvider ? '' : ' selected'}>${tr('filters.allProviders')}</fluent-option>
+            ${providers.map((provider) => `<fluent-option value="${escapeHtml(provider)}"${provider === appState().limitProvider ? ' selected' : ''}>${escapeHtml(clientLabel(provider))}</fluent-option>`).join('')}
+          </fluent-listbox>
+        </fluent-dropdown>
       </label>
       <span class="panel-meta tiny">${tr('limits.accountsCount', { count: cards.length })}</span>
     </div>`;

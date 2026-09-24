@@ -1,4 +1,4 @@
-import { finishFluentRender, setupFluentInteractions, syncFluentMotion, animateNavigation } from './core/fluent.js';
+import { finishFluentRender, setupFluentInteractions, syncFluentMotion, animateNavigation, animateDataUpdate, setFluentDropdownValue } from './core/fluent.js';
 import {
   capabilities,
   clearSecret,
@@ -48,6 +48,10 @@ import {
 import {
   clientIconPath,
   clampHomeLimitAccountCount,
+  ALL_DEVICES_OPTION_VALUE,
+  ALL_PROVIDERS_OPTION_VALUE,
+  deviceIdFromOptionValue,
+  deviceOptionValue,
   toolRows
 } from './core/data.js';
 
@@ -550,7 +554,7 @@ function showAuth(show) {
   }
 }
 
-const OVERLAY_FOCUSABLE = 'a[href], button:not([disabled]), fluent-button:not([disabled]), fluent-tab, fluent-radio-group:not([disabled]), fluent-dropdown:not([disabled]), fluent-switch:not([disabled]), fluent-text-input:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const OVERLAY_FOCUSABLE = 'a[href], button:not([disabled]), fluent-button:not([disabled]), fluent-tab, fluent-radio-group:not([disabled]), fluent-dropdown:not([disabled]), fluent-switch:not([disabled]), fluent-text-input:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 function overlayFocusable(root) {
   if (!root) return [];
@@ -602,14 +606,14 @@ function openSettings(open) {
   els.settingsOpen?.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
   els.settingsOpenTop?.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
   if (nextOpen) {
-    els.languageSelect.value = state.prefs.language || 'auto';
-    els.themeSelect.value = state.prefs.theme || 'system';
-    els.currencySelect.value = state.prefs.currency || 'USD';
+    setFluentDropdownValue(els.languageSelect, state.prefs.language || 'auto');
+    setFluentDropdownValue(els.themeSelect, state.prefs.theme || 'system');
+    setFluentDropdownValue(els.currencySelect, state.prefs.currency || 'USD');
     if (els.homeLimitAccountCount) {
       els.homeLimitAccountCount.value = String(clampHomeLimitAccountCount(state.prefs.homeLimitAccountCount, 3));
     }
     if (els.settingsSecret) els.settingsSecret.value = state.secret || '';
-    els.languageSelect.focus({ preventScroll: true });
+    (els.languageSelect.control || els.languageSelect).focus({ preventScroll: true });
   } else if (wasOpen) {
     restoreOverlayFocus('settings');
   }
@@ -770,11 +774,21 @@ function renderChrome() {
   els.pageMeta.textContent = [scoped ? '' : kicker, desc, scopeMeta].filter(Boolean).join(' · ');
   if (els.deviceFilter) {
     const current = state.prefs.deviceFilter || '';
-    els.deviceFilter.innerHTML = [
-      `<option value="">${escapeHtml(tr('filters.allDevices'))}</option>`,
-      ...allDevices.map((device) => `<option value="${escapeHtml(device.deviceId || '')}">${escapeHtml(device.hostname || device.deviceId || tr('devices.title'))}</option>`)
+    const selectedDeviceId = allDevices.some((device) => device.deviceId === current) ? current : '';
+    const selectedDeviceOption = selectedDeviceId ? deviceOptionValue(selectedDeviceId) : ALL_DEVICES_OPTION_VALUE;
+    const deviceOptionsHtml = [
+      `<fluent-option value="${ALL_DEVICES_OPTION_VALUE}"${selectedDeviceId ? '' : ' selected'}>${escapeHtml(tr('filters.allDevices'))}</fluent-option>`,
+      ...allDevices.map((device) => `<fluent-option value="${escapeHtml(deviceOptionValue(device.deviceId || ''))}"${device.deviceId === selectedDeviceId ? ' selected' : ''}>${escapeHtml(device.hostname || device.deviceId || tr('devices.title'))}</fluent-option>`)
     ].join('');
-    els.deviceFilter.value = allDevices.some((device) => device.deviceId === current) ? current : '';
+    let deviceListbox = els.deviceFilter.querySelector('fluent-listbox');
+    if (!deviceListbox) {
+      els.deviceFilter.innerHTML = `<fluent-listbox>${deviceOptionsHtml}</fluent-listbox>`;
+    } else if (deviceListbox.innerHTML !== deviceOptionsHtml) {
+      // Keep Dropdown's generated slotted control connected while refreshing
+      // the options; replacing the Dropdown's own innerHTML leaves a blank trigger.
+      deviceListbox.innerHTML = deviceOptionsHtml;
+    }
+    setFluentDropdownValue(els.deviceFilter, selectedDeviceOption);
     els.deviceFilter.title = selectedDevice?.hostname || selectedDevice?.deviceId || tr('filters.allDevices');
   }
   refreshPwaUi();
@@ -888,7 +902,8 @@ function restoreFormDrafts() {
         const selected = new Set(value.value);
         for (const option of control.options) option.selected = selected.has(option.value);
       } else if (value.value !== undefined) {
-        control.value = value.value;
+        if (control.matches('fluent-dropdown')) setFluentDropdownValue(control, value.value);
+        else control.value = value.value;
       }
     }
   });
@@ -1002,7 +1017,7 @@ function restoreRenderState(snapshot) {
   }
   const managementDialog = els.content.querySelector('.management-drawer:not(.hidden) [role="dialog"]');
   if (managementDialog && !managementDialog.contains(document.activeElement)) {
-    (managementDialog.querySelector('input:not([type="hidden"]), select, textarea, fluent-text-input, fluent-dropdown, button, fluent-button') || managementDialog).focus({ preventScroll: true });
+    (managementDialog.querySelector('input:not([type="hidden"]), textarea, fluent-text-input, fluent-dropdown, button, fluent-button') || managementDialog).focus({ preventScroll: true });
   } else if (!managementDialog && state.managementReturnFocus) {
     const { attribute, value } = state.managementReturnFocus;
     const target = [...els.content.querySelectorAll(`[${attribute}]`)].find((item) => item.getAttribute(attribute) === value);
@@ -1246,11 +1261,11 @@ function renderSubscriptions() {
     <div class="form-section-head"><div><p class="muted tiny">${tr('subscriptions.formHint')}</p></div></div>
     <div class="form-grid">
       <fluent-text-input class="field" name="provider" required value="${subscriptionField(editing, 'provider')}" placeholder="codex">${tr('subscriptions.provider')}</fluent-text-input>
-      <label class="field"><span>${tr('subscriptions.kind')}</span><select name="kind" data-subscription-kind><option value="subscription"${!formIsTopUp ? ' selected' : ''}>${tr('subscriptions.plan')}</option><option value="topup"${formIsTopUp ? ' selected' : ''}>${tr('subscriptions.topup')}</option></select></label>
+      <label class="field"><span>${tr('subscriptions.kind')}</span><fluent-dropdown name="kind" data-subscription-kind><fluent-listbox><fluent-option value="subscription"${!formIsTopUp ? ' selected' : ''}>${tr('subscriptions.plan')}</fluent-option><fluent-option value="topup"${formIsTopUp ? ' selected' : ''}>${tr('subscriptions.topup')}</fluent-option></fluent-listbox></fluent-dropdown></label>
       <fluent-text-input class="field" name="planName" value="${subscriptionField(editing, 'planName')}" placeholder="Pro">${tr('subscriptions.planName')}</fluent-text-input>
       ${!formIsTopUp ? `<label class="field"><span>${tr('subscriptions.amount')}</span><input name="amount" type="number" min="0" step="0.01" value="${escapeHtml(amount || '')}" required /></label>` : ''}
-      <label class="field"><span>${tr('subscriptions.currency')}</span><select name="currency">${['USD', 'CNY', 'TWD', 'HKD'].map((code) => `<option value="${code}"${(editing?.currency || 'USD') === code ? ' selected' : ''}>${code}</option>`).join('')}</select></label>
-      <label class="field"><span>${tr('subscriptions.interval')}</span><select name="interval"><option value="month"${editing?.interval !== 'year' ? ' selected' : ''}>${tr('subscriptions.monthly')}</option><option value="year"${editing?.interval === 'year' ? ' selected' : ''}>${tr('subscriptions.yearly')}</option></select></label>
+      <label class="field"><span>${tr('subscriptions.currency')}</span><fluent-dropdown name="currency"><fluent-listbox>${['USD', 'CNY', 'TWD', 'HKD'].map((code) => `<fluent-option value="${code}"${(editing?.currency || 'USD') === code ? ' selected' : ''}>${code}</fluent-option>`).join('')}</fluent-listbox></fluent-dropdown></label>
+      <label class="field"><span>${tr('subscriptions.interval')}</span><fluent-dropdown name="interval"><fluent-listbox><fluent-option value="month"${editing?.interval !== 'year' ? ' selected' : ''}>${tr('subscriptions.monthly')}</fluent-option><fluent-option value="year"${editing?.interval === 'year' ? ' selected' : ''}>${tr('subscriptions.yearly')}</fluent-option></fluent-listbox></fluent-dropdown></label>
       <label class="field"><span>${tr('subscriptions.intervalCount')}</span><input name="intervalCount" type="number" min="1" max="24" step="1" value="${subscriptionField(editing, 'intervalCount', '1')}" /></label>
       ${formIsTopUp ? `<div class="field field-wide topup-ledger" data-topup-ledger><div class="topup-ledger-head"><span>${tr('subscriptions.topupLedger')}</span><fluent-button appearance="transparent" type="button" class="ghost-btn" data-topup-add>${tr('subscriptions.topupAdd')}</fluent-button></div>${topUpRows.map(subscriptionTopUpRowHtml).join('')}</div>` : `<label class="field"><span>${tr('subscriptions.startDate')}</span><input name="startDate" type="date" value="${subscriptionField(editing, 'startDate')}" /></label>`}
       <label class="field"><span>${tr('subscriptions.nextRenewal')}</span><input name="nextRenewalOverride" type="date" value="${subscriptionField(editing, 'nextRenewalOverride')}" /></label>
@@ -1349,7 +1364,7 @@ function renderManagement() {
 }
 
 function settingsOptionList(options, selected) {
-  return options.map(([value, label]) => `<option value="${escapeHtml(value)}"${String(value) === String(selected) ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('');
+  return `<fluent-listbox>${options.map(([value, label]) => `<fluent-option value="${escapeHtml(value)}"${String(value) === String(selected) ? ' selected' : ''}>${escapeHtml(label)}</fluent-option>`).join('')}</fluent-listbox>`;
 }
 
 
@@ -2362,12 +2377,14 @@ function bindEvents() {
 
   if (els.deviceFilter) {
     els.deviceFilter.addEventListener('change', () => {
-      state.prefs.deviceFilter = els.deviceFilter.value || '';
+      state.prefs.deviceFilter = deviceIdFromOptionValue(els.deviceFilter.value);
       savePrefs({ deviceFilter: state.prefs.deviceFilter });
-      if (state.prefs.view === 'overview' || state.prefs.view === 'trends') {
-        void ensureHistory({ force: true }).then(() => render());
-      }
+      const historyRequest = state.prefs.view === 'overview' || state.prefs.view === 'trends'
+        ? ensureHistory({ force: true })
+        : null;
+      animateDataUpdate();
       render();
+      if (historyRequest) void historyRequest.then(() => { animateDataUpdate(); render(); });
     });
   }
 
@@ -2382,6 +2399,7 @@ function bindEvents() {
     state.customRange = null;
     state.prefs.period = period;
     savePrefs({ period: state.prefs.period });
+    animateDataUpdate();
     render();
   });
 
@@ -2727,6 +2745,7 @@ function bindEvents() {
     if (selectTool) {
       state.prefs.selectedToolId = selectTool.dataset.selectTool || '';
       savePrefs({ selectedToolId: state.prefs.selectedToolId });
+      animateDataUpdate();
       render();
       return;
     }
@@ -2734,6 +2753,7 @@ function bindEvents() {
     if (selectDevice && !event.target.closest('[data-delete-device]')) {
       state.prefs.selectedDeviceId = selectDevice.dataset.selectDevice || '';
       savePrefs({ selectedDeviceId: state.prefs.selectedDeviceId });
+      animateDataUpdate();
       render();
       return;
     }
@@ -2748,11 +2768,12 @@ function bindEvents() {
     syncWebSettingsFormState(event.target.closest?.('[data-web-settings-form]'));
     const trendsDevice = event.target.closest?.('[data-trends-device]');
     if (trendsDevice) {
-      state.prefs.deviceFilter = String(trendsDevice.value || '').trim();
+      state.prefs.deviceFilter = deviceIdFromOptionValue(trendsDevice.value);
       savePrefs({ deviceFilter: state.prefs.deviceFilter });
       const request = ensureHistory({ force: true });
+      animateDataUpdate();
       render();
-      void request.then(() => render());
+      void request.then(() => { animateDataUpdate(); render(); });
       return;
     }
     const trendsSetting = event.target.closest?.('[data-trends-setting]');
@@ -2767,6 +2788,7 @@ function bindEvents() {
       if (!allowedValues?.includes(value)) return;
       state.prefs[setting] = value;
       savePrefs({ [setting]: value });
+      animateDataUpdate();
       render();
       return;
     }
@@ -2785,6 +2807,7 @@ function bindEvents() {
       if (Object.hasOwn(preferences, setting)) {
         state.prefs[setting] = preferences[setting];
         savePrefs({ [setting]: state.prefs[setting] });
+        animateDataUpdate();
         render();
       }
       return;
@@ -2799,18 +2822,21 @@ function bindEvents() {
       state.oauthSession = null;
       state.accountFormError = '';
       state.accountFormMode = provider === 'codex' || provider === 'antigravity' ? 'oauth' : 'simple';
+      animateDataUpdate();
       render();
       return;
     }
     rememberFormDraft(event.target);
     const subscriptionKind = event.target.closest('[data-subscription-kind]');
     if (subscriptionKind) {
+      animateDataUpdate();
       render();
       return;
     }
     const provider = event.target.closest('[data-limit-provider]');
     if (provider) {
-      state.limitProvider = provider.value || '';
+      state.limitProvider = provider.value === ALL_PROVIDERS_OPTION_VALUE ? '' : provider.value || '';
+      animateDataUpdate();
       render();
       return;
     }

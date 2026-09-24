@@ -68,7 +68,7 @@
         <div class="topbar-actions scope-commandbar" role="group" aria-label="Filters and actions">
             <label class="device-filter">
               <span data-i18n="filters.device">Device</span>
-              <select id="deviceFilter"><option value="" data-i18n="filters.allDevices">All devices</option></select>
+              <fluent-dropdown id="deviceFilter"><fluent-listbox><fluent-option value="scope:all" selected data-i18n="filters.allDevices">All devices</fluent-option></fluent-listbox></fluent-dropdown>
             </label>
             <fluent-radio-group class="period-tabs" id="periodTabs" orientation="horizontal"></fluent-radio-group>
             <fluent-button appearance="transparent" icon-only type="button" id="customRangeBtn" class="icon-btn" title="Custom range" aria-label="Custom range" aria-controls="rangePopover" aria-expanded="false"><span class="ui-icon-slot" data-ui-icon="range"></span></fluent-button>
@@ -126,31 +126,37 @@
         <div class="drawer-body">
           <label class="field">
             <span data-i18n="settings.language">Language</span>
-            <select id="languageSelect">
-              <option value="auto">Auto</option>
-              <option value="en">English</option>
-              <option value="zh-CN">简体中文</option>
-              <option value="zh-TW">繁體中文</option>
-              <option value="ja">日本語</option>
-              <option value="ko">한국어</option>
-            </select>
+            <fluent-dropdown id="languageSelect">
+              <fluent-listbox>
+                <fluent-option value="auto">Auto</fluent-option>
+                <fluent-option value="en">English</fluent-option>
+                <fluent-option value="zh-CN">简体中文</fluent-option>
+                <fluent-option value="zh-TW">繁體中文</fluent-option>
+                <fluent-option value="ja">日本語</fluent-option>
+                <fluent-option value="ko">한국어</fluent-option>
+              </fluent-listbox>
+            </fluent-dropdown>
           </label>
           <label class="field">
             <span data-i18n="settings.theme">Theme</span>
-            <select id="themeSelect">
-              <option value="system">System</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-            </select>
+            <fluent-dropdown id="themeSelect">
+              <fluent-listbox>
+                <fluent-option value="system">System</fluent-option>
+                <fluent-option value="light">Light</fluent-option>
+                <fluent-option value="dark">Dark</fluent-option>
+              </fluent-listbox>
+            </fluent-dropdown>
           </label>
           <label class="field">
             <span data-i18n="settings.currency">Currency</span>
-            <select id="currencySelect">
-              <option value="USD">USD</option>
-              <option value="CNY">CNY</option>
-              <option value="TWD">TWD</option>
-              <option value="HKD">HKD</option>
-            </select>
+            <fluent-dropdown id="currencySelect">
+              <fluent-listbox>
+                <fluent-option value="USD">USD</fluent-option>
+                <fluent-option value="CNY">CNY</fluent-option>
+                <fluent-option value="TWD">TWD</fluent-option>
+                <fluent-option value="HKD">HKD</fluent-option>
+              </fluent-listbox>
+            </fluent-dropdown>
           </label>
           <label class="field">
             <span data-i18n="settings.homeLimitAccountCount">Home limit accounts</span>

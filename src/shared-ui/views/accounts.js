@@ -100,12 +100,12 @@ export function renderAccounts() {
   const isEditing = Boolean(editing);
   const providerOptionsHtml = HUB_ACCOUNT_PROVIDERS.map((provider) => {
     const label = provider.label || clientLabel(provider.id);
-    return `<option value="${escapeHtml(provider.id)}"${provider.id === currentProvider ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+    return `<fluent-option value="${escapeHtml(provider.id)}"${provider.id === currentProvider ? ' selected' : ''}>${escapeHtml(label)}</fluent-option>`;
   }).join('');
   const providerSelectHtml = `
     <div class="field account-provider-field">
       <label for="account-provider-select">${escapeHtml(tr('accounts.provider'))}</label>
-      <select id="account-provider-select" class="account-provider-dropdown" aria-label="${escapeHtml(tr('accounts.provider'))}" data-account-provider-select${isEditing ? ' disabled' : ''}>${providerOptionsHtml}</select>
+      <fluent-dropdown id="account-provider-select" class="account-provider-dropdown" aria-label="${escapeHtml(tr('accounts.provider'))}" data-account-provider-select${isEditing ? ' disabled' : ''}><fluent-listbox>${providerOptionsHtml}</fluent-listbox></fluent-dropdown>
       <input type="hidden" name="provider" value="${escapeHtml(currentProvider)}" data-account-provider-input />
     </div>`;
   const formTitle = isEditing ? tr('accounts.edit') : tr('accounts.add');
@@ -222,7 +222,7 @@ export function renderAccounts() {
     case 'qoder':
       simpleFieldsHtml = `
         <fluent-text-input class="field" name="cookie" type="password" autocomplete="off" spellcheck="false" placeholder="cookie" ${isEditing ? '' : 'required'}>${tr('accounts.cookie')}</fluent-text-input>
-        <label class="field"><span>${tr('accounts.site')}</span><select name="site"><option value="global"${accountCredentialField(editing, 'site', 'global') === 'global' ? ' selected' : ''}>Global</option><option value="cn"${accountCredentialField(editing, 'site') === 'cn' ? ' selected' : ''}>China (CN)</option></select></label>
+        <label class="field"><span>${tr('accounts.site')}</span><fluent-dropdown name="site"><fluent-listbox><fluent-option value="global"${accountCredentialField(editing, 'site', 'global') === 'global' ? ' selected' : ''}>Global</fluent-option><fluent-option value="cn"${accountCredentialField(editing, 'site') === 'cn' ? ' selected' : ''}>China (CN)</fluent-option></fluent-listbox></fluent-dropdown></label>
       `;
       break;
     case 'mimo':
@@ -256,7 +256,7 @@ export function renderAccounts() {
       break;
     case 'thirdparty':
       simpleFieldsHtml = `
-        <label class="field"><span>${tr('accounts.thirdPartyAdapter')}</span><select name="adapter"><option value="newapi"${accountCredentialField(editing, 'adapter', 'newapi') === 'newapi' ? ' selected' : ''}>New API / OneAPI</option><option value="custom"${accountCredentialField(editing, 'adapter') === 'custom' ? ' selected' : ''}>Custom</option></select></label>
+        <label class="field"><span>${tr('accounts.thirdPartyAdapter')}</span><fluent-dropdown name="adapter"><fluent-listbox><fluent-option value="newapi"${accountCredentialField(editing, 'adapter', 'newapi') === 'newapi' ? ' selected' : ''}>New API / OneAPI</fluent-option><fluent-option value="custom"${accountCredentialField(editing, 'adapter') === 'custom' ? ' selected' : ''}>Custom</fluent-option></fluent-listbox></fluent-dropdown></label>
         <fluent-text-input class="field" name="baseUrl" type="url" value="${accountCredentialField(editing, 'baseUrl')}" spellcheck="false" placeholder="https://api.example.com" ${isEditing ? '' : 'required'}>${tr('accounts.thirdPartyBaseUrl')}</fluent-text-input>
         <fluent-text-input class="field field-wide" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." ${isEditing ? '' : 'required'}>${tr('accounts.apiKey')}</fluent-text-input>
       `;
@@ -264,7 +264,7 @@ export function renderAccounts() {
     case 'zai':
       simpleFieldsHtml = `
         <fluent-text-input class="field" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="API Key" ${isEditing ? '' : 'required'}>${tr('accounts.apiKey')}</fluent-text-input>
-        <label class="field"><span>${tr('accounts.region')}</span><select name="region"><option value="global"${accountCredentialField(editing, 'region', 'global') === 'global' ? ' selected' : ''}>Global</option><option value="cn"${accountCredentialField(editing, 'region') === 'cn' ? ' selected' : ''}>China (BigModel)</option></select></label>
+        <label class="field"><span>${tr('accounts.region')}</span><fluent-dropdown name="region"><fluent-listbox><fluent-option value="global"${accountCredentialField(editing, 'region', 'global') === 'global' ? ' selected' : ''}>Global</fluent-option><fluent-option value="cn"${accountCredentialField(editing, 'region') === 'cn' ? ' selected' : ''}>China (BigModel)</fluent-option></fluent-listbox></fluent-dropdown></label>
       `;
       break;
     case 'kimi':

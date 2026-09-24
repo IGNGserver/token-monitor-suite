@@ -9,7 +9,7 @@ import {
   formatCost,
   formatNumber
 } from '../core/format.js';
-import { clientLabel, heatmapValue, historyDaily } from '../core/data.js';
+import { ALL_DEVICES_OPTION_VALUE, clientLabel, deviceOptionValue, heatmapValue, historyDaily } from '../core/data.js';
 import {
   tr,
   escapeHtml,
@@ -114,7 +114,7 @@ export function renderSparkline(daily) {
       `${formatNumber(tokens)} ${tr('stats.tokens')}`,
       cost ? formatCost(cost, appState().prefs.currency) : ''
     ]);
-    return `<rect class="bar-seg chart-hit" x="${x}" y="${tokens > 0 ? y : height - pad.bottom - 2}" width="${barW}" height="${tokens > 0 ? h : 2}" rx="3" fill="var(--accent)" opacity="${tokens > 0 ? 0.9 : 0.25}" data-tip="${escapeHtml(tip)}"></rect>`;
+    return `<g class="chart-bar"><rect class="bar-seg chart-hit" x="${x}" y="${tokens > 0 ? y : height - pad.bottom - 2}" width="${barW}" height="${tokens > 0 ? h : 2}" rx="3" fill="var(--accent)" opacity="${tokens > 0 ? 0.9 : 0.25}" data-tip="${escapeHtml(tip)}"></rect></g>`;
   }).join('');
   const labelDays = [daily[0], daily[Math.floor(daily.length / 2)], daily[daily.length - 1]].filter(Boolean);
   const labels = labelDays.map((day) => {
@@ -224,7 +224,7 @@ export function renderStackedBars(daily, stackBy, metric = 'tokens') {
       : (stackBy === 'model' ? (day.perModel || {}) : (day.perClient || {}));
     let y = height - pad.bottom;
     const x = pad.left + index * slot + (slot - barW) / 2;
-    const parts = [];
+    const barsForDay = [];
     const tipLines = [];
     for (const key of topKeys) {
       const amount = trendValue(map[key], metric);
@@ -235,7 +235,7 @@ export function renderStackedBars(daily, stackBy, metric = 'tokens') {
         ? tr('stats.tokens')
         : (stackBy === 'model' ? key : clientLabel(key));
       tipLines.push(`${label}: ${formatTrendValue(amount, metric)}`);
-      parts.push(`<rect class="bar-seg chart-hit" x="${x}" y="${y}" width="${barW}" height="${h}" fill="${colorMap[key]}" data-tip="${escapeHtml(tipText([day.date || '', `${label}: ${formatTrendValue(amount, metric)}`]))}"></rect>`);
+      barsForDay.push(`<rect class="bar-seg chart-hit" x="${x}" y="${y}" width="${barW}" height="${h}" fill="${colorMap[key]}" data-tip="${escapeHtml(tipText([day.date || '', `${label}: ${formatTrendValue(amount, metric)}`]))}"></rect>`);
     }
     const total = dayTotals[index];
     const totalTip = tipText([
@@ -245,8 +245,9 @@ export function renderStackedBars(daily, stackBy, metric = 'tokens') {
       ...tipLines
     ]);
     // Full-height invisible hit area so empty days and gaps still show the day total.
-    parts.unshift(`<rect class="chart-hit chart-hit-day" x="${x}" y="${pad.top}" width="${barW}" height="${height - pad.top - pad.bottom}" fill="transparent" data-tip="${escapeHtml(totalTip)}"></rect>`);
-    return parts.join('');
+    const dayHitArea = `<rect class="chart-hit chart-hit-day" x="${x}" y="${pad.top}" width="${barW}" height="${height - pad.top - pad.bottom}" fill="transparent" data-tip="${escapeHtml(totalTip)}"></rect>`;
+    const barGroup = barsForDay.length ? `<g class="chart-bar">${barsForDay.join('')}</g>` : '';
+    return `${dayHitArea}${barGroup}`;
   }).join('');
 
   const labelDays = [daily[0], daily[Math.floor(daily.length / 2)], daily[daily.length - 1]].filter(Boolean);
@@ -368,16 +369,16 @@ export function renderTrends() {
   </div>` : '';
   const selectedDevice = devices.find((device) => String(device.deviceId || '') === deviceId);
   const deviceOptions = [
-    `<option value="">${escapeHtml(tr('filters.allDevices'))}</option>`,
-    ...devices.map((device) => `<option value="${escapeHtml(device.deviceId || '')}"${String(device.deviceId || '') === deviceId ? ' selected' : ''}>${escapeHtml(device.hostname || device.deviceId || tr('devices.title'))}</option>`)
+    `<fluent-option value="${ALL_DEVICES_OPTION_VALUE}"${deviceId ? '' : ' selected'}>${escapeHtml(tr('filters.allDevices'))}</fluent-option>`,
+    ...devices.map((device) => `<fluent-option value="${escapeHtml(deviceOptionValue(device.deviceId || ''))}"${String(device.deviceId || '') === deviceId ? ' selected' : ''}>${escapeHtml(device.hostname || device.deviceId || tr('devices.title'))}</fluent-option>`)
   ].join('');
   const trendSelect = (key, label, value, options) => '<label class="field trends-filter-group"><span>'
     + escapeHtml(label)
-    + '</span><select data-trends-setting="' + key + '" aria-label="' + escapeHtml(label) + '">'
-    + options.map(([optionValue, optionLabel]) => '<option value="' + escapeHtml(optionValue) + '"'
+    + '</span><fluent-dropdown data-trends-setting="' + key + '" aria-label="' + escapeHtml(label) + '">'
+    + '<fluent-listbox>' + options.map(([optionValue, optionLabel]) => '<fluent-option value="' + escapeHtml(optionValue) + '"'
       + (String(optionValue) === String(value) ? ' selected' : '')
-      + '>' + escapeHtml(optionLabel) + '</option>').join('')
-    + '</select></label>';
+      + '>' + escapeHtml(optionLabel) + '</fluent-option>').join('') + '</fluent-listbox>'
+    + '</fluent-dropdown></label>';
   const historyContent = historyLoading
     ? `<div class="history-load-status" role="status"><fluent-spinner size="small">${escapeHtml(tr('loading'))}</fluent-spinner><span>${escapeHtml(tr('loading'))}</span></div>`
     : historyError
@@ -387,7 +388,7 @@ export function renderTrends() {
     ${renderHistoryScopeNotice()}
     ${trendSummary}
     <div class="trends-toolbar" role="group" aria-label="${tr('nav.trends')}">
-      <label class="field trends-device-filter"><span>${escapeHtml(tr('trends.device'))}</span><select data-trends-device aria-label="${escapeHtml(tr('trends.device'))}" title="${escapeHtml(selectedDevice?.hostname || selectedDevice?.deviceId || tr('filters.allDevices'))}">${deviceOptions}</select></label>
+      <label class="field trends-device-filter"><span>${escapeHtml(tr('trends.device'))}</span><fluent-dropdown data-trends-device aria-label="${escapeHtml(tr('trends.device'))}" title="${escapeHtml(selectedDevice?.hostname || selectedDevice?.deviceId || tr('filters.allDevices'))}"><fluent-listbox>${deviceOptions}</fluent-listbox></fluent-dropdown></label>
       ${trendSelect('trendsRange', tr('trends.range'), appState().prefs.trendsRange, ['7', '30', '90', '365', 'all'].map((range) => [range, range === 'all' ? tr('trends.range.all') : tr('trends.range.days', { count: range })]))}
       ${trendSelect('trendsMetric', tr('trends.metric'), trendMetric, [['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')], ['activeTime', tr('home.activeTime')]])}
       ${trendSelect('trendsStack', tr('trends.stack'), appState().prefs.trendsStack === 'model' ? 'model' : 'client', [['client', tr('trends.stack.client')], ['model', tr('trends.stack.model')]])}

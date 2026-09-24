@@ -33,6 +33,8 @@ const reduceMotion = () => {
 };
 let lastView = '';
 let pendingNavigation = false;
+let pendingDataUpdate = false;
+const animatedChartViews = new Set();
 let settingsSection = '';
 
 export function syncFluentMotion(preference = 'system') {
@@ -48,12 +50,99 @@ export function animateNavigation() {
   pendingNavigation = true;
 }
 
+export function animateDataUpdate() {
+  pendingDataUpdate = true;
+}
+
+export function setFluentDropdownValue(dropdown, value) {
+  const desired = String(value ?? '');
+  const options = [...dropdown.querySelectorAll('fluent-option')];
+  const selected = options.find((option) => option.value === desired);
+  const listbox = dropdown.listbox;
+  const controlSlot = dropdown.shadowRoot?.querySelector('slot[name="control"]');
+  const controlReady = dropdown.control?.isConnected && controlSlot?.assignedElements().includes(dropdown.control);
+  if (listbox?.isConnected && selected && listbox.contains(selected) && controlReady) {
+    dropdown.value = selected?.value ?? '';
+    return;
+  }
+
+  // FAST delivers the slotted listbox after the current render turn. Set the
+  // option state now, then use Dropdown's public value API once its listbox is
+  // and generated control are ready; calling value before control slotting
+  // throws in Fluent 3.1 and can strand the selected text outside the UI.
+  options.forEach((option) => { option.selected = option === selected; });
+  let synchronized = false;
+  let attempts = 0;
+  let frame = 0;
+  let timeout = 0;
+  const cleanup = () => {
+    if (frame) cancelAnimationFrame(frame);
+    if (timeout) window.clearTimeout(timeout);
+    dropdown.removeEventListener('slotchange', onSlotChange);
+  };
+  const synchronize = () => {
+    const currentListbox = dropdown.listbox;
+    const currentControlSlot = dropdown.shadowRoot?.querySelector('slot[name="control"]');
+    const currentControl = dropdown.control;
+    const currentControlReady = currentControl?.isConnected
+      && currentControlSlot?.assignedElements().includes(currentControl);
+    if (dropdown.isConnected && currentListbox?.isConnected && selected && currentListbox.contains(selected) && currentControlReady) {
+      dropdown.value = selected.value;
+      synchronized = true;
+      cleanup();
+      return;
+    }
+    attempts += 1;
+    if (attempts < 60) frame = requestAnimationFrame(synchronize);
+  };
+  const onSlotChange = () => queueMicrotask(() => requestAnimationFrame(synchronize));
+  dropdown.addEventListener('slotchange', onSlotChange);
+  frame = requestAnimationFrame(synchronize);
+  timeout = window.setTimeout(() => {
+    if (!synchronized) cleanup();
+  }, 1000);
+}
+
+function motionDuration(token, fallback) {
+  const value = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(`--${token}`));
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function motionEasing(token, fallback) {
+  return getComputedStyle(document.documentElement).getPropertyValue(`--${token}`).trim() || fallback;
+}
+
 function enter(element, kind = 'fade', delay = 0) {
   if (!element || reduceMotion() || typeof element.animate !== 'function') return;
   const frames = kind === 'fade'
     ? [{ opacity: 0 }, { opacity: 1 }]
     : [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'translateY(0)' }];
-  element.animate(frames, { duration: kind === 'fade' ? 150 : 200, delay, easing: 'cubic-bezier(0.1, 0.9, 0.2, 1)' });
+  element.animate(frames, {
+    duration: motionDuration(kind === 'fade' ? 'durationFast' : 'durationNormal', kind === 'fade' ? 150 : 200),
+    delay,
+    easing: motionEasing('curveDecelerateMid', 'cubic-bezier(0.1, 0.9, 0.2, 1)')
+  });
+}
+
+function animateCharts(root) {
+  if (reduceMotion() || typeof Element.prototype.animate !== 'function') return;
+  const easing = motionEasing('curveDecelerateMid', 'cubic-bezier(0.1, 0.9, 0.2, 1)');
+  const duration = motionDuration('durationSlow', 300);
+  const bars = [...root.querySelectorAll('.chart-bar')];
+  bars.forEach((bar, index) => {
+    bar.animate([
+      { opacity: 0.35, transform: 'scaleY(0.04)' },
+      { opacity: 1, transform: 'scaleY(1)' }
+    ], { duration, delay: Math.min(index * 12, 180), easing });
+  });
+  const cells = [...root.querySelectorAll('.chart-svg-heat .heat')];
+  cells.forEach((cell, index) => {
+    cell.animate([{ opacity: 0 }, { opacity: 1 }], {
+      duration: motionDuration('durationGentle', 250),
+      delay: Math.min(index * 4, 120),
+      easing
+    });
+  });
 }
 
 function configureTabs(root) {
@@ -108,6 +197,10 @@ function settingsNavigation(root) {
 export function finishFluentRender(root, view) {
   configureTabs(document);
   settingsNavigation(root);
+  root.querySelectorAll('fluent-dropdown').forEach((dropdown) => {
+    const selected = dropdown.querySelector('fluent-option[selected]');
+    if (selected) setFluentDropdownValue(dropdown, selected.value);
+  });
   // Use Fluent status badges and message bars while leaving domain charts and
   // data rows as semantic lists, tables, and custom visualizations.
   root.querySelectorAll('.badge:not(fluent-badge)').forEach((badge) => {
@@ -139,11 +232,29 @@ export function finishFluentRender(root, view) {
     notice.replaceWith(message);
   });
   root.setAttribute('aria-busy', String(Boolean(root.querySelector('.loading-stack'))));
-  if (view !== lastView || pendingNavigation) {
-    enter(root);
+  const changedView = view !== lastView || pendingNavigation;
+  const chartTargets = root.querySelector('.chart-bar, .chart-svg-heat .heat');
+  const shouldAnimateChart = Boolean(chartTargets)
+    && (changedView || pendingDataUpdate || !animatedChartViews.has(view));
+  if (changedView) enter(root);
+  if (changedView || pendingDataUpdate) {
     if (!lastView) [...root.querySelectorAll('.panel')].slice(0, 5).forEach((panel, index) => enter(panel, 'enter', index * 20));
+    else if (pendingDataUpdate) {
+      const cards = [
+        ...document.querySelectorAll('#heroStrip .hero-card'),
+        ...root.querySelectorAll('.panel, .usage-metric-card')
+      ];
+      cards.slice(0, 12).forEach((card, index) => enter(card, 'enter', Math.min(index * 16, 112)));
+    }
+  }
+  if (shouldAnimateChart) {
+    animateCharts(root);
+    if (!reduceMotion()) animatedChartViews.add(view);
+  }
+  if (changedView || pendingDataUpdate) {
     lastView = view;
     pendingNavigation = false;
+    pendingDataUpdate = false;
   }
 }
 

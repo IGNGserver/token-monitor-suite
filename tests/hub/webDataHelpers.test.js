@@ -76,7 +76,8 @@ test('hub web app wires status, heatmap, and active-days controls', () => {
   assert.match(app, /data-account-refresh/);
   assert.match(app, /data-account-delete/);
   assert.match(app, /data-account-provider-select/);
-  assert.match(app, /<option value=/);
+  assert.match(app, /<fluent-option value=/);
+  assert.doesNotMatch(app, /<option(?:\s|>)/);
   assert.match(app, /data-account-provider-input/);
   assert.doesNotMatch(app, /data-account-provider-menu|accountProviderMenuOpen/);
   assert.doesNotMatch(app, /<select name="provider"/);
@@ -122,7 +123,9 @@ test('hub account UI keeps the shared form system and reports OAuth failures', (
   assert.match(app, /void saveAccountFromForm\(accountForm\)\.catch/);
   assert.match(app, /account-form-error/);
   assert.doesNotMatch(index, /[☰↻⚙←×]/u);
-  assert.match(css, /\.field input, \.field select, \.field textarea/);
+  assert.match(css, /\.field input, \.field textarea/);
+  assert.match(css, /\.field fluent-dropdown \{ display: block; width: 100%; min-height: 44px; \}/);
+  assert.doesNotMatch(css, /\.field select/);
   assert.match(css, /\.account-oauth-redirect-input/);
   assert.match(css, /\.account-provider-dropdown/);
   assert.match(css, /\.account-provider-dropdown \{ display: block; width: 100%; \}/);

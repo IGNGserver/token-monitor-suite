@@ -58,7 +58,7 @@ function rangeQueryToParts(query) {
  * @param {() => object} deps.getSettings        Current settings snapshot.
  * @param {() => object} deps.getStats           Local-or-Hub stats snapshot.
  * @param {() => object} deps.getCustomRange     Custom-range aggregation.
- * @param {() => object} deps.getHistory         Full history document.
+ * @param {(options: object) => object} deps.getHistory Scoped history document.
  * @param {() => object|null} deps.getSessionDetail
  * @param {(path: string, options: object) => Promise<object>} deps.hubRequest
  *        Authenticated proxy for Hub-owned routes. Rejects with

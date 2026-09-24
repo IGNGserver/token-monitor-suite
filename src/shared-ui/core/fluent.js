@@ -1,4 +1,7 @@
-import { Tablist, TablistTemplate, TablistStyles } from '../vendor/fluent.js';
+import {
+  Listbox,
+  Tablist, TablistTemplate, TablistStyles
+} from '../vendor/fluent.js';
 
 // Upstream 3.1.3 queues descendant connection work that may run after an
 // entire template has been replaced. An unattached root has no getElementById.
@@ -8,6 +11,19 @@ class WorkspaceTablist extends Tablist {
   changeTab(previous, next) { if (this.isConnected) super.changeTab(previous, next); }
 }
 WorkspaceTablist.define({ name: 'tm-tablist', template: TablistTemplate, styles: TablistStyles });
+
+// Fluent Dropdown discovers its listbox by the official fluent-listbox tag,
+// so keep that tag and guard the queued callback on its shared prototype. A
+// rerender can disconnect slotted options before FAST delivers old slot work.
+Listbox.prototype.optionsChanged = function optionsChanged(_previous, next) {
+  if (!this.isConnected || !next) return;
+  next.forEach((option, index) => {
+    const internals = option?.elementInternals;
+    if (!internals) return;
+    internals.ariaPosInSet = String(index + 1);
+    internals.ariaSetSize = String(next.length);
+  });
+};
 
 // UI-only behavior. No host, data, credential or persistence access belongs here.
 const reduceMotion = () => {

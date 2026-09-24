@@ -3150,15 +3150,21 @@ function handleZoomShortcut(event, input) {
 
 
 
-async function getDashboardHistory() {
+async function getDashboardHistory(options = {}) {
   if (settings?.historyEnabled === false) return aggregateHistory([]);
+  const deviceId = String(options?.query?.get?.('deviceId') || '').trim();
+  const localDeviceHistory = () => deviceId && String(localDevice?.deviceId || '') === deviceId
+    ? aggregateHistory([localDevice])
+    : null;
   if (mode === 'local') {
     // The local collector keeps localDevice.history current (watch + interval
     // ticks, with carry-forward), so read it directly — exactly as the hub
     // branch reads /api/history. Forcing a full collection tick here made the
     // fetch take seconds; on a quick close/reopen the response outlived the
     // renderer and was dropped, stranding the dashboard on its empty state.
-    const history = aggregateHistory(localDevice ? [localDevice] : []);
+    const history = deviceId && !localDeviceHistory()
+      ? aggregateHistory([])
+      : aggregateHistory(localDevice ? [localDevice] : []);
     if (localDevice) cacheLocalSnapshot({ history });
     return history;
   }
@@ -3168,6 +3174,11 @@ async function getDashboardHistory() {
     const error = new Error('Hub history transport is unavailable');
     error.code = config.error?.code || 'hub_history_transport_unavailable';
     updateSyncHealth('rest', { state: 'error', lastFailureAt: new Date().toISOString(), failureCode: error.code });
+    if (deviceId) {
+      const localHistory = localDeviceHistory();
+      if (localHistory) return localHistory;
+      throw error;
+    }
     return desktopSnapshotCache?.hub?.history
       || desktopSnapshotCache?.local?.history
       || aggregateHistory(lastCollectedDevice ? [lastCollectedDevice] : []);
@@ -3177,13 +3188,19 @@ async function getDashboardHistory() {
     const error = new Error('Hub history is not configured');
     error.code = 'hub_not_configured';
     updateSyncHealth('rest', { state: 'blocked', lastFailureAt: new Date().toISOString(), failureCode: error.code });
+    if (deviceId) {
+      const localHistory = localDeviceHistory();
+      if (localHistory) return localHistory;
+      throw error;
+    }
     return desktopSnapshotCache?.hub?.history
       || desktopSnapshotCache?.local?.history
       || aggregateHistory(lastCollectedDevice ? [lastCollectedDevice] : []);
   }
-  const url = `${hubUrl.replace(/\/$/, '')}/api/history`;
+  const historyUrl = new URL(`${hubUrl.replace(/\/$/, '')}/api/history`);
+  if (deviceId) historyUrl.searchParams.set('deviceId', deviceId);
   try {
-    const response = await fetchBufferedWithTimeout(fetch, url, {
+    const response = await fetchBufferedWithTimeout(fetch, historyUrl, {
       headers: secret ? { authorization: `Bearer ${secret}` } : {}
     }, HUB_REQUEST_TIMEOUT_MS);
     if (!response.ok) {
@@ -3193,7 +3210,7 @@ async function getDashboardHistory() {
       throw error;
     }
     const history = await response.json();
-    cacheHubSnapshot({ history });
+    if (!deviceId) cacheHubSnapshot({ history });
     updateSyncHealth('rest', { state: 'ok', lastSuccessAt: new Date().toISOString(), failureCode: null, status: null });
     return history;
   } catch (error) {
@@ -3203,6 +3220,11 @@ async function getDashboardHistory() {
       failureCode: stableSyncFailureCode(error, 'hub_history_failed'),
       status: Number.isInteger(Number(error?.status)) ? Number(error.status) : null
     });
+    if (deviceId) {
+      const localHistory = localDeviceHistory();
+      if (localHistory) return localHistory;
+      throw error;
+    }
     // History is an enhancement to the cached stats snapshot. Preserve the
     // last full trend data when the Hub is unavailable, then fall back to the
     // current local record if this is a first-ever connection.
@@ -3311,7 +3333,7 @@ async function validateHubSecret(secret) {
 const desktopRouter = createRequestRouter({
   getSettings: () => settingsForRenderer(),
   getStats: (options) => fetchStats(options),
-  getHistory: () => getDashboardHistory(),
+  getHistory: (options) => getDashboardHistory(options),
   getCustomRange: (options) => fetchCustomRangeStats(options?.body || options),
   getSessionDetail: (args) => fetchSessionDetail(args),
   getCapabilities: () => localCapabilitiesForRenderer(),

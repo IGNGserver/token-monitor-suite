@@ -18,6 +18,7 @@ export function renderListView(rows, emptyKey, { showIcon = false } = {}) {
   })).join('')}</div>`;
 }
 
-export function usageMetricCard(label, value, detail = '') {
-  return `<div class="usage-metric-card"><span class="summary-label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>${detail ? `<span class="row-sub">${escapeHtml(detail)}</span>` : ''}</div>`;
+export function usageMetricCard(label, value, detail = '', className = '') {
+  const extraClass = className ? ` ${escapeHtml(className)}` : '';
+  return `<div class="usage-metric-card${extraClass}"><span class="summary-label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>${detail ? `<span class="row-sub">${escapeHtml(detail)}</span>` : ''}</div>`;
 }

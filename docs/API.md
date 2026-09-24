@@ -300,7 +300,11 @@ Requires read scope. Returns the cross-device history rollup used by the Trends
 view: `aggregateHistory()` over every stored device record, so it is the same
 shape the desktop app serves locally through its own transport. Only devices
 that report the optional `history` field contribute — collection is controlled by
-`TOKEN_MONITOR_HISTORY_ENABLED` / Settings → Collection.
+`TOKEN_MONITOR_HISTORY_ENABLED` / Settings → Collection. The optional
+`deviceId` query parameter returns history for only that stored device, using
+the same response shape; an unknown ID returns an empty history document. This
+supports the Trends page's device scope without presenting Hub-wide history as
+device-specific data.
 
 ## `GET /api/subscriptions` / `PUT /api/subscriptions`
 

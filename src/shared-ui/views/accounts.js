@@ -51,7 +51,9 @@ export function renderAccounts() {
   `;
 
   const list = records.length
-    ? `<div class="management-list">${records.map((record) => {
+    ? `<div class="account-list" role="table" aria-label="${escapeHtml(tr('accounts.title'))}">
+      <div class="account-list-head" role="row"><span role="columnheader">${tr('accounts.provider')}</span><span role="columnheader">${tr('accounts.name')}</span><span role="columnheader">${tr('accounts.columnStatus')}</span><span role="columnheader">${tr('accounts.columnRefresh')}</span><span role="columnheader"></span></div>
+      ${records.map((record) => {
       const providerLabel = clientLabel(record.provider);
       const isOk = record.status === 'ok';
       const isRefreshing = record.status === 'refreshing' || record.status === 'pending';
@@ -69,53 +71,41 @@ export function renderAccounts() {
         badgeText = tr('accounts.statusOk');
       }
 
-      const metaParts = [
-        providerLabel,
+      const identityParts = [
         record.label ? escapeHtml(record.label) : '',
-        record.accountEmail || record.accountKey ? escapeHtml(record.accountEmail || record.accountKey) : '',
-        record.lastSuccessAt ? tr('accounts.lastRefresh', { time: escapeHtml(formatRelative(record.lastSuccessAt, appState().locale)) }) : ''
+        record.accountEmail || record.accountKey ? escapeHtml(record.accountEmail || record.accountKey) : ''
       ].filter(Boolean);
 
       const errorDetail = record.lastErrorMessage ? `<div class="row-sub row-error" style="color:var(--warn, #e06c75);margin-top:4px;">${escapeHtml(record.lastErrorMessage)}</div>` : '';
 
-      return `<article class="management-row account-management-row ${record.id === appState().accountEditId ? 'is-editing' : ''}">
-        <div class="row-main">
-          <img class="client-icon" src="${clientIconPath(record.provider)}" alt="" onerror="this.style.display='none'" />
-          <div class="row-copy">
-            <div class="row-name">
-              ${escapeHtml(record.name || providerLabel)}
-              <span class="badge ${badgeTone}" style="margin-left:8px;font-size:11px;">${badgeText}</span>
-            </div>
-            <div class="row-sub">${metaParts.join(' · ')}</div>
-            ${errorDetail}
-          </div>
-        </div>
-        ${canManage ? `<div class="management-actions">
-          <fluent-button appearance="transparent" type="button" class="ghost-btn" data-account-refresh="${escapeHtml(record.id)}" ${appState().accountsSaving ? 'disabled' : ''}>${tr('accounts.refresh')}</fluent-button>
-          <fluent-button appearance="transparent" type="button" class="ghost-btn" data-account-toggle="${escapeHtml(record.id)}" ${appState().accountsSaving ? 'disabled' : ''}>${record.enabled === false ? tr('accounts.enabled') : tr('accounts.statusDisabled')}</fluent-button>
-          <fluent-button appearance="transparent" type="button" class="ghost-btn" data-account-edit="${escapeHtml(record.id)}">${tr('actions.edit')}</fluent-button>
-          <fluent-button appearance="secondary" type="button" class="danger-btn" data-account-delete="${escapeHtml(record.id)}">${tr('actions.delete')}</fluent-button>
+      const needsAttention = !isOk && !isDisabled && !isRefreshing;
+      return `<article class="account-row${record.id === appState().accountEditId && appState().accountDrawerOpen ? ' is-editing' : ''}" role="row">
+        <div class="account-provider" role="cell"><img class="client-icon" src="${clientIconPath(record.provider)}" alt="" onerror="this.style.display='none'" /><span>${escapeHtml(providerLabel)}</span></div>
+        <div class="account-identity" role="cell"><span class="row-name">${escapeHtml(record.name || providerLabel)}</span>${identityParts.length ? `<span class="row-sub">${identityParts.join(' · ')}</span>` : ''}${errorDetail}</div>
+        <div class="account-status" role="cell"><span class="badge ${badgeTone}">${badgeText}</span></div>
+        <div class="account-updated" role="cell" data-label="${escapeHtml(tr('accounts.columnRefresh'))}">${record.lastSuccessAt ? escapeHtml(formatRelative(record.lastSuccessAt, appState().locale)) : '—'}</div>
+        ${canManage ? `<div class="account-row-actions" role="cell">
+          ${needsAttention ? `<fluent-button appearance="secondary" type="button" class="account-primary-action" data-account-edit="${escapeHtml(record.id)}">${tr('actions.edit')}</fluent-button>` : ''}
+          <details class="row-action-menu"><summary aria-label="${escapeHtml(tr('actions.more'))}" data-management-focus="account-${escapeHtml(record.id)}">•••</summary><div class="row-action-popover">
+            <fluent-button appearance="transparent" type="button" data-account-refresh="${escapeHtml(record.id)}" ${appState().accountsSaving ? 'disabled' : ''}>${tr('accounts.refresh')}</fluent-button>
+            <fluent-button appearance="transparent" type="button" data-account-toggle="${escapeHtml(record.id)}" ${appState().accountsSaving ? 'disabled' : ''}>${record.enabled === false ? tr('accounts.enabled') : tr('accounts.statusDisabled')}</fluent-button>
+            <fluent-button appearance="transparent" type="button" data-account-edit="${escapeHtml(record.id)}">${tr('actions.edit')}</fluent-button>
+            <fluent-button appearance="transparent" type="button" class="danger-btn" data-account-delete="${escapeHtml(record.id)}">${tr('actions.delete')}</fluent-button>
+          </div></details>
         </div>` : ''}
       </article>`;
     }).join('')}</div>`
     : emptyHtml('accounts.empty');
 
   const isEditing = Boolean(editing);
-  const selectedProvider = HUB_ACCOUNT_PROVIDERS.find((provider) => provider.id === currentProvider)
-    || { id: currentProvider, label: clientLabel(currentProvider) };
   const providerOptionsHtml = HUB_ACCOUNT_PROVIDERS.map((provider) => {
-    const selected = provider.id === currentProvider;
     const label = provider.label || clientLabel(provider.id);
-    return `<fluent-dropdown-option class="account-select-option" value="${escapeHtml(provider.id)}" text="${escapeHtml(label)}"${selected ? ' selected' : ''}>
-      <img slot="start" class="account-select-option-icon" src="${escapeHtml(clientIconPath(provider.id))}" alt="" aria-hidden="true" onerror="this.style.display='none'" />
-    </fluent-dropdown-option>`;
+    return `<option value="${escapeHtml(provider.id)}"${provider.id === currentProvider ? ' selected' : ''}>${escapeHtml(label)}</option>`;
   }).join('');
   const providerSelectHtml = `
     <div class="field account-provider-field">
-      <label id="account-provider-label">${escapeHtml(tr('accounts.provider'))}</label>
-      <fluent-dropdown class="account-provider-dropdown" value="${escapeHtml(selectedProvider.id)}" aria-labelledby="account-provider-label" data-account-provider-select${isEditing ? ' disabled' : ''}>
-        <fluent-listbox aria-label="${escapeHtml(tr('accounts.provider'))}">${providerOptionsHtml}</fluent-listbox>
-      </fluent-dropdown>
+      <label for="account-provider-select">${escapeHtml(tr('accounts.provider'))}</label>
+      <select id="account-provider-select" class="account-provider-dropdown" aria-label="${escapeHtml(tr('accounts.provider'))}" data-account-provider-select${isEditing ? ' disabled' : ''}>${providerOptionsHtml}</select>
       <input type="hidden" name="provider" value="${escapeHtml(currentProvider)}" data-account-provider-input />
     </div>`;
   const formTitle = isEditing ? tr('accounts.edit') : tr('accounts.add');
@@ -348,25 +338,17 @@ export function renderAccounts() {
   const accountDraftKey = `account:${editing?.id || 'new'}`;
   const form = `<form class="management-form account-form" data-account-form data-account-mode="${escapeHtml(effectiveMode)}" data-draft-key="${escapeHtml(accountDraftKey)}">
     <div class="form-section-head">
-      <div>
-        <h3>${formTitle}</h3>
-        <p class="muted tiny">${tr('accounts.hint')}</p>
-        ${isEditing ? `<p class="muted tiny">${tr('accounts.credentialKeepHint')}</p>` : ''}
-      </div>
+      <div>${isEditing ? `<p class="muted tiny">${tr('accounts.credentialKeepHint')}</p>` : ''}</div>
       <div class="account-form-head-actions">
         <div class="mode-toggle-group">
           ${isOAuthCandidate ? `<fluent-button appearance="transparent" type="button" class="ghost-btn ${oauthModeActive ? 'active' : ''}" data-account-mode="oauth">${tr('accounts.oauthModeToggle')}</fluent-button>` : ''}
           <fluent-button appearance="transparent" type="button" class="ghost-btn ${!oauthModeActive && simpleModeActive ? 'active' : ''}" data-account-mode="simple">${tr('accounts.modeSimple')}</fluent-button>
           <fluent-button appearance="transparent" type="button" class="ghost-btn ${!oauthModeActive && !simpleModeActive ? 'active' : ''}" data-account-mode="json">${tr('accounts.modeJson')}</fluent-button>
         </div>
-        ${isEditing ? `<fluent-button appearance="transparent" type="button" class="ghost-btn" data-account-reset>${tr('actions.cancel')}</fluent-button>` : ''}
       </div>
     </div>
     <div class="form-grid">
-      <div class="field">
-        <span>${tr('accounts.provider')}</span>
-        ${providerSelectHtml}
-      </div>
+      ${providerSelectHtml}
       <fluent-text-input class="field" name="name" required value="${accountField(editing, 'name')}" placeholder="${currentProvider}-1" maxlength="128">${tr('accounts.name')}</fluent-text-input>
       <fluent-text-input class="field field-wide" name="label" value="${accountField(editing, 'label')}" placeholder="Production / Personal" maxlength="256">${tr('accounts.label')}</fluent-text-input>
       ${isEditing ? `
@@ -390,18 +372,28 @@ export function renderAccounts() {
       </label>` : ''}
     </div>` : ''}
     ${appState().accountFormError ? `<p class="form-error account-form-error" role="alert">${escapeHtml(appState().accountFormError)}</p>` : ''}
-    <div class="drawer-actions">
+    <div class="drawer-actions management-form-actions">
+      <fluent-button appearance="transparent" type="button" class="ghost-btn" data-account-reset>${tr('actions.cancel')}</fluent-button>
       <fluent-button appearance="primary" type="submit" class="primary-btn" ${appState().accountsSaving ? 'disabled' : ''}>
         ${appState().accountsSaving ? tr('actions.saving') : tr('actions.save')}
       </fluent-button>
     </div>
   </form>`;
 
-  const management = appState().authorization?.scopes?.includes('admin')
-    ? panel(tr('accounts.add'), form)
+  const addAction = canManage
+    ? `<fluent-button appearance="primary" type="button" class="primary-btn" data-account-add>${escapeHtml(tr('accounts.add'))}</fluent-button>`
+    : '';
+  const management = canManage
+    ? `<div class="drawer management-drawer${appState().accountDrawerOpen ? '' : ' hidden'}" data-management-drawer="account" aria-hidden="${appState().accountDrawerOpen ? 'false' : 'true'}">
+        <div class="drawer-backdrop" data-close-management-drawer></div>
+        <aside class="drawer-panel management-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="account-form-title" tabindex="-1">
+          <header class="drawer-head"><div><h2 id="account-form-title">${escapeHtml(formTitle)}</h2><p class="muted tiny">${escapeHtml(tr('accounts.hint'))}</p></div><fluent-button appearance="transparent" icon-only type="button" class="icon-btn" data-close-management-drawer aria-label="${escapeHtml(tr('actions.close'))}"><span class="ui-icon-slot" data-ui-icon="close"></span></fluent-button></header>
+          <div class="drawer-body">${form}</div>
+        </aside>
+      </div>`
     : '';
 
-  return `${panel(tr('accounts.title'), `<div class="summary-grid account-summary">${summary}</div>${list}`)}${management}`;
+  return `${panel(tr('accounts.title'), `<div class="summary-grid account-summary">${summary}</div>${list}`, '', addAction)}${management}`;
 }
 
 export function renderAccountsPage() {

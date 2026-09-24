@@ -158,13 +158,13 @@ export function formatLimitHint(card) {
   return '';
 }
 
-export function renderLimitCards(cards, { compact = false } = {}) {
+export function renderLimitCards(cards, { compact = false, hideProvider = false } = {}) {
   if (!cards.length) return emptyHtml('empty.limits');
   return `
-    <div class="grid-2">
+    <div class="limit-list${compact ? ' limit-list-compact' : ''}">
       ${cards.map((card) => {
         const sub = [
-          clientLabel(card.provider),
+          hideProvider ? '' : clientLabel(card.provider),
           card.plan || '',
           card.source ? String(card.source).toUpperCase() : '',
           card.accountEmail && card.name !== card.accountEmail ? card.accountEmail : ''
@@ -181,10 +181,14 @@ export function renderLimitCards(cards, { compact = false } = {}) {
             </div>
             ${formatLimitBadge(card)}
           </div>
-          ${renderLimitCardWindows(card)}
+          <div class="limit-card-windows">${renderLimitCardWindows(card)}</div>
           ${(() => {
             const hint = formatLimitHint(card);
-            return hint ? `<p class="muted tiny limit-card-hint">${escapeHtml(hint)}</p>` : '';
+            const canOpenAccounts = appState().authorization?.capabilities?.hubAccounts !== false && appState().authorization?.scopes?.includes('admin');
+            const action = canOpenAccounts && card.status !== 'ok'
+              ? `<fluent-button appearance="transparent" type="button" class="limit-account-action" data-jump-view="accounts">${tr('nav.accounts')}</fluent-button>`
+              : '';
+            return hint || action ? `<div class="limit-card-followup">${hint ? `<p class="muted tiny limit-card-hint">${escapeHtml(hint)}</p>` : ''}${action}</div>` : '';
           })()}
           <div class="limit-card-foot" title="${escapeHtml(card.updatedAt ? formatReset(card.updatedAt, appState().locale) : '')}">
             <span>${tr('limits.lastFetched', { time: formatRelative(card.updatedAt, appState().locale) })}</span>
@@ -199,17 +203,22 @@ export function renderLimits() {
   const stats = viewStats();
   const allCards = limitCards(stats, appState().locale);
   const providers = [...new Set(allCards.map((card) => card.provider))].sort();
-  const cards = appState().limitProvider
+  const cards = (appState().limitProvider
     ? allCards.filter((card) => card.provider === appState().limitProvider)
-    : allCards;
+    : allCards).sort((a, b) => {
+      const rank = (card) => {
+        const status = String(card.status).toLowerCase();
+        return status === 'ok' ? 2 : status === 'disabled' ? 3 : card.stale ? 1 : 0;
+      };
+      return rank(a) - rank(b) || String(a.name).localeCompare(String(b.name));
+    });
   const healthy = cards.filter((card) => !card.stale && String(card.status).toLowerCase() === 'ok').length;
   const stale = cards.filter((card) => card.stale).length;
-  const attention = Math.max(0, cards.length - healthy - stale);
+  const attention = cards.filter((card) => !card.stale && !['ok', 'disabled'].includes(String(card.status).toLowerCase())).length;
   const healthSummary = `<div class="usage-metric-strip limit-health-strip">
-    ${usageMetricCard(tr('status.accounts'), cards.length)}
-    ${usageMetricCard(tr('limits.healthy'), healthy)}
-    ${usageMetricCard(tr('limits.attention'), attention)}
-    ${usageMetricCard(tr('limits.stale'), stale)}
+    ${usageMetricCard(tr('limits.healthy'), healthy, '', healthy > 0 ? 'is-healthy' : '')}
+    ${usageMetricCard(tr('limits.attention'), attention, '', attention > 0 ? 'is-attention' : '')}
+    ${usageMetricCard(tr('limits.stale'), stale, '', stale > 0 ? 'is-stale' : '')}
   </div>`;
   const filter = `
     <div class="toolbar-row view-toolbar">
@@ -223,7 +232,18 @@ export function renderLimits() {
       <span class="panel-meta tiny">${tr('limits.accountsCount', { count: cards.length })}</span>
     </div>`;
   const healthPanel = appState().prefs.limitTab === 'health' ? renderStatus() : '';
-  return `${healthSummary}${healthPanel}${filter}${renderLimitCards(cards)}`;
+  const grouped = new Map();
+  cards.forEach((card) => {
+    const key = String(card.provider || 'other');
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(card);
+  });
+  const providerGroups = [...grouped.entries()].map(([provider, rows]) => `
+    <section class="provider-limit-group">
+      <header class="provider-limit-head"><div class="row-main"><img class="client-icon" src="${clientIconPath(provider)}" alt="" onerror="this.style.display='none'" /><h2>${escapeHtml(clientLabel(provider))}</h2></div><span class="muted tiny">${tr('limits.accountsCount', { count: rows.length })}</span></header>
+      ${renderLimitCards(rows, { compact: true, hideProvider: true })}
+    </section>`).join('');
+  return `${healthSummary}${healthPanel}${filter}${providerGroups ? `<div class="provider-limit-groups">${providerGroups}</div>` : emptyHtml('empty.limits')}`;
 }
 
 export function renderStatus() {

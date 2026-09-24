@@ -43,9 +43,9 @@ export function renderTools() {
     colorFor: (key) => modelColor(key)
   });
   const toolList = tools.map((row) => {
-    const active = row.key === selected.key ? ' selected' : '';
+    const active = row.key === selected.key;
     return `
-      <fluent-dropdown-option class="tool-select-row${active}" value="${escapeHtml(row.key)}" text="${escapeHtml(row.name)}" aria-label="${escapeHtml(`${row.name}, ${formatNumber(row.value)} tokens, ${formatCost(row.cost, appState().prefs.currency)}`)}" data-select-tool="${escapeHtml(row.key)}"${active ? ' selected' : ''}>
+      <button type="button" class="tool-select-row${active ? ' selected' : ''}" aria-pressed="${active}" aria-label="${escapeHtml(`${row.name}, ${formatNumber(row.value)} tokens, ${formatCost(row.cost, appState().prefs.currency)}`)}" data-select-tool="${escapeHtml(row.key)}">
         <div class="row-main">
           <img class="client-icon" src="${clientIconPath(row.key)}" alt="" onerror="this.style.display='none'" />
           <div class="row-copy">
@@ -57,14 +57,14 @@ export function renderTools() {
           <div class="row-value">${formatNumber(row.value)}</div>
           <div class="row-cost">${formatCost(row.cost, appState().prefs.currency)}</div>
         </div>
-      </fluent-dropdown-option>`;
+      </button>`;
   }).join('');
 
   return `
     <div class="grid-2 tools-layout">
       <section class="panel">
         <div class="panel-head"><h2 class="panel-title">${tr('nav.tool')}</h2></div>
-        <fluent-listbox class="tool-select-list" aria-label="${escapeHtml(tr('nav.tool'))}">${toolList}</fluent-listbox>
+        <div class="tool-select-list" role="group" aria-label="${escapeHtml(tr('nav.tool'))}">${toolList}</div>
       </section>
       <section class="panel">
         <div class="panel-head">
@@ -73,7 +73,7 @@ export function renderTools() {
         </div>
         ${selected.metrics ? `<div class="usage-detail-label">${escapeHtml(tr('usage.breakdown'))}</div>${renderTokenMix(selected.metrics)}` : ''}
         <div class="usage-detail-label usage-detail-label-spaced">${escapeHtml(tr('usage.tabs.models'))}</div>
-        ${models.length ? shareBarHtml(models.slice(0, 16)) : emptyHtml('empty.usage')}
+        ${models.length ? shareBarHtml(models.slice(0, 16), { clientIcons: false }) : emptyHtml('empty.usage')}
       </section>
     </div>
   `;
@@ -95,11 +95,11 @@ export function renderUsageMetricStrip(period) {
 
 export function renderTokenMix(metrics = {}) {
   const values = [
-    [tr('usage.input'), metrics.inputTokens, 'var(--accent)'],
-    [tr('usage.output'), metrics.outputTokens, 'var(--good)'],
-    [tr('usage.cacheRead'), metrics.cacheReadTokens, 'var(--warn)'],
-    [tr('usage.cacheWrite'), metrics.cacheWriteTokens, 'var(--bad)'],
-    [tr('usage.uncached'), metrics.uncachedInputTokens, 'var(--stale)']
+    [tr('usage.input'), metrics.inputTokens, 'var(--chart-series-1)'],
+    [tr('usage.output'), metrics.outputTokens, 'var(--chart-series-2)'],
+    [tr('usage.cacheRead'), metrics.cacheReadTokens, 'var(--chart-series-3)'],
+    [tr('usage.cacheWrite'), metrics.cacheWriteTokens, 'var(--chart-series-4)'],
+    [tr('usage.uncached'), metrics.uncachedInputTokens, 'var(--chart-series-5)']
   ];
   const total = Math.max(1, Number(metrics.totalTokens || 0));
   const visible = values.filter(([, value]) => Number(value || 0) > 0);

@@ -22,7 +22,6 @@ import {
 // instead of threading a context object through every helper.
 const emptyHtml = (key) => viewHelper('emptyHtml')(key);
 const panel = (...args) => viewHelper('panel')(...args);
-const segButtons = (...args) => viewHelper('segButtons')(...args);
 const usageMetricCard = (...args) => viewHelper('usageMetricCard')(...args);
 const formatDuration = (...args) => viewHelper('formatDuration')(...args);
 const trendValue = (...args) => viewHelper('trendValue')(...args);
@@ -42,16 +41,15 @@ export function renderCompletenessNotice(stats, periodName) {
 
 export function renderHistoryScopeNotice() {
   const notices = [];
-  if (appState().prefs.deviceFilter) notices.push(tr('data.historyGlobal'));
   if (appState().customPeriod) notices.push(tr('usage.customRangeGlobal'));
-  return notices.length
-    ? notices.map((notice) => `<div class="notice" role="status">${escapeHtml(notice)}</div>`).join('')
-    : '';
+  return notices.map((notice) => `<div class="notice" role="status">${escapeHtml(notice)}</div>`).join('');
 }
 
 
 export function historySource() {
-  return appState().history || appState().stats?.historyPreview || null;
+  const deviceId = String(appState().prefs.deviceFilter || '').trim();
+  if (appState().history && appState().historyDeviceId === deviceId) return appState().history;
+  return deviceId ? null : (appState().stats?.historyPreview || null);
 }
 
 export function historyHasBreakdown(history) {
@@ -62,8 +60,8 @@ export function historyHasBreakdown(history) {
   });
 }
 
-function niceCeiling(value) {
-  const n = Math.max(1, Number(value) || 1);
+function niceCeiling(value, minimum = 1) {
+  const n = Math.max(minimum, Number(value) || minimum);
   const exp = Math.floor(Math.log10(n));
   const base = 10 ** exp;
   const mantissa = n / base;
@@ -71,20 +69,20 @@ function niceCeiling(value) {
   return nice * base;
 }
 
-function yAxisScale(maxValue, tickCount = 4) {
-  const top = niceCeiling(maxValue);
+function yAxisScale(maxValue, tickCount = 4, minimum = 1) {
+  const top = niceCeiling(maxValue, minimum);
   const ticks = [];
   for (let i = 0; i <= tickCount; i += 1) ticks.push((top * i) / tickCount);
   return { top, ticks };
 }
 
-function renderYAxis({ pad, width, height, top, ticks }) {
+function renderYAxis({ pad, width, height, top, ticks, formatTick = formatCompact }) {
   const innerH = height - pad.top - pad.bottom;
   const lines = ticks.map((value) => {
-    const y = height - pad.bottom - (innerH * value) / Math.max(1, top);
+    const y = height - pad.bottom - (innerH * value) / Math.max(Number.EPSILON, top);
     return `
       <line class="grid-line" x1="${pad.left}" y1="${y}" x2="${width - pad.right}" y2="${y}" />
-      <text class="axis-label axis-y" x="${pad.left - 8}" y="${y + 3}" text-anchor="end">${escapeHtml(formatCompact(value))}</text>
+      <text class="axis-label axis-y" x="${pad.left - 8}" y="${y + 3}" text-anchor="end">${escapeHtml(formatTick(value))}</text>
     `;
   }).join('');
   return lines;
@@ -141,17 +139,18 @@ export function renderHeatmap(daily, metric = 'tokens') {
   const heatMetric = metric === 'cost' ? 'cost' : 'tokens';
   const values = daily.map((day) => heatmapValue(day, heatMetric));
   const max = Math.max(1, ...values);
-  const cell = 12;
+  const cell = 14;
   const gap = 3;
   const first = daily[0]?.date;
   const startDow = first ? new Date(`${first}T00:00:00Z`).getUTCDay() : 0;
   const weeks = Math.ceil((daily.length + startDow) / 7);
-  const left = 28;
+  const left = 38;
   const top = 4;
   const width = left + weeks * (cell + gap) + 8;
   const height = top + 7 * (cell + gap) + 8;
-  const dowLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
-    .map((label, index) => `<text class="axis-label" x="0" y="${top + index * (cell + gap) + cell - 1}">${label}</text>`)
+  const weekdayFormatter = new Intl.DateTimeFormat(appState().locale, { weekday: 'short', timeZone: 'UTC' });
+  const dowLabels = Array.from({ length: 7 }, (_, index) => weekdayFormatter.format(new Date(Date.UTC(2023, 0, index + 1))))
+    .map((label, index) => `<text class="axis-label" x="${left - 5}" y="${top + index * (cell + gap) + cell - 2}" text-anchor="end">${escapeHtml(label)}</text>`)
     .join('');
   const cells = daily.map((day, index) => {
     const pos = index + startDow;
@@ -173,7 +172,7 @@ export function renderHeatmap(daily, metric = 'tokens') {
   }).join('');
   return `
     <div class="chart-wrap chart-wrap-heat">
-      <svg class="chart-svg chart-svg-heat" style="min-width:${Math.max(320, width)}px;height:${height + 12}px" viewBox="0 0 ${width} ${height}" role="img" aria-label="Activity heatmap">
+      <svg class="chart-svg chart-svg-heat" style="min-width:${Math.max(320, width)}px;height:${height + 12}px" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(tr('home.summary'))}">
         ${dowLabels}
         ${cells}
       </svg>
@@ -212,11 +211,12 @@ export function renderStackedBars(daily, stackBy, metric = 'tokens') {
     const map = stackBy === 'model' ? (day.perModel || {}) : (day.perClient || {});
     return topKeys.reduce((sum, key) => sum + trendValue(map[key], metric), 0);
   });
-  const { top, ticks } = yAxisScale(Math.max(1, ...dayTotals, 1));
+  const minimum = metric === 'cost' ? 0.0001 : 1;
+  const { top, ticks } = yAxisScale(Math.max(...dayTotals, minimum), 4, minimum);
   const slot = (width - pad.left - pad.right) / Math.max(1, daily.length);
   const barW = Math.max(4, slot - 4);
-  const palette = ['#2563eb', '#0f9f6e', '#c98512', '#d6455d', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
-  const colorMap = Object.fromEntries(topKeys.map((key, index) => [key, useTotalsFallback ? 'var(--accent)' : palette[index % palette.length]]));
+  const palette = ['--chart-series-1', '--chart-series-2', '--chart-series-3', '--chart-series-4', '--chart-series-5'];
+  const colorMap = Object.fromEntries(topKeys.map((key, index) => [key, useTotalsFallback ? 'var(--accent)' : `var(${palette[index % palette.length]})`]));
 
   const bars = daily.map((day, index) => {
     const map = useTotalsFallback
@@ -256,64 +256,144 @@ export function renderStackedBars(daily, stackBy, metric = 'tokens') {
     return `<text class="axis-label" x="${x}" y="${height - 12}" text-anchor="middle">${escapeHtml(String(day.date || '').slice(5))}</text>`;
   }).join('');
 
-  const legend = topKeys.map((key) => `
-    <div class="row">
-      <div class="row-main">
+  const legend = topKeys.map((key, index) => {
+    const amount = seriesKeys.get(key) || 0;
+    const total = topKeys.reduce((sum, seriesKey) => sum + (seriesKeys.get(seriesKey) || 0), 0);
+    const percent = total ? Math.round((amount / total) * 100) : 0;
+    return `
+      <li class="trend-rank-row">
+        <span class="trend-rank-index">${index + 1}</span>
         <span class="swatch" style="background:${colorMap[key]}"></span>
-        <div class="row-name">${escapeHtml(useTotalsFallback ? tr('stats.tokens') : (stackBy === 'model' ? key : clientLabel(key)))}</div>
-      </div>
-      <div class="row-value">${escapeHtml(formatTrendValue(seriesKeys.get(key) || 0, metric))}</div>
-    </div>
-  `).join('');
+        <span class="trend-rank-name">${escapeHtml(useTotalsFallback ? tr('stats.tokens') : (stackBy === 'model' ? key : clientLabel(key)))}</span>
+        <span class="trend-rank-value">${escapeHtml(formatTrendValue(amount, metric))}</span>
+        <span class="trend-rank-share">${percent}%</span>
+      </li>
+    `;
+  }).join('');
 
   return `
-    <div class="stack">
-      <div class="chart-wrap">
+    <div class="trend-chart-layout">
+      <div class="chart-wrap trend-plot">
         <svg class="chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Stacked usage">
-          ${renderYAxis({ pad, width, height, top, ticks })}
+          ${renderYAxis({ pad, width, height, top, ticks, formatTick: (value) => formatTrendValue(value, metric) })}
           <line class="axis-base" x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" />
           ${bars}
           ${labels}
         </svg>
       </div>
-      <div class="stack">${legend || emptyHtml('empty.history')}</div>
+      <aside class="trend-ranking" aria-label="${escapeHtml(stackBy === 'model' ? tr('nav.model') : tr('nav.tool'))}">
+        <h3>${escapeHtml(stackBy === 'model' ? tr('nav.model') : tr('nav.tool'))}</h3>
+        <ol>${legend || `<li>${emptyHtml('empty.history')}</li>`}</ol>
+      </aside>
     </div>
   `;
 }
 
+function renderTrendBreakdownTable(daily, stackBy, metric) {
+  const sourceKey = stackBy === 'model' ? 'perModel' : 'perClient';
+  const totals = new Map();
+  for (const day of daily) {
+    for (const [key, value] of Object.entries(day?.[sourceKey] || {})) {
+      const row = totals.get(key) || { tokens: 0, cost: 0, activeTimeMs: null };
+      row.tokens += Number(value?.tokens || 0);
+      row.cost += Number(value?.cost || 0);
+      if (value && Object.hasOwn(value, 'activeTimeMs')) {
+        row.activeTimeMs = Number(row.activeTimeMs || 0) + Number(value.activeTimeMs || 0);
+      }
+      totals.set(key, row);
+    }
+  }
+
+  const hasSeriesMetric = [...totals.values()].some((row) => trendValue(row, metric) > 0);
+  if (!hasSeriesMetric) {
+    const aggregate = daily.reduce((row, day) => ({
+      tokens: row.tokens + Number(day?.tokens || 0),
+      cost: row.cost + Number(day?.cost || 0),
+      activeTimeMs: row.activeTimeMs + Number(day?.activeTimeMs || 0)
+    }), { tokens: 0, cost: 0, activeTimeMs: 0 });
+    totals.clear();
+    totals.set('', aggregate);
+  }
+
+  const rows = [...totals.entries()]
+    .sort((a, b) => trendValue(b[1], metric) - trendValue(a[1], metric) || a[0].localeCompare(b[0]));
+  const totalMetric = rows.reduce((sum, [, row]) => sum + trendValue(row, metric), 0);
+  const label = stackBy === 'model' ? tr('nav.model') : tr('nav.tool');
+  const title = tr('trends.tableTitle', { group: label });
+  const rowHtml = rows.map(([key, row]) => {
+    const value = trendValue(row, metric);
+    const share = totalMetric > 0 ? Math.round((value / totalMetric) * 100) : 0;
+    const name = key ? (stackBy === 'model' ? key : clientLabel(key)) : tr('trends.allUsage');
+    return '<tr><th scope="row">' + escapeHtml(name)
+      + '</th><td>' + escapeHtml(formatNumber(row.tokens))
+      + '</td><td>' + escapeHtml(formatCost(row.cost, appState().prefs.currency))
+      + '</td><td>' + (row.activeTimeMs == null ? '—' : escapeHtml(formatDuration(row.activeTimeMs)))
+      + '</td><td>' + share + '%</td></tr>';
+  }).join('');
+  const body = '<div class="trends-table-wrap" tabindex="0" aria-label="' + escapeHtml(title) + '">'
+    + '<table class="trends-breakdown-table"><thead><tr>'
+    + '<th scope="col">' + escapeHtml(label) + '</th>'
+    + '<th scope="col">' + escapeHtml(tr('stats.tokens')) + '</th>'
+    + '<th scope="col">' + escapeHtml(tr('stats.cost')) + '</th>'
+    + '<th scope="col">' + escapeHtml(tr('home.activeTime')) + '</th>'
+    + '<th scope="col">' + escapeHtml(tr('trends.share')) + '</th>'
+    + '</tr></thead><tbody>' + rowHtml + '</tbody></table></div>';
+  return panel(title, body, tr(metric === 'activeTime' ? 'home.activeTime' : metric === 'cost' ? 'stats.cost' : 'stats.tokens'));
+}
+
 export function renderTrends() {
-  const heatMetric = appState().prefs.heatmapMetric === 'tokens' ? 'tokens' : 'cost';
-  const daily = historyDaily(historySource(), appState().prefs.trendsRange === 'all' ? 0 : appState().prefs.trendsRange);
+  const deviceId = String(appState().prefs.deviceFilter || '').trim();
+  const devices = appState().stats?.devices || [];
+  const historyLoading = Boolean(deviceId)
+    && appState().historyLoading
+    && appState().historyLoadingDeviceId === deviceId;
+  const historyError = appState().historyError
+    && appState().historyErrorDeviceId === deviceId;
+  const history = historySource();
+  const daily = historyLoading || historyError
+    ? []
+    : historyDaily(history, appState().prefs.trendsRange === 'all' ? 0 : appState().prefs.trendsRange);
+  const hasHistory = daily.length > 0;
+  const heatMetric = appState().prefs.trendsMetric === 'cost' ? 'cost' : 'tokens';
   const trendMetric = ['tokens', 'cost', 'activeTime'].includes(appState().prefs.trendsMetric) ? appState().prefs.trendsMetric : 'tokens';
   const rangeSummary = daily.reduce((summary, day) => ({
     tokens: summary.tokens + Number(day?.tokens || 0),
     cost: summary.cost + Number(day?.cost || 0),
     activeTime: summary.activeTime + Number(day?.activeTimeMs || 0)
   }), { tokens: 0, cost: 0, activeTime: 0 });
-  const trendSummary = `<div class="usage-metric-strip trend-summary">
+  const trendSummary = hasHistory ? `<div class="usage-metric-strip trend-summary">
     ${usageMetricCard(tr('home.activeDays'), formatNumber(daily.filter((day) => Number(day?.tokens || 0) > 0 || Number(day?.cost || 0) > 0).length))}
     ${usageMetricCard(tr('stats.tokens'), formatNumber(rangeSummary.tokens))}
     ${usageMetricCard(tr('stats.cost'), formatCost(rangeSummary.cost, appState().prefs.currency))}
     ${usageMetricCard(tr('home.activeTime'), formatDuration(rangeSummary.activeTime))}
-  </div>`;
+  </div>` : '';
+  const selectedDevice = devices.find((device) => String(device.deviceId || '') === deviceId);
+  const deviceOptions = [
+    `<option value="">${escapeHtml(tr('filters.allDevices'))}</option>`,
+    ...devices.map((device) => `<option value="${escapeHtml(device.deviceId || '')}"${String(device.deviceId || '') === deviceId ? ' selected' : ''}>${escapeHtml(device.hostname || device.deviceId || tr('devices.title'))}</option>`)
+  ].join('');
+  const trendSelect = (key, label, value, options) => '<label class="field trends-filter-group"><span>'
+    + escapeHtml(label)
+    + '</span><select data-trends-setting="' + key + '" aria-label="' + escapeHtml(label) + '">'
+    + options.map(([optionValue, optionLabel]) => '<option value="' + escapeHtml(optionValue) + '"'
+      + (String(optionValue) === String(value) ? ' selected' : '')
+      + '>' + escapeHtml(optionLabel) + '</option>').join('')
+    + '</select></label>';
+  const historyContent = historyLoading
+    ? `<div class="history-load-status" role="status"><fluent-spinner size="small">${escapeHtml(tr('loading'))}</fluent-spinner><span>${escapeHtml(tr('loading'))}</span></div>`
+    : historyError
+      ? `<div class="history-load-status" role="alert"><span>${escapeHtml(tr('error.generic'))}</span><fluent-button appearance="transparent" type="button" data-retry-history>${escapeHtml(tr('actions.retry'))}</fluent-button></div>`
+      : hasHistory ? renderStackedBars(daily, appState().prefs.trendsStack, trendMetric) : emptyHtml('empty.history');
   return `
     ${renderHistoryScopeNotice()}
     ${trendSummary}
-    <div class="toolbar-row">
-      <fluent-radio-group class="seg" name="trendsStack" data-selection="trendsStack" value="${appState().prefs.trendsStack === 'model' ? 'model' : 'client'}" orientation="horizontal" aria-label="${tr('trends.stack')}">
-        ${segButtons([['client', tr('trends.stack.client')], ['model', tr('trends.stack.model')]], appState().prefs.trendsStack === 'model' ? 'model' : 'client', 'trendsStack')}
-      </fluent-radio-group>
-      <fluent-radio-group class="seg" name="trendsRange" data-selection="trendsRange" value="${String(appState().prefs.trendsRange)}" orientation="horizontal" aria-label="${tr('trends.range')}">
-        ${segButtons(['7', '30', '90', '365', 'all'].map((range) => [range, range === 'all' ? tr('trends.range.all') : tr('trends.range.days', { count: range })]), String(appState().prefs.trendsRange), 'trendsRange')}
-      </fluent-radio-group>
-      <fluent-radio-group class="seg" name="heatmapMetric" data-selection="heatmapMetric" value="${heatMetric}" orientation="horizontal" aria-label="${tr('home.heatmapMetric')}">
-        ${segButtons([['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')]], heatMetric, 'heatmapMetric')}
-      </fluent-radio-group>
-      <fluent-radio-group class="seg" name="trendsMetric" data-selection="trendsMetric" value="${trendMetric}" orientation="horizontal" aria-label="${tr('trends.metric')}">
-        ${segButtons([['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')], ['activeTime', tr('home.activeTime')]], trendMetric, 'trendsMetric')}
-      </fluent-radio-group>
+    <div class="trends-toolbar" role="group" aria-label="${tr('nav.trends')}">
+      <label class="field trends-device-filter"><span>${escapeHtml(tr('trends.device'))}</span><select data-trends-device aria-label="${escapeHtml(tr('trends.device'))}" title="${escapeHtml(selectedDevice?.hostname || selectedDevice?.deviceId || tr('filters.allDevices'))}">${deviceOptions}</select></label>
+      ${trendSelect('trendsRange', tr('trends.range'), appState().prefs.trendsRange, ['7', '30', '90', '365', 'all'].map((range) => [range, range === 'all' ? tr('trends.range.all') : tr('trends.range.days', { count: range })]))}
+      ${trendSelect('trendsMetric', tr('trends.metric'), trendMetric, [['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')], ['activeTime', tr('home.activeTime')]])}
+      ${trendSelect('trendsStack', tr('trends.stack'), appState().prefs.trendsStack === 'model' ? 'model' : 'client', [['client', tr('trends.stack.client')], ['model', tr('trends.stack.model')]])}
     </div>
-    ${panel(tr('nav.trends'), renderStackedBars(daily, appState().prefs.trendsStack, trendMetric))}
-    ${panel(tr('home.heatmap'), renderHeatmap(daily, heatMetric))}
+    ${panel(tr('nav.trends'), historyContent, hasHistory ? `${daily[0].date} – ${daily.at(-1).date}` : selectedDevice?.hostname || '')}
+    ${hasHistory ? renderTrendBreakdownTable(daily, appState().prefs.trendsStack === 'model' ? 'model' : 'client', trendMetric) : ''}
   `;
 }

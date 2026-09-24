@@ -39,14 +39,26 @@ export function renderHome() {
   const tools = toolRows(period).slice(0, 5);
   const models = modelRows(period).slice(0, 5);
   const devices = deviceRows(stats, appState().customPeriod ? 'today' : appState().prefs.period).slice(0, 5);
-  const limits = limitCards(stats, appState().locale).slice(0, clampHomeLimitAccountCount(appState().prefs.homeLimitAccountCount, 3));
+  const limits = limitCards(stats, appState().locale)
+    .sort((a, b) => {
+      const rank = (card) => card.stale ? 1 : String(card.status || '').toLowerCase() === 'ok' ? 3 : 0;
+      return rank(a) - rank(b) || String(a.name || '').localeCompare(String(b.name || ''));
+    })
+    .slice(0, clampHomeLimitAccountCount(appState().prefs.homeLimitAccountCount, 3));
   const history = historySource();
   const daily = historyDaily(history, 14);
   const heatDaily = historyDaily(history, 90);
+  const historyDeviceId = String(appState().prefs.deviceFilter || '').trim();
+  const historyPending = Boolean(historyDeviceId)
+    && appState().historyLoading
+    && appState().historyLoadingDeviceId === historyDeviceId;
+  const historyError = appState().historyError
+    && appState().historyErrorDeviceId === historyDeviceId;
+  const hasHistory = daily.length > 0;
   const heatMetric = appState().prefs.heatmapMetric === 'tokens' ? 'tokens' : 'cost';
   const activeDaysWindow = appState().prefs.activeDaysWindow === 'year' ? 'year' : 'all';
   const summary = history?.summary || null;
-  const displayActiveDays = countActiveDays(history?.daily || [], activeDaysWindow);
+  const displayActiveDays = hasHistory ? countActiveDays(history?.daily || [], activeDaysWindow) : null;
   const summaryActiveDays = Number(summary?.activeDays);
   const activeDaysValue = activeDaysWindow === 'year'
     ? displayActiveDays
@@ -151,7 +163,7 @@ export function renderHome() {
 
   const viewAllAction = (targetView) => `<fluent-button appearance="secondary" type="button" class="panel-head-action" data-jump-view="${targetView}"><span>${tr(`nav.${targetView}`)}</span>${uiIcon('arrowUpRight')}</fluent-button>`;
 
-  const sparklineHeader = `
+  const sparklineHeader = hasHistory ? `
     <div class="home-sparkline-head">
       <div class="home-sparkline-pills">
         <div class="home-pill"><span class="home-pill-label">${tr('home.activeDays')}:</span><span class="home-pill-val">${formatNumber(activeDaysValue)}</span></div>
@@ -161,14 +173,18 @@ export function renderHome() {
       </div>
       ${viewAllAction('trends')}
     </div>
-  `;
+  ` : '';
 
-  const sparklineBlock = `
-    ${sparklineHeader}
-    ${renderSparkline(daily)}
-  `;
+  const historyStateBlock = historyPending
+    ? `<div class="history-load-status" role="status"><fluent-spinner size="small">${tr('loading')}</fluent-spinner><span>${tr('loading')}</span></div>`
+    : historyError
+      ? `<div class="history-load-status" role="alert"><span>${escapeHtml(tr('error.generic'))}</span><fluent-button appearance="transparent" type="button" data-retry-history>${tr('actions.retry')}</fluent-button></div>`
+      : `<div class="empty-inline" role="status">${tr('empty.history')}</div>`;
+  const sparklineBlock = hasHistory
+    ? `${sparklineHeader}${renderSparkline(daily)}`
+    : historyStateBlock;
 
-  const heatmapBody = (summary || heatDaily.length)
+  const heatmapBody = heatDaily.length
     ? `
       <div class="toolbar-row">
         <fluent-radio-group class="seg" name="heatmapMetric" data-selection="heatmapMetric" value="${heatMetric}" orientation="horizontal" aria-label="${tr('home.heatmapMetric')}">
@@ -186,10 +202,10 @@ export function renderHome() {
     ${completeness}
     ${renderHistoryScopeNotice()}
     <div class="overview-workspace">
-      <div class="overview-activity">${panel(tr('home.activity'), sparklineBlock, daily.length ? `${daily.length}d` : '')}</div>
+      <div class="overview-activity${hasHistory ? '' : ' is-empty'}">${panel(tr('home.activity'), sparklineBlock, hasHistory ? tr('trends.range.days', { count: daily.length }) : '')}</div>
       <aside class="overview-health">${panel(tr('home.limits'), limitsBody, '', viewAllAction('limits'))}${panel(tr('home.devices'), devicesBody, '', viewAllAction('device'))}</aside>
       <div class="overview-breakdowns">${panel(tr('home.tools'), toolsBody, '', viewAllAction('tool'))}${panel(tr('home.models'), modelsBody, '', viewAllAction('model'))}</div>
     </div>
-    ${panel(tr('home.summary'), heatmapBody)}
+    ${heatDaily.length ? panel(tr('home.summary'), heatmapBody) : ''}
   `;
 }

@@ -517,8 +517,12 @@ function createHub({
     return stats;
   }
 
-  async function getHistory() {
-    return aggregateHistory(await store.listDeviceRecords());
+  async function getHistory(deviceId = '') {
+    const records = await store.listDeviceRecords();
+    const scopedDeviceId = String(deviceId || '').trim();
+    return aggregateHistory(scopedDeviceId
+      ? records.filter((record) => String(record.deviceId || '') === scopedDeviceId)
+      : records);
   }
 
   async function setSubscriptions(subscriptions, baseUpdatedAt) {
@@ -1132,7 +1136,9 @@ function createHub({
       const stats = await getStats();
       return sendJson(res, 200, { devices: stats.devices });
     }
-    if (req.method === 'GET' && url.pathname === '/api/history') return sendJson(res, 200, await getHistory());
+    if (req.method === 'GET' && url.pathname === '/api/history') {
+      return sendJson(res, 200, await getHistory(url.searchParams.get('deviceId')));
+    }
     if (req.method === 'GET' && url.pathname === '/api/subscriptions') {
       return sendJson(res, 200, { ok: true, ...(await getSubscriptions()) });
     }

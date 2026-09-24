@@ -1211,6 +1211,8 @@ html[data-theme="dark"] .heat.heat-cost.lvl-4 { fill: rgba(251, 191, 36, 0.92); 
   flex-direction: column;
   justify-content: space-between;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
   padding: 12px 14px;
   border-radius: 14px;
   border: 1px solid var(--line);
@@ -1219,6 +1221,17 @@ html[data-theme="dark"] .heat.heat-cost.lvl-4 { fill: rgba(251, 191, 36, 0.92); 
   text-align: left;
   cursor: pointer;
   transition: background var(--durationFaster) var(--curveEasyEase), border-color var(--durationFaster) var(--curveEasyEase), transform var(--durationFaster) var(--curveEasyEase);
+}
+.home-limit-card::part(content) {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
 }
 .home-limit-card:hover {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
@@ -1232,14 +1245,19 @@ html[data-theme="dark"] .heat.heat-cost.lvl-4 { fill: rgba(251, 191, 36, 0.92); 
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
 }
 .home-limit-identity {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 .home-limit-name {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 13px;
   font-weight: 650;
   white-space: nowrap;
@@ -1247,10 +1265,12 @@ html[data-theme="dark"] .heat.heat-cost.lvl-4 { fill: rgba(251, 191, 36, 0.92); 
   text-overflow: ellipsis;
 }
 .home-limit-val {
+  flex: 0 0 auto;
   font-size: 16px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
+  white-space: nowrap;
 }
 .home-limit-sub {
   font-size: 11px;

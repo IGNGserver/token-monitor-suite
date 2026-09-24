@@ -16,6 +16,7 @@ const SCOPE_ZH = Object.freeze({
   collector: '采集器',
   desktop: '桌面端',
   electron: '桌面端',
+  home: '首页',
   hub: 'Hub',
   limits: '用量限制',
   release: '发布流程',

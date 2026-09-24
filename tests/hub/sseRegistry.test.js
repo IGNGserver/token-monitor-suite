@@ -236,14 +236,15 @@ test('the SSE registry refuses new streams past its cap', async () => {
   await hub.start();
   const { port } = hub.server.address();
   const controllers = [];
+  const activeResponses = [];
   try {
     const open = () => {
       const controller = new AbortController();
       controllers.push(controller);
       return fetch(`http://127.0.0.1:${port}/api/stats/stream`, { signal: controller.signal });
     };
-    assert.equal((await open()).status, 200);
-    assert.equal((await open()).status, 200);
+    activeResponses.push(await open(), await open());
+    assert.deepEqual(activeResponses.map((response) => response.status), [200, 200]);
     // The third stream is refused rather than evicting a live one.
     const refused = await open();
     assert.equal(refused.status, 503);

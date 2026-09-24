@@ -50,7 +50,7 @@ open-source: https://github.com/junhoyeo/tokscale
 ## 更新内容
 
 <!-- app-update-notes:zh:start -->
-### 改进
+### 变更
 - **Fluent 2 界面重构：** 统一重做总览、趋势、设备、额度、账号、管理、设置和使用情况页面，理顺信息层级与响应式布局；趋势支持按设备查看。
 <!-- app-update-notes:zh:end -->
 

@@ -3,17 +3,18 @@
 ## What's changed
 
 <!-- app-update-notes:en:start -->
-### Changed
-- **Fluent 2 redesign:** Rebuilt the dashboard, trends, devices, limits, accounts, management, settings, and usage views with a consistent responsive layout and clearer data hierarchy. Trends can be scoped to an individual device.
+### Improved
+- **Fluent 2 interactions:** Replaced browser-native selectors with Fluent dropdowns and added restrained, reduced-motion-aware transitions for route, card, and chart changes.
+- **Desktop settings accessibility:** Restored visible labels and the unencrypted-traffic warning for remote HTTP.
 <!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.7-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.47.0-rev.7-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.47.0-rev.7.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-Setup-0.47.0-rev.7.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.47.0-rev.7.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.47.0-rev.7.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.8-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.47.0-rev.8-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.47.0-rev.8.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-Setup-0.47.0-rev.8.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.47.0-rev.8.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.47.0-rev.8.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -50,17 +51,18 @@ open-source: https://github.com/junhoyeo/tokscale
 ## 更新内容
 
 <!-- app-update-notes:zh:start -->
-### 变更
-- **Fluent 2 界面重构：** 统一重做总览、趋势、设备、额度、账号、管理、设置和使用情况页面，理顺信息层级与响应式布局；趋势支持按设备查看。
+### 改进
+- **Fluent 2 交互：** 将浏览器原生下拉替换为 Fluent Dropdown；为路由、摘要卡片和图表变化加入克制动效，并遵循减少动态效果偏好。
+- **桌面设置可访问性：** 恢复远程 HTTP 开关的可见标签与传输不加密风险说明。
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.7-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.47.0-rev.7-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.47.0-rev.7.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-Setup-0.47.0-rev.7.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.47.0-rev.7.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.47.0-rev.7.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.8-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.47.0-rev.8-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.47.0-rev.8.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-Setup-0.47.0-rev.8.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.47.0-rev.8.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.47.0-rev.8.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -93,7 +95,7 @@ https://github.com/junhoyeo/tokscale
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v0.47.0-rev.6...v0.47.0-rev.7">v0.47.0-rev.6...v0.47.0-rev.7</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v0.47.0-rev.7...v0.47.0-rev.8">v0.47.0-rev.7...v0.47.0-rev.8</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -111,16 +113,17 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh-TW:start -->
 ### 改進
-- **Fluent 2 介面重構：** 統一重做總覽、趨勢、裝置、額度、帳號、管理、設定和使用情況頁面，整理資訊層級與響應式版面；趨勢支援依裝置查看。
+- **Fluent 2 互動：** 將瀏覽器原生下拉選單替換為 Fluent Dropdown；為路由、摘要卡片和圖表變化加入克制動效，並遵循減少動態效果偏好。
+- **桌面設定可及性：** 恢復遠端 HTTP 開關的可見標籤與傳輸未加密風險說明。
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.7-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.47.0-rev.7-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.47.0-rev.7.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-Setup-0.47.0-rev.7.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.47.0-rev.7.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.47.0-rev.7.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.8-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.47.0-rev.8-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.47.0-rev.8.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-Setup-0.47.0-rev.8.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.47.0-rev.8.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.47.0-rev.8.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8.AppImage)
 
 </details>
 
@@ -132,17 +135,18 @@ https://github.com/junhoyeo/tokscale
 ## 업데이트 내용
 
 <!-- app-update-notes:ko:start -->
-### 변경 사항
-- **Fluent 2 UI 개편:** 대시보드, 추세, 기기, 한도, 계정, 관리, 설정 및 사용량 화면을 일관된 반응형 레이아웃과 명확한 정보 계층으로 다시 구성했습니다. 추세를 기기별로 볼 수 있습니다.
+### 개선
+- **Fluent 2 상호작용:** 브라우저 기본 선택 상자를 Fluent 드롭다운으로 바꾸고, 화면 전환·요약 카드·차트 변경에 절제된 애니메이션을 적용했습니다. 동작 줄이기 설정도 따릅니다.
+- **데스크톱 설정 접근성:** 원격 HTTP 스위치에 보이는 레이블과 전송 중 암호화되지 않는다는 안내를 복원했습니다.
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.7-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.47.0-rev.7-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.47.0-rev.7.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-Setup-0.47.0-rev.7.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.47.0-rev.7.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.47.0-rev.7.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.8-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.47.0-rev.8-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.47.0-rev.8.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-Setup-0.47.0-rev.8.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.47.0-rev.8.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.47.0-rev.8.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8.AppImage)
 
 </details>
 
@@ -154,17 +158,18 @@ https://github.com/junhoyeo/tokscale
 ## 更新内容
 
 <!-- app-update-notes:ja:start -->
-### 変更
-- **Fluent 2 UI の再設計:** ダッシュボード、傾向、デバイス、利用上限、アカウント、管理、設定、使用状況の画面を、統一されたレスポンシブなレイアウトと明確な情報階層に再構成しました。傾向をデバイス別に表示できます。
+### 改善
+- **Fluent 2 の操作性:** ブラウザー標準の選択欄を Fluent Dropdown に置き換え、画面・カード・グラフの変化に控えめなアニメーションを追加しました。視差効果を減らす設定にも従います。
+- **デスクトップ設定のアクセシビリティ:** リモート HTTP スイッチに表示ラベルと、通信が暗号化されない旨の説明を追加しました。
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.7-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.47.0-rev.7-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.47.0-rev.7.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-Setup-0.47.0-rev.7.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.47.0-rev.7.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.47.0-rev.7.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.7/Token-Monitor-0.47.0-rev.7.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.8-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.47.0-rev.8-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.47.0-rev.8.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-Setup-0.47.0-rev.8.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.47.0-rev.8.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.47.0-rev.8.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.8/Token-Monitor-0.47.0-rev.8.AppImage)
 
 </details>
 

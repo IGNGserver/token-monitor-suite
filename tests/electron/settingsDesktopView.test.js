@@ -15,7 +15,7 @@ const viewPath = path.join(__dirname, '..', '..', 'src', 'shared-ui', 'views', '
 
 // The module is browser ESM; evaluate it with its import graph stubbed so the
 // test stays a pure unit test of the field mapping.
-function loadView() {
+function loadView(state = {}) {
   installDom(globalThis);
   const source = fs.readFileSync(viewPath, 'utf8')
     .replace(/^import \{[\s\S]*?\} from '\.\.\/core\/viewContext\.js';/m, `
@@ -26,9 +26,14 @@ function loadView() {
       const settingsOptionList = (options, selected) => options
         .map(([value, label]) => \`<option value="\${value}"\${String(value) === String(selected) ? ' selected' : ''}>\${label}</option>\`)
         .join('');
+      // The update and collector panels render only what the main process pushed,
+      // so the stub reports whatever the test provides.
+      const appState = () => (${JSON.stringify({
+    desktopAppUpdate: null, desktopTokscale: null, desktopTokscaleCheck: null, ...state
+  })});
     `);
   const factory = new Function(`${source.replace(/^export /gm, '')}
-    return { renderDesktopSettings, readDesktopSettingsPatch };`);
+    return { renderDesktopSettings, readDesktopSettingsPatch, desktopSettingsFieldError };`);
   return factory();
 }
 
@@ -62,6 +67,16 @@ test('WSL scanning is offered only on Windows', () => {
   const linux = renderDesktopSettings({}, { clients: [] }, { platform: 'linux' });
   assert.ok(win.includes('name="wslScanEnabled"'), 'Windows needs the WSL toggle');
   assert.ok(!linux.includes('name="wslScanEnabled"'), 'WSL scanning is meaningless off Windows');
+});
+
+test('the title-strip switch is offered only where a title strip is drawn', () => {
+  const { renderDesktopSettings } = loadView();
+  assert.ok(renderDesktopSettings({}, { clients: [] }, { platform: 'win32' }).includes('name="titleIconOnly"'),
+    'the web content owns the Windows title strip');
+  for (const platform of ['darwin', 'linux']) {
+    assert.ok(!renderDesktopSettings({}, { clients: [] }, { platform }).includes('name="titleIconOnly"'),
+      `${platform} has no product-drawn title text to collapse`);
+  }
 });
 
 test('the macOS glass selector is macOS-only', () => {
@@ -107,6 +122,95 @@ test('reading the form back produces the right value types', () => {
   assert.equal(patch.deviceId, 'renamed', 'text fields are trimmed');
   assert.equal(patch.hubUrl, 'http://hub:17321');
   assert.equal(patch.collectionMode, 'smart');
+});
+
+test('the glass control round-trips as a boolean', () => {
+  // The dropdown's option values are 'system' and 'off'; the window-material code
+  // only ever reads `systemGlass === false`, so persisting the string made the
+  // control unable to turn the glass off.
+  const { readDesktopSettingsPatch } = loadView();
+  const formFor = (value) => ({
+    querySelector: (selector) => (selector === '[name="systemGlass"]' ? { value } : null),
+    querySelectorAll: () => []
+  });
+  assert.equal(readDesktopSettingsPatch(formFor('off')).systemGlass, false);
+  assert.equal(readDesktopSettingsPatch(formFor('system')).systemGlass, true);
+});
+
+test('the file-watch controls are offered next to the tick cadence', () => {
+  const { renderDesktopSettings } = loadView();
+  const html = renderDesktopSettings({}, { clients: [] }, { platform: 'linux' });
+  assert.ok(html.includes('name="watchEnabled"'), 'watching tool files is the 3-5 second promise; it needs a switch');
+  assert.ok(html.includes('name="watchDebounceMs"'), 'the debounce needs a value, not only an env var');
+});
+
+test('the Windows material picker is Windows-only', () => {
+  const { renderDesktopSettings } = loadView();
+  assert.ok(renderDesktopSettings({}, { clients: [] }, { platform: 'win32' }).includes('name="windowsBackdrop"'));
+  for (const platform of ['darwin', 'linux']) {
+    assert.ok(!renderDesktopSettings({}, { clients: [] }, { platform }).includes('name="windowsBackdrop"'),
+      `no background material exists on ${platform}`);
+  }
+});
+
+test('a malformed field is reported instead of silently dropped', () => {
+  const { desktopSettingsFieldError } = loadView();
+  const formFor = (value) => ({ querySelector: () => ({ value }) });
+  const check = (name, value) => desktopSettingsFieldError(formFor(value), name);
+  assert.ok(check('themeColors', '{oops}'), 'bad JSON must not save as a no-op');
+  assert.ok(check('allTimeSince', 'next Tuesday'), 'a bad anchor date must not fall back silently');
+  assert.equal(check('themeColors', '{"surface":"#123456"}'), '');
+  assert.equal(check('themeColors', ''), '', 'an empty map means defaults');
+  assert.equal(check('allTimeSince', '2024-01-01'), '');
+  assert.equal(check('deviceId', 'anything'), '', 'free-text ids are not validated here');
+});
+
+test('the update panel offers the action the pushed state actually allows', () => {
+  const { renderDesktopSettings } = loadView({
+    desktopAppUpdate: {
+      currentVersion: '1.0.0', latest: { version: '1.1.0' }, hasUpdate: true,
+      downloaded: false, installSupported: true
+    }
+  });
+  const html = renderDesktopSettings({}, { clients: [] }, { platform: 'win32' });
+  assert.match(html, /data-desktop-action="download-update"/);
+  assert.doesNotMatch(html, /data-desktop-action="install-update"/, 'nothing is downloaded yet');
+
+  const installed = loadView({
+    desktopAppUpdate: {
+      currentVersion: '1.0.0', latest: { version: '1.1.0' }, hasUpdate: true,
+      downloaded: true, installSupported: true
+    }
+  }).renderDesktopSettings({}, { clients: [] }, { platform: 'win32' });
+  assert.match(installed, /data-desktop-action="install-update"/);
+
+  const unsupported = loadView({
+    desktopAppUpdate: {
+      currentVersion: '1.0.0', latest: { version: '1.1.0' }, hasUpdate: true,
+      downloaded: true, installSupported: false, installSupportReason: 'portable build'
+    }
+  }).renderDesktopSettings({}, { clients: [] }, { platform: 'linux' });
+  assert.doesNotMatch(unsupported, /data-desktop-action="install-update"/, 'a portable build cannot self-install');
+  assert.match(unsupported, /portable build/, 'the reason is shown rather than the button hidden silently');
+});
+
+test('the collector engine panel follows the pushed resolver state', () => {
+  const bundled = loadView({
+    desktopTokscale: { supported: true, current: { source: 'bundled', version: '4.14.0' } },
+    desktopTokscaleCheck: { supported: true, newer: true, npm: { version: '4.15.0' } }
+  }).renderDesktopSettings({}, { clients: [] }, { platform: 'darwin' });
+  assert.match(bundled, /data-desktop-action="tokscale-check"/);
+  assert.match(bundled, /data-desktop-action="tokscale-download"/);
+  assert.doesNotMatch(bundled, /data-desktop-action="tokscale-reset"/, 'nothing to reset from');
+
+  const downloaded = loadView({
+    desktopTokscale: { supported: true, current: { source: 'downloaded', version: '4.15.0' } }
+  }).renderDesktopSettings({}, { clients: [] }, { platform: 'darwin' });
+  assert.match(downloaded, /data-desktop-action="tokscale-reset"/);
+
+  const unsupported = loadView({ desktopTokscale: { supported: false } })
+    .renderDesktopSettings({}, { clients: [] }, { platform: 'darwin' });
+  assert.doesNotMatch(unsupported, /desktop-settings-group" data-desktop-group="engine"/, 'no panel where the updater cannot run');
 });
 
 test('the tracked-client checklist round-trips as a csv', () => {

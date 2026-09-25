@@ -52,7 +52,13 @@ const {
   normalizeHiddenClients,
   normalizePinnedClients
 } = require('./preferences/clientDisplayPreferences');
-const { LANGUAGE_OPTIONS, resolveLocale, translate } = require('./i18n');
+// The native menu, tray and dialogs localize from the same catalog the shared UI
+// renders. The main process used to keep its own copy, which silently lost every
+// `menu.*`/`nav.*` string the redesign added. The catalog is an ES module; Node
+// 22.12+ (and therefore Electron's bundled Node) requires it directly.
+const { SUPPORTED_LOCALES, resolveLocale, t: translate } = require('../shared-ui/core/i18n.js');
+// Same formatter the dashboard uses, so the tray tooltip never disagrees with it.
+const { formatCompact: formatCompactTokens } = require('../shared-ui/core/format.js');
 const {
   defaultViewDisplayPreferences,
   normalizeHiddenViews,
@@ -101,6 +107,7 @@ const { fetchBufferedWithTimeout, fetchWithTimeout } = require('../shared/http')
 const { postSyncPayload } = require('../shared/syncPayload');
 const { renameDeviceOnHub, readDeviceIdentity, writeDeviceIdentity } = require('../shared/deviceIdentity');
 const {
+  COLLECTION_INTERVAL_OPTIONS: SHARED_COLLECTION_INTERVAL_OPTIONS,
   DEFAULT_COLLECTION_INTERVAL_MS: SHARED_DEFAULT_COLLECTION_INTERVAL_MS,
   DEFAULT_SMART_COLLECTION_INTERVAL_MS: SHARED_DEFAULT_SMART_COLLECTION_INTERVAL_MS,
   normalizeCollectionIntervalMs: normalizeSharedCollectionIntervalMs,
@@ -125,8 +132,8 @@ function startDiscordRpc(...args) { return loadDiscordRpc().startDiscordRpc(...a
 function stopDiscordRpc(...args) { return loadDiscordRpc().stopDiscordRpc(...args); }
 function updateDiscordRpc(...args) { return loadDiscordRpc().updateDiscordRpc(...args); }
 const linuxAutostart = require('./linuxAutostart');
-const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
 const { classifyStreamFailure } = require('./syncConnection');
+const { buildDiagnosticsBundle, diagnosticsFileName } = require('./diagnostics');
 const { composeLocalSyncStats, reattachLocalNativeView } = require('./syncDisplayStats');
 const {
   cacheable: cacheableDesktopSnapshot,
@@ -199,9 +206,13 @@ const CSP_HEADER = [
   "frame-ancestors 'none'"
 ].join('; ');
 const HUB_MODE_VALUES = new Set(['local', 'client']);
-const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
+const LANGUAGE_VALUES = new Set(['auto', ...SUPPORTED_LOCALES]);
 const DEFAULT_COLLECTION_INTERVAL_MS = SHARED_DEFAULT_COLLECTION_INTERVAL_MS;
 const HUB_REQUEST_TIMEOUT_MS = 15 * 1000;
+// Deliberate: the desktop app reaches the Hub and the rate source with the plain
+// runtime fetch, i.e. it does NOT follow HTTP(S)_PROXY. The operator decision was
+// that a workstation's proxy must not silently become the sync path; only the
+// per-provider quota collectors (shared/outboundFetch) honour proxy env today.
 // The Docker Hub emits a heartbeat every 30 seconds by default. Allow two
 // missed beats before treating a half-open stream as disconnected.
 const SSE_IDLE_TIMEOUT_MS = 90 * 1000;
@@ -280,8 +291,7 @@ let credentialStorageErrorShown = false;
 let clientUsageArchive = null;
 let deviceIdentity = null;
 let rendererViewState = normalizeInitialRendererViewState();
-const serviceStatusClient = createServiceStatusClient();
-const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname));
+let initialWindowCreated = false;
 
 app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId('com.igng.tokenmonitor');
@@ -291,6 +301,14 @@ if (!gotLock) app.exit(0);
 
 const HOME_LIMIT_ACCOUNT_COUNT_DEFAULT = 3;
 const HOME_LIMIT_ACCOUNT_COUNT_MAX = 12;
+// Runtime state the main process owns. The renderer neither reads them nor may
+// write them: a stray write would silently discard a restored window, an archive,
+// or an update decision. tests/electron/settingsMigration.test.js pins both halves.
+const INTERNAL_ONLY_SETTING_KEYS = Object.freeze([
+  'windowBounds', 'lastViewState', 'archivedClientUsage',
+  'migratedDefaultClients', 'lastPostedDeviceId', 'appUpdate'
+]);
+
 const LEGACY_LOCAL_LIMIT_SETTING_KEYS = Object.freeze([
   'claudeWebCookie',
   'opencodeCookie',
@@ -318,6 +336,17 @@ const LEGACY_LOCAL_LIMIT_SETTING_KEYS = Object.freeze([
   'mimoManagedAccounts'
 ]);
 
+const UI_FLAG_PREFIX = 'token-monitor.';
+function isUiFlagKey(key) {
+  return String(key || '').startsWith(UI_FLAG_PREFIX);
+}
+
+function withoutInternalOnlyKeys(value) {
+  const clean = { ...(value || {}) };
+  for (const key of INTERNAL_ONLY_SETTING_KEYS) delete clean[key];
+  return clean;
+}
+
 function stripLegacyLocalLimitSettings(value) {
   const clean = { ...(value || {}) };
   for (const key of LEGACY_LOCAL_LIMIT_SETTING_KEYS) delete clean[key];
@@ -342,26 +371,24 @@ function defaultSettings() {
     hubUrl: envHubUrl,
     secret: process.env.TOKEN_MONITOR_SECRET || '',
     allowInsecureHubHttp: parseBoolean(process.env.TOKEN_MONITOR_ALLOW_INSECURE_HTTP, false),
-    refreshMs: Number(process.env.TOKEN_MONITOR_WIDGET_REFRESH_MS || 15000),
-    glassOpacity: 68,
-    glassBlur: 32,
+    theme: 'system',
     systemGlass: true,
     macosGlassStyle: macosLiquidGlassAvailable({ platform: process.platform, osRelease: os.release() })
       ? MACOS_GLASS_LIQUID
       : MACOS_GLASS_VIBRANCY,
-    windowsBackdrop: 'acrylic',
+    windowsBackdrop: 'mica',
     reduceMotion: 'system',
     showLiveDot: true,
     showToolIcons: true,
-    titleIconOnly: true,
-    showCompactTotalTokens: false,
+    titleIconOnly: false,
+    showCompactTotalTokens: true,
     heatmapMetric: 'cost',
     homeActiveDaysWindow: 'all',
     themeColors: {},
     vendorColors: {},
     lastViewState: { period: 'today', breakdown: 'tool' },
     discordRpcEnabled: false,
-    deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
+    deviceId: normalizeDeviceIdValue(process.env.TOKEN_MONITOR_DEVICE_ID, defaultDeviceId()),
     lastPostedDeviceId: '',
     clients: clientsCsvForSetting(process.env.TOKEN_MONITOR_CLIENTS),
     migratedDefaultClients: '',
@@ -372,8 +399,8 @@ function defaultSettings() {
     hiddenViews: defaultViewDisplayPreferences().hiddenViews,
     homeModuleOrder: defaultHomeModulePreferences().homeModuleOrder,
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
-    showHomeLimitBars: false,
-    showHomeLimitProviderNames: false,
+    showHomeLimitBars: true,
+    showHomeLimitProviderNames: true,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, false),
     historyEnabled: parseBoolean(process.env.TOKEN_MONITOR_HISTORY_ENABLED, true),
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
@@ -383,6 +410,13 @@ function defaultSettings() {
     exportDir: '',
     exportIntervalMs: 60 * 1000,
     collectionMode,
+    // Pause is a user-visible switch, not a mode: the collectors stop producing
+    // while the window, cache and (in client mode) the Hub stream stay alive.
+    collectionPaused: parseBoolean(process.env.TOKEN_MONITOR_COLLECTION_PAUSED, false),
+    // Default desktop behaviour: closing the window hides it to the tray, and a
+    // login-item launch starts hidden rather than popping a window at sign-in.
+    closeToTray: parseBoolean(process.env.TOKEN_MONITOR_CLOSE_TO_TRAY, true),
+    startHidden: parseBoolean(process.env.TOKEN_MONITOR_START_HIDDEN, true),
     collectionIntervalMs: normalizeCollectionIntervalMs(
       process.env.TOKEN_MONITOR_INTERVAL_MS,
       collectionMode === 'smart' ? SHARED_DEFAULT_SMART_COLLECTION_INTERVAL_MS : SHARED_DEFAULT_COLLECTION_INTERVAL_MS
@@ -390,17 +424,14 @@ function defaultSettings() {
     watchEnabled: parseBoolean(process.env.TOKEN_MONITOR_WATCH, true),
     watchDebounceMs: normalizeSharedWatchDebounceMs(process.env.TOKEN_MONITOR_WATCH_DEBOUNCE_MS),
     syncUploadIntervalMs: normalizeSyncUploadIntervalMs(process.env.TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS),
-    serviceProviderDisplayOrder: '',
-    hiddenServiceProviders: '',
-    serviceStatusRefreshMs: 60000,
     archivedClientUsage: { version: 1, clients: {} },
-    allTimeSince: process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01',
+    allTimeSince: normalizeAllTimeSince(process.env.TOKEN_MONITOR_ALL_TIME_SINCE),
     customModelPricing: [],
     limitProviderOrder: defaultLimitProviderOrder(),
     homeLimitProviderOrder: '',
     hiddenHomeLimitProviders: '',
     homeLimitAccountCount: HOME_LIMIT_ACCOUNT_COUNT_DEFAULT,
-    showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
+    showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, true),
     maskLimitAccountEmails: false,
     showLimitUsed: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_USED, false),
     windowBounds: null,
@@ -422,8 +453,7 @@ function normalizeCollectionMode(value, fallback = 'live') {
   return normalizeSharedCollectionMode(value, fallback);
 }
 
-function normalizeHeatmapMetric(value, fallback = 'cost') {
-  const next = String(value || '').trim();
+function normalizeHeatmapMetric(value, fallback = 'cost') {  const next = String(value || '').trim();
   if (next === 'tokens' || next === 'cost') return next;
   return fallback === 'tokens' ? 'tokens' : 'cost';
 }
@@ -433,6 +463,32 @@ function normalizeHomeActiveDaysWindow(value, fallback = 'all') {
   if (next === 'year') return 'year';
   if (next === 'all') return 'all';
   return fallback === 'year' ? 'year' : 'all';
+}
+
+const THEME_VALUES = new Set(['system', 'light', 'dark']);
+function normalizeThemeChoice(value, fallback = 'system') {
+  const raw = String(value || '').trim().toLowerCase();
+  if (THEME_VALUES.has(raw)) return raw;
+  return THEME_VALUES.has(fallback) ? fallback : 'system';
+}
+
+const ALL_TIME_SINCE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+// tokscale reads this as the anchor of the all-time window, so a malformed value
+// would silently make every "since" figure wrong rather than fail loudly.
+function normalizeAllTimeSince(value, fallback = '2024-01-01') {
+  const raw = String(value || '').trim();
+  if (!ALL_TIME_SINCE_PATTERN.test(raw)) return normalizeAllTimeSince(fallback);
+  const parsed = Date.parse(`${raw}T00:00:00`);
+  if (Number.isNaN(parsed) || parsed > Date.now()) return normalizeAllTimeSince(fallback);
+  return raw;
+}
+
+// The device id is the Hub's row key and part of local file names, so only
+// path/URL-unsafe characters are replaced. Case is preserved deliberately:
+// rewriting "Work-PC" to "work-pc" would register a second device upstream.
+function normalizeDeviceIdValue(value, fallback = '') {
+  const cleaned = String(value || '').trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '');
+  return cleaned || fallback;
 }
 
 function normalizeCollectionIntervalMs(value, fallback = DEFAULT_COLLECTION_INTERVAL_MS) {
@@ -517,12 +573,6 @@ function migrateClientDisplayOrder(value) {
   const raw = Array.isArray(value) ? value : String(value || '').split(',');
   const hasKnownClient = raw.some((item) => known.has(String(item || '').trim().toLowerCase()));
   return hasKnownClient ? normalizeClientDisplayOrder(value, KNOWN_CLIENT_LIST).join(',') : '';
-}
-
-const SERVICE_STATUS_REFRESH_VALUES = new Set([0, 60000, 120000, 300000, 900000, 1800000]);
-function normalizeServiceStatusRefreshMs(value) {
-  const n = Number(value);
-  return SERVICE_STATUS_REFRESH_VALUES.has(n) ? n : 60000;
 }
 
 function migrateViewDisplayOrder(value) {
@@ -844,8 +894,8 @@ function readSettings() {
     if (saved.hiddenHomeModules !== undefined) {
       merged.hiddenHomeModules = normalizeHiddenHomeModules(saved.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST);
     }
-    merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
-    merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
+    merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, true);
+    merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, true);
     merged.automaticAppUpdates = parseBoolean(merged.automaticAppUpdates, false);
     if (saved.homeLimitProviderOrder !== undefined) {
       merged.homeLimitProviderOrder = migrateHomeLimitProviderOrder(saved.homeLimitProviderOrder);
@@ -880,15 +930,17 @@ function readSettings() {
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
-    if (saved.serviceProviderDisplayOrder !== undefined) {
-      merged.serviceProviderDisplayOrder = String(saved.serviceProviderDisplayOrder || '');
-    }
-    if (saved.hiddenServiceProviders !== undefined) {
-      merged.hiddenServiceProviders = String(saved.hiddenServiceProviders || '');
-    }
-    if (saved.serviceStatusRefreshMs !== undefined) {
-      merged.serviceStatusRefreshMs = normalizeServiceStatusRefreshMs(saved.serviceStatusRefreshMs);
-    }
+    // A desktop build before this normalization persisted the glass switch as the
+    // string 'off', which every consumer reads as "glass on" (`=== false`).
+    merged.systemGlass = parseBoolean(merged.systemGlass, true);
+    merged.theme = normalizeThemeChoice(merged.theme);
+    merged.allTimeSince = normalizeAllTimeSince(merged.allTimeSince);
+    merged.deviceId = normalizeDeviceIdValue(merged.deviceId, defaultDeviceId());
+    merged.windowsBackdrop = normalizeWindowsBackdropMode(merged.windowsBackdrop);
+    merged.macosGlassStyle = normalizeMacosGlassStyle(merged.macosGlassStyle);
+    merged.collectionPaused = parseBoolean(merged.collectionPaused, false);
+    merged.closeToTray = parseBoolean(merged.closeToTray, true);
+    merged.startHidden = parseBoolean(merged.startHidden, true);
     if (saved.lastViewState !== undefined) {
       merged.lastViewState = normalizeInitialRendererViewState(saved.lastViewState);
     }
@@ -904,11 +956,17 @@ function readSettings() {
     // and leaving them in settings.json would imply they still do something.
     for (const key of ['windowBehavior', 'alwaysOnTop', 'floatingBubbleEnabled', 'floatingBubbleTrigger',
       'floatingBubbleContent', 'floatingBubbleCustomLayout', 'floatingBubbleBounds', 'showTrayIcon',
-      'trayMode', 'closeToTray', 'startInTray', 'trayContent', 'trayCustomLayout',
+      'trayMode', 'startInTray', 'trayContent', 'trayCustomLayout',
       'showTrayProviderBadge', 'windowToggleShortcut',
       // Device-side quota probing is gone; the Hub owns accounts and publishes
       // the normalized limits, so neither of these selects anything.
-      'limitsEnabled', 'limitProviders']) {
+      'limitsEnabled', 'limitProviders',
+      // The service-status panel is retired: nothing polls it and no view renders
+      // it, so its three preferences would only look still live.
+      'serviceProviderDisplayOrder', 'hiddenServiceProviders', 'serviceStatusRefreshMs',
+      // Retired with the borderless widget window: nothing has read the glass
+      // geometry or the old local poll cadence since the shell moved to SSE/IPC.
+      'refreshMs', 'glassOpacity', 'glassBlur']) {
       delete merged[key];
     }
     invalidateLegacyLocalLimitData();
@@ -957,6 +1015,15 @@ function linuxAutostartOptions() {
   return { appPath: process.execPath };
 }
 
+// A login-item launch carries this argument so the window stays in the tray; it is
+// deliberately separate from the retired `--started-at-login` marker, which is only
+// recognised on read for entries older builds left behind.
+const HIDDEN_LAUNCH_ARG = '--hidden';
+
+function hiddenLaunchRequested() {
+  return process.argv.includes(HIDDEN_LAUNCH_ARG);
+}
+
 function loginItemEnabledHere() {
   if (!app.isPackaged) return false;
   // Electron login items only cover macOS/Windows; on Linux we manage an XDG
@@ -976,9 +1043,20 @@ function currentLoginItemState() {
 function applyLoginItem(startAtLogin) {
   if (!loginItemEnabledHere()) return false;
   if (process.platform === 'linux') {
-    return linuxAutostart.setAutostartEnabled(Boolean(startAtLogin), linuxAutostartOptions());
+    return linuxAutostart.setAutostartEnabled(Boolean(startAtLogin), {
+      ...linuxAutostartOptions(),
+      hidden: Boolean(startAtLogin && settings.startHidden !== false)
+    });
   }
-  app.setLoginItemSettings({ openAtLogin: Boolean(startAtLogin) });
+  // `openAsHidden` is macOS-only; Windows takes the launch argument instead. Both
+  // mean "a sign-in launch stays in the tray", which is the default the product
+  // wants, while a double-click from the icon still shows the window.
+  app.setLoginItemSettings({
+    openAtLogin: Boolean(startAtLogin),
+    ...(process.platform === 'darwin'
+      ? { openAsHidden: Boolean(startAtLogin && settings.startHidden !== false) }
+      : { args: startAtLogin && settings.startHidden !== false ? [HIDDEN_LAUNCH_ARG] : [] })
+  });
   return currentLoginItemState();
 }
 
@@ -1093,12 +1171,39 @@ function applyWindowSettings() {
   if (typeof mainWindow.setResizable === 'function') mainWindow.setResizable(true);
 }
 
+// The window surface and its caption glyphs have to equal the surface the
+// stylesheet paints, not a remembered grey: these are the live token pairs
+// (`--bg` light #f5f5f5 / dark #141414, `--text` #242424 / #ffffff).
+const NATIVE_SURFACE = Object.freeze({
+  light: { background: '#f5f5f5', glyph: '#242424' },
+  dark: { background: '#141414', glyph: '#ffffff' }
+});
+
+// Setting `themeSource` first is what lets the system-drawn parts — scrollbars,
+// context menus, the macOS menu bar — agree with a forced in-app theme, and it is
+// also how the resolved surface below reads the user's choice back.
+function resolveNativeSurface(source = settings) {
+  nativeTheme.themeSource = source?.theme === 'light' || source?.theme === 'dark' ? source.theme : 'system';
+  return NATIVE_SURFACE[nativeTheme.shouldUseDarkColors ? 'dark' : 'light'];
+}
+
+// The Windows material follows the operator's choice, but only on builds where
+// Electron can apply a background material; every caller needs the same platform
+// and OS-release pair, so it is resolved here once.
+function windowsSurfaceFor({ systemGlass = nativeBlurEnabled(), source = settings } = {}) {
+  return windowsSurfaceProfile({
+    platform: process.platform,
+    osRelease: os.release(),
+    systemGlass,
+    backdropMode: source?.windowsBackdrop
+  });
+}
+
 function windowsTitleBarOverlayOptions(source = settings) {
-  const dark = source?.theme === 'dark'
-    || (source?.theme !== 'light' && Boolean(nativeTheme?.shouldUseDarkColors));
+  const surface = resolveNativeSurface(source);
   return {
-    color: dark ? '#0b0c0e' : '#f4f5f7',
-    symbolColor: dark ? '#e7ebf3' : '#20252d',
+    color: surface.background,
+    symbolColor: surface.glyph,
     height: 36
   };
 }
@@ -1107,6 +1212,17 @@ function applyWindowsTitleBarOverlay(target = mainWindow, source = settings) {
   if (process.platform !== 'win32' || !target || target.isDestroyed?.()) return;
   if (typeof target.setTitleBarOverlay !== 'function') return;
   try { target.setTitleBarOverlay(windowsTitleBarOverlayOptions(source)); } catch (_) {}
+}
+
+// A native-backdrop window is painted by DWM, so only the flat window gets a
+// solid background colour.
+function applyNativeTheme(target = mainWindow, source = settings) {
+  const surface = resolveNativeSurface(source);
+  if (target && !target.isDestroyed?.() && typeof target.setBackgroundColor === 'function'
+    && !windowsSurfaceFor({ source }).nativeBackdrop) {
+    try { target.setBackgroundColor(surface.background); } catch (_) {}
+  }
+  applyWindowsTitleBarOverlay(target, source);
 }
 
 function nativeBlurEnabled(source = settings) {
@@ -1553,6 +1669,10 @@ function stopSyncCollector(options = {}) {
 
 function startSyncCollector() {
   stopSyncCollector();
+  if (settings.collectionPaused) {
+    updateSyncHealth('local', { state: 'paused', failureCode: null });
+    return;
+  }
   mode = 'sync';
   updateSyncHealth('local', { state: 'collecting', failureCode: null });
   // A headless agent on this machine already collects and posts this device's
@@ -1805,6 +1925,14 @@ function stopLocalCollector(options = {}) {
 
 function startLocalCollector() {
   stopLocalCollector();
+  // Pausing keeps the window, cache and stream alive; only the collectors stop, so
+  // a paused device still shows its last good numbers instead of an empty app.
+  if (settings.collectionPaused) {
+    mode = 'local';
+    updateSyncHealth('local', { state: 'paused', failureCode: null });
+    sendStatus(false, { reason: 'paused' });
+    return;
+  }
   mode = 'local';
   updateSyncHealth('local', { state: 'collecting', failureCode: null });
   sendStatus(false, { reason: 'collecting' });
@@ -2168,7 +2296,7 @@ function focusExistingWindow() {
 
 
 function settingsForRenderer() {
-  const safeSettings = stripLegacyLocalLimitSettings(settings);
+  const safeSettings = withoutInternalOnlyKeys(stripLegacyLocalLimitSettings(settings));
   const redactedCredentials = credentialSettingsForRenderer(settings, {
     // The renderer only needs the configured boolean. A Hub secret is accepted
     // through the one-shot validation/save IPC path and is never part of the
@@ -2177,11 +2305,7 @@ function settingsForRenderer() {
   });
   return {
     ...safeSettings,
-    windowsSurface: windowsSurfaceProfile({
-      platform: process.platform,
-      osRelease: os.release(),
-      systemGlass: settings?.systemGlass !== false
-    }).kind,
+    windowsSurface: windowsSurfaceFor().kind,
     ...redactedCredentials,
     hubAdminConfigured: Boolean(settings?.secret),
     limitsAuthority: 'hub',
@@ -2198,12 +2322,6 @@ function pushSettingsToRenderer() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('settings:push', payload); } catch (_) {}
   }
-  // The trends dashboard is a separate renderer with its own currency module
-  // instance; it must receive effective-rate updates too, otherwise an
-  // already-open dashboard keeps showing the previous rate after an auto
-  // refresh or manual override until it is reopened.
-  // Currency, compact-unit, locale, and theme settings are part of the native
-  // Widget snapshot even when the usage counters themselves did not change.
 }
 
 
@@ -2993,7 +3111,6 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'qoder.com' || parsed.hostname === 'www.qoder.com' || parsed.hostname === 'qoder.com.cn' || parsed.hostname === 'www.qoder.com.cn') return true;
   if ((parsed.hostname === 'ollama.com' || parsed.hostname === 'www.ollama.com') && (parsed.pathname === '/settings' || parsed.pathname === '/signin')) return true;
   if ((parsed.hostname === 'kimi.com' || parsed.hostname === 'www.kimi.com') && parsed.pathname.startsWith('/code')) return true;
-  if (STATUS_PAGE_HOSTS.has(parsed.hostname) && (parsed.pathname === '' || parsed.pathname === '/')) return true;
   return false;
 }
 
@@ -3012,6 +3129,12 @@ function loadWindowFile(target, options = {}) {
   const reveal = () => {
     if (revealed) return;
     revealed = true;
+    // A sign-in launch stays in the tray. The tray, the Dock and the second-instance
+    // path can all still bring the window up, so nothing is lost by not showing it.
+    if (options.startHidden === true && settings.startHidden !== false) {
+      cleanup();
+      return;
+    }
     revealWindow(target, { inactive: options.inactive === true });
   };
   const waitForContent = options.waitForContent === true;
@@ -3054,12 +3177,15 @@ function createWindow(boundsOverride, options = {}) {
   ensureSettingsLoaded();
   const glass = nativeBlurEnabled();
   const macosGlassStyle = macosGlassStyleFor(settings);
-  const windowsSurface = windowsSurfaceProfile({
-    platform: process.platform,
-    osRelease: os.release(),
-    systemGlass: glass
-  });
+  const windowsSurface = windowsSurfaceFor({ systemGlass: glass });
   const nativeWindowsBackdrop = windowsSurface.nativeBackdrop;
+  // Only the very first window of a sign-in launch starts hidden: a later rebuild
+  // (material change, activation, restore) happens while the user is looking for it.
+  const startHidden = !initialWindowCreated && hiddenLaunchRequested();
+  initialWindowCreated = true;
+  // Resolving the surface also pins nativeTheme.themeSource, so the native
+  // controls and the web content start on the same theme.
+  const nativeSurface = resolveNativeSurface(settings);
   const bounds = boundsOverride || restoredBounds() || DEFAULT_WINDOW;
   // A normal application window: framed, resizable, minimizable, and present in
   // the taskbar/Dock. The widget-era build's borderless always-on-top chrome is gone, so
@@ -3077,7 +3203,7 @@ function createWindow(boundsOverride, options = {}) {
       ? { titleBarStyle: 'hidden', titleBarOverlay: windowsTitleBarOverlayOptions(settings) }
       : {}),
     show: false,
-    backgroundColor: nativeWindowsBackdrop ? undefined : '#f4f5f7',
+    backgroundColor: nativeWindowsBackdrop ? undefined : nativeSurface.background,
     icon: APP_ICON_PATH,
     autoHideMenuBar: process.platform !== 'darwin',
     ...(process.platform === 'darwin' && glass && macosGlassStyle === MACOS_GLASS_VIBRANCY
@@ -3093,7 +3219,7 @@ function createWindow(boundsOverride, options = {}) {
     }
   });
   mainWindow = win;
-  applyWindowsTitleBarOverlay(win);
+  applyNativeTheme(win);
   applyMacosNativeWindowButtons(win);
   applyWindowsChrome(win, { round: true });
   if (windowsSurface.useLegacyAccent) applyWindowsAccentBlur(win);
@@ -3121,6 +3247,9 @@ function createWindow(boundsOverride, options = {}) {
   // first and is therefore still allowed to destroy the window and process.
   win.on('close', (event) => {
     if (quitRequested) return;
+    // Closing to the tray is the default, but it is a choice: with it off, or with
+    // no tray to fall back to, the window really closes and the app follows.
+    if (settings.closeToTray === false) return;
     if (!applicationTray || applicationTray.isDestroyed?.()) return;
     event.preventDefault();
     win.hide();
@@ -3129,6 +3258,7 @@ function createWindow(boundsOverride, options = {}) {
   loadWindowFile(win, {
     waitForContent: options.waitForContent === true,
     inactive: options.inactive === true,
+    startHidden,
     query: {
       ...initialRendererViewStateQuery(rendererViewState),
       ...(settings?.systemGlass === false ? { systemGlassDisabled: '1' } : {}),
@@ -3262,7 +3392,6 @@ function localCapabilitiesForRenderer() {
       limitsAuthority: 'hub',
       // Desktop-only surfaces, gated so the shared UI can render them
       // consistently without branching on platform.
-      serviceStatus: true,
       themeEditor: true,
       desktopSettings: true
     }
@@ -3566,6 +3695,86 @@ async function fetchCustomRangeStats(rangeInput) {
     }
 }
 
+// Sleep leaves the collection timer late and the Hub stream half-open. The stream
+// has an idle watchdog, but resume is the moment to stop waiting for it; a short
+// delay gives the network stack back before the mode is re-established.
+const RESUME_RECONNECT_DELAY_MS = 2000;
+let resumeReconnectTimer = null;
+function handleSystemResume() {
+  clearTimeout(resumeReconnectTimer);
+  resumeReconnectTimer = setTimeout(() => { startMode(); }, RESUME_RECONNECT_DELAY_MS);
+}
+
+// Shared by the renderer's app-info request and the diagnostics bundle, so the two
+// can never disagree about what this machine is.
+function appDiagnosticsInfo() {
+  return {
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    osRelease: os.release(),
+    isPackaged: app.isPackaged,
+    userData: app.getPath('userData'),
+    sharedDataDir: sharedDataDir(),
+    loginItemSupported: loginItemEnabledHere(),
+    loginItemOpenAtLogin: currentLoginItemState()
+  };
+}
+
+// Provider id and status only: account labels, e-mails and windows are the user's
+// data, not something a support bundle needs.
+function diagnosticsLimitsSummary() {
+  const providers = (latestStats || localStats)?.limits?.providers || [];
+  return providers.map((provider) => ({
+    provider: provider.provider,
+    status: provider.status,
+    stale: Boolean(provider.stale),
+    windowCount: Array.isArray(provider.windows) ? provider.windows.length : 0
+  }));
+}
+
+// The tooltip is the only always-visible tray surface, so it carries the two facts
+// that matter without a window: that collection is paused, and what today cost.
+function trayTooltipText() {
+  if (settings?.collectionPaused === true) return `Token Monitor · ${nativeShellText('trayMenu.paused')}`;
+  const tokens = Number((localDevice || lastCollectedDevice)?.today?.totalTokens || 0);
+  return tokens > 0
+    ? `Token Monitor · ${nativeShellText('trayMenu.tooltipToday', { tokens: formatCompactTokens(tokens) })}`
+    : 'Token Monitor';
+}
+
+// One function so the tray, the settings switch and any later menu entry all take
+// the same path: persist, rebuild the runtime, tell the renderer, refresh the tray.
+function setCollectionPaused(paused) {
+  const next = paused === true;
+  if (!settings || settings.collectionPaused === next) return;
+  settings.collectionPaused = next;
+  saveSettings();
+  void startMode();
+  pushSettingsToRenderer();
+  refreshApplicationTrayMenu();
+}
+
+// The native shell (menu bar, tray, dialogs) resolves `auto` from the OS locale,
+// which a renderer reads off `navigator` but this process has to ask Electron for.
+function nativeShellText(key, params) {
+  return translate(resolveLocale(settings?.language || 'auto', [app.getLocale()]), key, params);
+}
+
+// A normal application has a menu bar. It also gives the shared UI a
+// keyboard-reachable entry point to Settings and each view. Rebuilt when the
+// language changes: the menu is native, so a renderer re-render cannot relabel it.
+function buildApplicationMenu() {
+  createAppMenu({
+    getWindow: () => mainWindow,
+    openView: openSharedUiView,
+    checkForUpdates: () => runAppUpdateCheck({ force: true }),
+    openUserData: () => { void shell.openPath(app.getPath('userData')); },
+    translate: nativeShellText,
+    appVersion: appVersion()
+  });
+}
+
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
   ensureSettingsLoaded();
@@ -3584,8 +3793,12 @@ app.whenReady().then(() => {
       templateIconPath: TRAY_ICON_PATH,
       getWindow: () => mainWindow,
       onOpenSettings: () => openSharedUiView('settings'),
+      onOpenView: openSharedUiView,
       onQuit: () => app.quit(),
-      translate: (key, params) => translate(resolveLocale(settings?.language || 'auto'), key, params)
+      isCollectionPaused: () => settings?.collectionPaused === true,
+      onToggleCollectionPaused: () => setCollectionPaused(!(settings?.collectionPaused === true)),
+      tooltip: trayTooltipText,
+      translate: nativeShellText
     });
     applicationTray = trayHandle.tray;
     refreshApplicationTrayMenu = trayHandle.refreshMenu;
@@ -3598,16 +3811,8 @@ app.whenReady().then(() => {
   }
   syncLoginItemSettingFromOs();
   cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
-  // A normal application has a menu bar. It also gives the shared UI a
-  // keyboard-reachable entry point to Settings and each view.
-  createAppMenu({
-    getWindow: () => mainWindow,
-    openView: openSharedUiView,
-    checkForUpdates: () => runAppUpdateCheck({ force: true }),
-    openUserData: () => { void shell.openPath(app.getPath('userData')); },
-    translate: (key, params) => translate(resolveLocale(settings?.language || 'auto'), key, params),
-    appVersion: appVersion()
-  });
+  buildApplicationMenu();
+  powerMonitor.on('resume', handleSystemResume);
   regenerateTokscalePricing();
   if (settings.discordRpcEnabled) startDiscordRpc();
   rateCache = readRateCache();
@@ -3641,11 +3846,7 @@ app.whenReady().then(() => {
     const previousSettingsState = settings;
     const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
     const previousNativeMaterial = nativeBlurEnabled();
-    const previousWindowsSurface = windowsSurfaceProfile({
-      platform: process.platform,
-      osRelease: os.release(),
-      systemGlass: previousNativeMaterial
-    }).kind;
+    const previousWindowsSurface = windowsSurfaceFor({ systemGlass: previousNativeMaterial }).kind;
     const previousClients = settings.clients;
     const previousDiscordRpcEnabled = settings.discordRpcEnabled;
     const previousCurrency = settings.currency;
@@ -3653,7 +3854,7 @@ app.whenReady().then(() => {
     const previousAutomaticAppUpdates = settings.automaticAppUpdates;
     const previousCustomModelPricing = JSON.stringify(settings.customModelPricing || []);
     const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
-    const normalizedPatch = { ...stripLegacyLocalLimitSettings(patch), currency: normalizedCurrency };
+    const normalizedPatch = { ...withoutInternalOnlyKeys(stripLegacyLocalLimitSettings(patch)), currency: normalizedCurrency };
     delete normalizedPatch.customModelPricing;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
     if (patch.hubUrl !== undefined) normalizedPatch.hubUrl = normalizeHubUrl(patch.hubUrl);
@@ -3684,19 +3885,21 @@ app.whenReady().then(() => {
       ...settings,
       ...normalizedPatch,
       hubMode: patch.hubMode !== undefined ? normalizeHubMode(patch.hubMode, settings.hubMode) : settings.hubMode,
-      deviceId: (patch.deviceId !== undefined ? String(patch.deviceId).trim() : settings.deviceId) || defaultDeviceId(),
+      deviceId: normalizeDeviceIdValue(patch.deviceId !== undefined ? patch.deviceId : settings.deviceId, defaultDeviceId()),
+      theme: normalizeThemeChoice(patch.theme !== undefined ? patch.theme : settings.theme),
+      allTimeSince: normalizeAllTimeSince(patch.allTimeSince !== undefined ? patch.allTimeSince : settings.allTimeSince),
       clients: patch.clients !== undefined ? clientsCsvForSetting(patch.clients, '') : clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS),
-      refreshMs: Math.max(5000, Number(patch.refreshMs ?? settings.refreshMs ?? 15000)),
-      glassOpacity: Math.max(0, Math.min(100, Number(patch.glassOpacity ?? settings.glassOpacity ?? 68))),
-      glassBlur: Math.max(0, Math.min(100, Number(patch.glassBlur ?? settings.glassBlur ?? 32))),
-      systemGlass: patch.systemGlass ?? settings.systemGlass ?? true,
+      systemGlass: parseBoolean(patch.systemGlass ?? settings.systemGlass, true),
+      collectionPaused: parseBoolean(patch.collectionPaused ?? settings.collectionPaused, false),
+      closeToTray: parseBoolean(patch.closeToTray ?? settings.closeToTray, true),
+      startHidden: parseBoolean(patch.startHidden ?? settings.startHidden, true),
       macosGlassStyle: normalizeMacosGlassStyle(patch.macosGlassStyle ?? settings.macosGlassStyle),
       windowsBackdrop: normalizeWindowsBackdropMode(patch.windowsBackdrop ?? settings.windowsBackdrop),
       reduceMotion: motionPreferenceApi.normalize(patch.reduceMotion ?? settings.reduceMotion),
       showLiveDot: patch.showLiveDot ?? settings.showLiveDot ?? true,
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
       titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
-      showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, false),
+      showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, true),
       discordRpcEnabled: patch.discordRpcEnabled ?? settings.discordRpcEnabled ?? false,
       limitProviderOrder: patch.limitProviderOrder !== undefined ? migrateLimitProviderOrder(patch.limitProviderOrder) : settings.limitProviderOrder,
       clientDisplayOrder: patch.clientDisplayOrder !== undefined ? migrateClientDisplayOrder(patch.clientDisplayOrder) : (settings.clientDisplayOrder || ''),
@@ -3706,8 +3909,8 @@ app.whenReady().then(() => {
       hiddenViews: patch.hiddenViews !== undefined ? normalizeHiddenViews(patch.hiddenViews, DEFAULT_VIEW_LIST) : normalizeHiddenViews(settings.hiddenViews, DEFAULT_VIEW_LIST),
       homeModuleOrder: patch.homeModuleOrder !== undefined ? normalizeHomeModuleOrder(patch.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',') : normalizeHomeModuleOrder(settings.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(','),
       hiddenHomeModules: patch.hiddenHomeModules !== undefined ? normalizeHiddenHomeModules(patch.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST) : normalizeHiddenHomeModules(settings.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST),
-      showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, false),
-      showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),
+      showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, true),
+      showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, true),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
@@ -3721,10 +3924,7 @@ app.whenReady().then(() => {
       watchEnabled: parseBoolean(patch.watchEnabled ?? settings.watchEnabled, true),
       watchDebounceMs: normalizeSharedWatchDebounceMs(patch.watchDebounceMs ?? settings.watchDebounceMs),
       syncUploadIntervalMs: normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs ?? settings.syncUploadIntervalMs),
-      serviceProviderDisplayOrder: patch.serviceProviderDisplayOrder !== undefined ? String(patch.serviceProviderDisplayOrder || '') : (settings.serviceProviderDisplayOrder || ''),
-      hiddenServiceProviders: patch.hiddenServiceProviders !== undefined ? String(patch.hiddenServiceProviders || '') : (settings.hiddenServiceProviders || ''),
-      serviceStatusRefreshMs: normalizeServiceStatusRefreshMs(patch.serviceStatusRefreshMs ?? settings.serviceStatusRefreshMs),
-      showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
+      showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, true),
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
       zoomFactor: clampZoom(patch.zoomFactor ?? settings.zoomFactor),
@@ -3753,6 +3953,11 @@ app.whenReady().then(() => {
     if (settings.startAtLogin !== previousStartAtLogin) {
       settings.startAtLogin = applyLoginItem(settings.startAtLogin);
       saveSettings({ throwOnError: true });
+    } else if (previousRuntimeSettings.startHidden !== settings.startHidden && settings.startAtLogin) {
+      // The hidden-launch flag is part of what gets registered at login, so
+      // changing it has to rewrite the entry even though "start at login" itself
+      // did not change.
+      applyLoginItem(true);
     }
     if (settings.automaticAppUpdates && !previousAutomaticAppUpdates) {
       runAppUpdateCheck({ bypassCooldown: true }).catch(() => {});
@@ -3765,13 +3970,9 @@ app.whenReady().then(() => {
     else if (!settings.discordRpcEnabled && previousDiscordRpcEnabled) stopDiscordRpc();
     else if (settings.discordRpcEnabled && settings.currency !== previousCurrency && latestStats) updateDiscordRpc(latestStats, settings.currency);
     applyWindowSettings();
-    applyWindowsTitleBarOverlay(mainWindow, settings);
+    applyNativeTheme(mainWindow, settings);
     const nextNativeMaterial = nativeBlurEnabled();
-    const nextWindowsSurface = windowsSurfaceProfile({
-      platform: process.platform,
-      osRelease: os.release(),
-      systemGlass: nextNativeMaterial
-    }).kind;
+    const nextWindowsSurface = windowsSurfaceFor({ systemGlass: nextNativeMaterial }).kind;
     if (process.platform === 'win32' && (
       previousNativeMaterial !== nextNativeMaterial
       || previousWindowsSurface !== nextWindowsSurface
@@ -3781,7 +3982,11 @@ app.whenReady().then(() => {
       applyNativeMaterial();
     }
     const runtimeChange = classifySettingsChange(previousRuntimeSettings, settings);
-    if (runtimeChange.modeStructural) {
+    // Pause is not a structural change (same mode, same config) but it does decide
+    // whether the collectors run, so it needs its own restart.
+    if (previousRuntimeSettings.collectionPaused !== settings.collectionPaused) {
+      startMode();
+    } else if (runtimeChange.modeStructural) {
       startMode();
     } else if (runtimeChange.usageStructural || runtimeChange.sinkStructural) {
       restartDeviceRuntimeForMode();
@@ -3792,6 +3997,9 @@ app.whenReady().then(() => {
       refreshExchangeRates();              // async: fetch if stale, then re-push
     }
     refreshApplicationTrayMenu();
+    // The menu bar is native chrome, so only an explicit rebuild follows a
+    // language change — the renderer re-localizes itself over the transport.
+    if (previousSettingsState?.language !== settings?.language) buildApplicationMenu();
     pushSettingsToRenderer();
     return settingsForRenderer();
   });
@@ -3805,7 +4013,6 @@ app.whenReady().then(() => {
   ipcMain.on('window:viewState', (_event, patch) => {
     updateRendererViewState(patch);
   });
-  ipcMain.handle('stats:get', (_event, options) => fetchStats(options));
   ipcMain.handle('stats:getCustomRange', (_event, rangeInput) => fetchCustomRangeStats(rangeInput));
 
   ipcMain.handle('export:now', async () => {
@@ -3827,26 +4034,36 @@ app.whenReady().then(() => {
     if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
     return { ok: true, dir: result.filePaths[0] };
   });
+  ipcMain.handle('diagnostics:export', async () => {
+    // Save dialog rather than a fixed folder: the point is that the user reads the
+    // file before attaching it anywhere.
+    const result = await dialog.showSaveDialog(mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined, {
+      title: 'Token Monitor diagnostics',
+      defaultPath: path.join(app.getPath('documents'), diagnosticsFileName(app.getVersion())),
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    try {
+      fs.writeFileSync(result.filePath, `${JSON.stringify(buildDiagnosticsBundle({
+        appInfo: appDiagnosticsInfo,
+        settings: () => settings,
+        tokscaleStatus: () => getTokscaleStatus(),
+        syncHealth: () => syncHealthSnapshot(),
+        appUpdate: () => deriveAppUpdateState(),
+        snapshotMeta: () => desktopSnapshotMeta(),
+        limitsSummary: diagnosticsLimitsSummary
+      }), null, 2)}\n`, 'utf8');
+      return { ok: true, file: result.filePath };
+    } catch (error) {
+      return { ok: false, error: error.message || String(error) };
+    }
+  });
   ipcMain.handle('session:getDetail', (_event, args) => fetchSessionDetail(args));
   ipcMain.handle('sync:recover', () => recoverNow());
   ipcMain.handle('sync:health', () => syncHealthSnapshot());
   ipcMain.handle('desktop:snapshot-meta', () => desktopSnapshotMeta());
   ipcMain.handle('stream:status', () => ({ connected: streamConnected, mode, health: syncHealthSnapshot(), ...(streamFailure || {}) }));
-  ipcMain.handle('serviceStatus:get', (_event, options) => serviceStatusClient.getServiceStatus({
-    force: Boolean(options?.force),
-    providerIds: Array.isArray(options?.providerIds) ? options.providerIds : null
-  }));
-  ipcMain.handle('app:getInfo', () => ({
-    version: app.getVersion(),
-    platform: process.platform,
-    arch: process.arch,
-    osRelease: require('os').release(),
-    isPackaged: app.isPackaged,
-    userData: app.getPath('userData'),
-    sharedDataDir: sharedDataDir(),
-    loginItemSupported: loginItemEnabledHere(),
-    loginItemOpenAtLogin: currentLoginItemState()
-  }));
+  ipcMain.handle('app:getInfo', () => appDiagnosticsInfo());
   ipcMain.handle('clipboard:write', (_event, text) => {
     clipboard.writeText(String(text || ''));
     return true;
@@ -3909,31 +4126,19 @@ app.whenReady().then(() => {
     // the modules that own them so a new view or provider cannot be missing here.
     views: SHARED_VIEW_LIST.map((view) => view.id),
     homeModules: ['limits', 'tool', 'device', 'model', 'trends'],
-    serviceProviders: SERVICE_STATUS_PROVIDERS.map((provider) => provider.id),
-    hiddenServiceProviders: SERVICE_STATUS_PROVIDERS.map((provider) => provider.id),
-    languageOptions: LANGUAGE_OPTIONS
-  }));
-  ipcMain.handle('transport:capabilities', () => ({
-    pwa: false,
-    nativeDialogs: true,
-    externalOpen: 'shell',
-    clipboard: 'ipc',
-    routing: 'hash',
-    localCollector: true,
-    updater: true,
-    desktopSettings: true,
-    serviceStatus: true,
-    themeEditor: true,
-    accounts: true,
-    subscriptions: true,
-    pricing: true
+    // The collector owns the sanctioned tick cadence, so the UI cannot drift from it.
+    collectionModeIntervals: Array.from(SHARED_COLLECTION_INTERVAL_OPTIONS)
   }));
   ipcMain.handle('transport:flag:read', (_event, key) => {
+    if (!isUiFlagKey(key)) return null;
     const value = settings?.[String(key)];
     return value === undefined ? null : value;
   });
   ipcMain.handle('transport:flag:write', (_event, key, value) => {
-    if (!key) return false;
+    // Flags are UI scratch state. Requiring the namespace keeps a future flag from
+    // landing on a real setting key by accident — the generic settings write is
+    // where validated preferences belong.
+    if (!isUiFlagKey(key)) return false;
     settings[String(key)] = value;
     saveSettings();
     return true;

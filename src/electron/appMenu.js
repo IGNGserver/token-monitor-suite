@@ -11,6 +11,20 @@ const { Menu, app, shell } = require('electron');
 
 const REPOSITORY_URL = 'https://github.com/IGNGserver/token-monitor-suite';
 
+// The shared UI's navigable views, in sidebar order, with the label key each one
+// already uses. Written as literals on purpose: `tests/electron/i18n.test.js`
+// scrapes this file for `nav.*` keys and fails if a native label has no
+// translation, which is the guard against a menu that renders its own keys.
+const VIEW_MENU_ITEMS = [
+  { id: 'overview', labelKey: 'nav.overview' },
+  { id: 'usage', labelKey: 'nav.usage' },
+  { id: 'devices', labelKey: 'nav.devices' },
+  { id: 'limits', labelKey: 'nav.limits' },
+  { id: 'trends', labelKey: 'nav.trends' },
+  { id: 'accounts', labelKey: 'nav.accounts' },
+  { id: 'management', labelKey: 'nav.management' }
+];
+
 /**
  * @param {object} deps
  * @param {() => BrowserWindow|null} deps.getWindow
@@ -99,11 +113,11 @@ function createAppMenu(deps) {
   template.push({
     label: t('menu.view'),
     submenu: [
-      { label: t('nav.overview'), click: () => deps.openView('overview') },
-      { label: t('nav.usage'), click: () => deps.openView('usage') },
-      { label: t('nav.devices'), click: () => deps.openView('devices') },
-      { label: t('nav.limits'), click: () => deps.openView('limits') },
-      { label: t('nav.trends'), click: () => deps.openView('trends') },
+      ...VIEW_MENU_ITEMS.map((item, index) => ({
+        label: t(item.labelKey),
+        ...(index < 9 ? { accelerator: `CmdOrCtrl+${index + 1}` } : {}),
+        click: () => deps.openView(item.id)
+      })),
       { type: 'separator' },
       { role: 'reload' },
       { role: 'forceReload' },

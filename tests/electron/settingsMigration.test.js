@@ -24,8 +24,8 @@ const RETAINED_KEYS = [
   'sessionUsageArchiveEnabled', 'wslScanEnabled', 'allTimeSince',
   'collectionMode', 'collectionIntervalMs', 'watchEnabled', 'watchDebounceMs',
   'exportAutoEnabled', 'exportDir', 'exportIntervalMs',
-  'customModelPricing', 'refreshMs',
-  'glassOpacity', 'glassBlur', 'systemGlass', 'macosGlassStyle', 'windowsBackdrop',
+  'customModelPricing',
+  'systemGlass', 'macosGlassStyle', 'theme', 'windowsBackdrop',
   'reduceMotion', 'showLiveDot', 'showToolIcons', 'titleIconOnly',
   'showCompactTotalTokens', 'zoomFactor', 'heatmapMetric', 'homeActiveDaysWindow',
   'themeColors', 'vendorColors',
@@ -33,21 +33,24 @@ const RETAINED_KEYS = [
   'viewDisplayOrder', 'hiddenViews', 'homeModuleOrder', 'hiddenHomeModules',
   'homeLimitProviderOrder', 'hiddenHomeLimitProviders', 'homeLimitAccountCount',
   'showHomeLimitBars', 'showHomeLimitProviderNames', 'limitProviderOrder',
-  'serviceProviderDisplayOrder', 'hiddenServiceProviders', 'serviceStatusRefreshMs',
   'showLimitSource', 'maskLimitAccountEmails', 'showLimitUsed',
   'startAtLogin', 'automaticAppUpdates', 'appUpdate', 'discordRpcEnabled',
+  'collectionPaused', 'closeToTray', 'startHidden',
   'language', 'currency', 'currencyRates',
   'windowBounds', 'lastViewState', 'archivedClientUsage', 'migratedDefaultClients',
   'lastPostedDeviceId'
 ];
 
-// Widget-only keys that must NOT survive: nothing reads them now.
+// Keys that must NOT survive: nothing reads them now. Both widget-era leftovers
+// and the retired service-status preferences land here.
 const DROPPED_KEYS = [
   'windowBehavior', 'alwaysOnTop', 'floatingBubbleEnabled', 'floatingBubbleTrigger',
   'floatingBubbleContent', 'floatingBubbleCustomLayout', 'floatingBubbleBounds',
-  'showTrayIcon', 'trayMode', 'closeToTray', 'startInTray', 'trayContent',
+  'showTrayIcon', 'trayMode', 'startInTray', 'trayContent',
   'trayCustomLayout', 'showTrayProviderBadge', 'windowToggleShortcut',
-  'limitsEnabled', 'limitProviders'
+  'limitsEnabled', 'limitProviders',
+  'serviceProviderDisplayOrder', 'hiddenServiceProviders', 'serviceStatusRefreshMs',
+  'refreshMs', 'glassOpacity', 'glassBlur'
 ];
 
 function defaultSettingsBlock() {
@@ -79,6 +82,16 @@ test('widget-only settings are not declared and are stripped on read', () => {
   const stripBlock = main.slice(stripStart, stripEnd);
   const unstripped = DROPPED_KEYS.filter((key) => !stripBlock.includes(`'${key}'`));
   assert.deepEqual(unstripped, [], `widget keys not stripped on read: ${unstripped.join(', ')}`);
+});
+
+test('the glass preference is normalized to a boolean on both paths', () => {
+  // Every consumer reads `systemGlass === false`, but the settings control stored
+  // its option string ('system' / 'off'), which made the switch a no-op and left
+  // already-upgraded profiles holding a string. Both entry points must normalize.
+  assert.match(main, /merged\.systemGlass = parseBoolean\(merged\.systemGlass, true\)/,
+    'a stored glass string must normalize on read');
+  assert.match(main, /systemGlass: parseBoolean\(patch\.systemGlass \?\? settings\.systemGlass, true\)/,
+    'the settings:update path must normalize the glass value');
 });
 
 test('legacy widget settings keys are invalidated like other removed credentials', () => {
@@ -163,7 +176,6 @@ test('every retained setting that the old widget exposed has a control', () => {
     'heatmapMetric', 'homeActiveDaysWindow', 'clientDisplayOrder', 'hiddenClients',
     'pinnedClients', 'homeLimitProviderOrder', 'hiddenHomeLimitProviders',
     'homeLimitAccountCount', 'showHomeLimitBars', 'showHomeLimitProviderNames',
-    'serviceProviderDisplayOrder', 'hiddenServiceProviders', 'serviceStatusRefreshMs',
     'themeColors', 'vendorColors', 'currency', 'currencyRates', 'language'
   ];
   const orphaned = prefsBacked.filter((key) => !uiSource.includes(key));
@@ -172,4 +184,60 @@ test('every retained setting that the old widget exposed has a control', () => {
     [],
     `preferences with no UI surface anywhere: ${orphaned.join(', ')}`
   );
+});
+
+test('main-process runtime state stays out of the renderer surface', () => {
+  const declared = /const INTERNAL_ONLY_SETTING_KEYS = Object\.freeze\(\[([\s\S]*?)\]\)/.exec(main);
+  assert.ok(declared, 'the internal-state key list must exist');
+  const keys = [...declared[1].matchAll(/'([A-Za-z]+)'/g)].map((match) => match[1]);
+  assert.deepEqual(keys, ['windowBounds', 'lastViewState', 'archivedClientUsage',
+    'migratedDefaultClients', 'lastPostedDeviceId', 'appUpdate']);
+
+  // Both the settings read for the renderer and the write path go through it, so
+  // neither can leak or clobber runtime state.
+  assert.match(main, /withoutInternalOnlyKeys\(stripLegacyLocalLimitSettings\(settings\)\)/,
+    'the renderer snapshot must omit internal state');
+  assert.match(main, /withoutInternalOnlyKeys\(stripLegacyLocalLimitSettings\(patch\)\)/,
+    'a renderer write must not reach internal state');
+
+  // The omission is only safe because no view reads these names.
+  const uiDir = path.join(root, 'src', 'shared-ui');
+  const scan = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (
+    entry.isDirectory() ? scan(path.join(dir, entry.name)) : (entry.name.endsWith('.js') ? [fs.readFileSync(path.join(dir, entry.name), 'utf8')] : [])
+  ));
+  const offenders = keys.filter((key) => scan(uiDir).some((source) => new RegExp(`\\b${key}\\b`).test(source)));
+  assert.deepEqual(offenders, [], `views read main-process runtime state: ${offenders.join(', ')}`);
+});
+
+test('UI flags cannot land on a real setting key', () => {
+  // The flag store writes straight into settings.json, so the namespace is the only
+  // thing separating a dismissed notice from a clobbered preference.
+  assert.match(main, /function isUiFlagKey\(key\) \{\n\s+return String\(key \|\| ''\)\.startsWith\(UI_FLAG_PREFIX\);/);
+  assert.match(main, /if \(!isUiFlagKey\(key\)\) return false;/);
+  assert.match(main, /if \(!isUiFlagKey\(key\)\) return null;/);
+});
+
+test('native chrome colours come from the live Fluent surface tokens', () => {
+  // The window background and the Windows caption overlay must equal what the
+  // stylesheet paints; the pre-redesign greys are what made the title strip and the
+  // first paint disagree with the app.
+  assert.match(main, /light: \{ background: '#f5f5f5', glyph: '#242424' \}/);
+  assert.match(main, /dark: \{ background: '#141414', glyph: '#ffffff' \}/);
+  assert.match(main, /nativeTheme\.themeSource = /, 'native controls must follow the app theme');
+  assert.doesNotMatch(main, /'#f4f5f7'|'#0b0c0e'/, 'the retired greys must not come back');
+});
+
+test('the desktop Hub path deliberately ignores the proxy environment', () => {
+  // Operator decision: a workstation's HTTP(S)_PROXY must not silently become the
+  // sync path. Only the per-provider quota collectors honour proxy env today, so a
+  // future "consistency" fix that routes these through outboundFetch is a change of
+  // behaviour and needs a new decision, not a refactor.
+  assert.doesNotMatch(main, /require\('\.\.\/shared\/outboundFetch'\)/, 'the desktop app must not proxy Hub traffic');
+  assert.match(main, /postSyncPayload\(fetch, url/);
+  assert.match(main, /fetchBufferedWithTimeout\(fetch, /);
+});
+
+test('waking from sleep re-establishes the runtime instead of waiting for a timer', () => {
+  assert.match(main, /powerMonitor\.on\('resume', handleSystemResume\)/);
+  assert.match(main, /resumeReconnectTimer = setTimeout\(\(\) => \{ startMode\(\); \}, RESUME_RECONNECT_DELAY_MS\)/);
 });

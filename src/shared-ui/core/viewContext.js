@@ -9,6 +9,8 @@
 // host-specific belongs in transport/. This module only carries pure helpers
 // that are identical in both hosts.
 
+import { clientIconPath } from './data.js';
+
 let context = null;
 
 // Keep this list next to the context validator so adding a view helper cannot
@@ -98,6 +100,26 @@ export function rerender() {
 /** Persist a preference change. */
 export function persistPrefs(patch) {
   return requireContext().savePrefs(patch);
+}
+
+/**
+ * A desktop display preference (`settings.json`), or `fallback` on a host with no
+ * settings document — the Hub dashboard always renders the fallback. Each flag
+ * reads as an opt-out from a rendering that used to be unconditional, so the
+ * fallback is what both hosts showed before the flag did anything.
+ */
+export function displayFlag(name, fallback = true) {
+  const value = requireContext().state?.desktopSettings?.[name];
+  return value === undefined ? Boolean(fallback) : Boolean(value);
+}
+
+/**
+ * A tool icon, or nothing when the display preference hides them. Every view that
+ * labels a row by tool renders this, so the opt-out has exactly one site.
+ */
+export function toolIconHtml(id) {
+  if (!displayFlag('showToolIcons', true)) return '';
+  return `<img class="client-icon" src="${clientIconPath(id)}" alt="" onerror="this.style.display='none'" />`;
 }
 
 /** Navigate to another view, optionally with a sub-tab. */

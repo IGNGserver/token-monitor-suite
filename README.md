@@ -159,7 +159,6 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **Hub-managed account quotas** — add multiple provider accounts manually, keep their credentials in the Hub, refresh quotas centrally, and distribute the results to every connected device
 - **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
 - **Usage Trends** — a home-screen activity heatmap and trend chart, plus the Trends view with streaks and stacked per-tool/per-model history (bar and K-line views) across all your devices
-- **Service status panel** — Claude, OpenAI, Cursor, and DeepSeek status pages on the Limits view's Health tab, with manual or interval re-checks
 - **Data export** — export usage as tool-agnostic CSV + JSON, manually or auto-written to a folder, for spreadsheets, Obsidian, Grafana, or scripts; see [docs/export.md](docs/export.md)
 - **Subscription records** — record by hand what each AI account actually costs; the plan label's tooltip then reports the price, the next renewal or end date, time subscribed, and the month's usage cost as a multiple of what the plan costs, for recurring plans and top-up ledgers alike
 

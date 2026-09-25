@@ -346,7 +346,6 @@ export function createHttpTransport(options = {}) {
       localCollector: false,
       updater: false,
       desktopSettings: false,
-      serviceStatus: false,
       themeEditor: false,
       accounts: true,
       subscriptions: true,

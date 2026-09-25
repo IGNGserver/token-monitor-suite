@@ -47,9 +47,8 @@ body.is-win32 .desktop-window-strip {
   gap: 9px;
   padding: 0 144px 0 16px;
   overflow: hidden;
-  background: var(--bg-elevated);
+  background: var(--bg);
   color: var(--muted);
-  border-bottom: 1px solid var(--line);
   -webkit-app-region: drag;
   user-select: none;
 }
@@ -59,6 +58,17 @@ body.is-win32 .desktop-window-title {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.01em;
+}
+
+/* `titleIconOnly` collapses the strip to the mark: the window is already labelled
+   by the taskbar and the caption buttons, so the text is the redundant half. */
+body.title-icon-only .desktop-window-title,
+body.title-icon-only .desktop-window-context {
+  display: none;
+}
+
+body.title-icon-only .desktop-window-strip {
+  padding-left: 12px;
 }
 
 body.is-win32 .desktop-window-context {

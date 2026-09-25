@@ -1,4 +1,4 @@
-import { finishFluentRender, setupFluentInteractions, syncFluentMotion, animateNavigation, animateDataUpdate, setFluentDropdownValue } from './core/fluent.js';
+import { finishFluentRender, setupFluentInteractions, syncFluentMotion, syncShellDisplayFlags, animateNavigation, animateDataUpdate, setFluentDropdownValue } from './core/fluent.js';
 import {
   capabilities,
   clearSecret,
@@ -23,14 +23,14 @@ import {
   writeRoute
 } from './transport/index.js';
 import { applyI18n, resolveLocale, t } from './core/i18n.js';
-import { configureViewContext, VIEW_HELPER_NAMES } from './core/viewContext.js';
+import { configureViewContext, displayFlag, VIEW_HELPER_NAMES } from './core/viewContext.js';
 import { syncHealthStateLabel } from './core/syncHealth.js';
 import { renderLimits } from './views/limits.js';
 import { renderHome } from './views/home.js';
 import { renderUsage, renderTokenMix } from './views/usage.js';
 import { renderDevices } from './views/devices.js';
 import { renderAccountsPage } from './views/accounts.js';
-import { readDesktopSettingsPatch } from './views/settingsDesktop.js';
+import { readDesktopSettingsPatch, desktopSettingsFieldError } from './views/settingsDesktop.js';
 import { renderSettingsPage } from './views/settings.js';
 import { usageMetricCard } from './views/rows.js';
 import {
@@ -369,6 +369,9 @@ const state = {
   desktopSettings: null,
   desktopCatalog: null,
   desktopInfo: null,
+  desktopAppUpdate: null,
+  desktopTokscale: null,
+  desktopTokscaleCheck: null,
   desktopSyncHealth: null,
   desktopSnapshotMeta: null
 };
@@ -504,9 +507,12 @@ function setStreamStatus(status, meta = {}) {
     error: 'status.error'
   };
   const live = status === 'live';
-  els.streamStatus.dataset.state = live ? 'live' : (status === 'unauthorized' || status === 'error' ? 'error' : 'offline');
-  els.streamStatusText.textContent = tr(map[status] || 'status.offline');
-  els.liveLabel.textContent = live ? tr('stats.live.on') : tr('stats.live.off');
+  // A paused collector is neither live nor broken: saying "offline" would send the
+  // user looking for a network fault.
+  const collectionPaused = isCapable('desktopSettings') && state.desktopSettings?.collectionPaused === true;
+  els.streamStatus.dataset.state = collectionPaused ? 'offline' : (live ? 'live' : (status === 'unauthorized' || status === 'error' ? 'error' : 'offline'));
+  els.streamStatusText.textContent = collectionPaused ? tr('status.paused') : tr(map[status] || 'status.offline');
+  els.liveLabel.textContent = collectionPaused ? tr('status.paused') : (live ? tr('stats.live.on') : tr('stats.live.off'));
   // Always publish the age of the displayed data: the badge alone used to read
   // "live" while the numbers could be arbitrarily old.
   const at = Number(meta.lastEventAt) || null;
@@ -715,6 +721,11 @@ function viewDescription(view = state.prefs.view) {
 function renderChrome() {
   const capabilities = state.authorization?.capabilities || state.health?.capabilities || {};
   const admin = state.authorization?.scopes?.includes('admin');
+  // Two flags act on the shell rather than a view (live dot, title strip).
+  syncShellDisplayFlags({
+    hideLiveDot: !displayFlag('showLiveDot', true),
+    titleIconOnly: displayFlag('titleIconOnly', false)
+  });
   const visibleViews = VIEWS.filter((view) => {
     if (view.id === 'accounts') return capabilities.hubAccounts !== false;
     if (view.id === 'management') return capabilities.subscriptions !== false || (capabilities.pricing !== false && admin);
@@ -795,11 +806,12 @@ function renderChrome() {
 }
 
 function rowHtml(row, { showIcon = false, sub } = {}) {
-  const icon = showIcon && row.client
-    ? `<img class="client-icon" src="${clientIconPath(row.client)}" alt="" onerror="this.style.display='none'" />`
-    : (showIcon
-      ? `<img class="client-icon" src="${clientIconPath(row.key)}" alt="" onerror="this.style.display='none'" />`
-      : `<span class="swatch" style="background:${row.color}"></span>`);
+  // A hidden tool icon falls back to the colour swatch rather than collapsing the
+  // row's leading column, so the metric columns stay aligned across lists.
+  const iconId = row.client || row.key;
+  const icon = showIcon && displayFlag('showToolIcons', true) && iconId
+    ? `<img class="client-icon" src="${clientIconPath(iconId)}" alt="" onerror="this.style.display='none'" />`
+    : `<span class="swatch" style="background:${row.color}"></span>`;
   return `
     <div class="row">
       <div class="row-main">
@@ -1061,7 +1073,7 @@ function segButtons(options, current, groupName) {
   }).join('');
 }
 
-function shareBarHtml(rows, { clientIcons = true } = {}) {
+function shareBarHtml(rows, { clientIcons = displayFlag('showToolIcons', true) } = {}) {
   if (!rows.length) return emptyHtml('empty.usage');
   return `<div class="stack">${rows.map((row) => `
     <div class="share-row">
@@ -1101,8 +1113,11 @@ function renderHero() {
   if (!onHome) return;
   const period = activePeriod();
   const stats = viewStats();
-  els.totalTokens.textContent = formatCompact(period.totalTokens || 0);
-  els.totalTokens.title = formatNumber(period.totalTokens || 0);
+  const tokens = period.totalTokens || 0;
+  // The exact figure is always available on hover; the compact form is the
+  // desktop preference and the only one the narrow hero card fits.
+  els.totalTokens.textContent = displayFlag('showCompactTotalTokens', true) ? formatCompact(tokens) : formatNumber(tokens);
+  els.totalTokens.title = formatNumber(tokens);
   els.totalCost.textContent = formatCost(period.costUsd || 0, state.prefs.currency);
   els.deviceCount.textContent = formatNumber(stats?.devices?.length || 0);
 }
@@ -1374,7 +1389,11 @@ async function saveWebSettingsForm(form) {
   state.prefs.theme = String(values.get('theme') || 'system');
   state.prefs.currency = String(values.get('currency') || 'USD');
   if (!isCapable('desktopSettings')) state.prefs.reduceMotion = String(values.get('reduceMotion') || 'system');
-  state.prefs.homeLimitAccountCount = clampHomeLimitAccountCount(values.get('homeLimitAccountCount'), 3);
+  // On desktop the quota-count control lives in the desktop group; reading the
+  // absent field here would reset it to the default on every language or theme save.
+  if (!isCapable('desktopSettings')) {
+    state.prefs.homeLimitAccountCount = clampHomeLimitAccountCount(values.get('homeLimitAccountCount'), 3);
+  }
   savePrefs({
     language: state.prefs.language,
     theme: state.prefs.theme,
@@ -1426,6 +1445,16 @@ let renderPending = false;
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && renderPending) render();
 });
+
+// The desktop window delays its own reveal until this fires, so a reopened window
+// never paints the shell's static "0" placeholders first. The main process keeps a
+// timeout fallback, so an unreachable collector still shows the window.
+let contentReadySignalled = false;
+function signalContentReady() {
+  if (contentReadySignalled || !state.stats) return;
+  contentReadySignalled = true;
+  getTransport().desktop?.signalContentReady?.();
+}
 
 function render() {
   // Continue accepting snapshots while hidden, but rebuild the DOM only once
@@ -1560,6 +1589,8 @@ function applyStatsSnapshot(stats, meta = null) {
     void loadSubscriptions({ force: true, preserveDraft: hasDirtyFormDraft('subscription:') });
   }
   render();
+  // Painted with real data: release a desktop window that is waiting to reveal.
+  signalContentReady();
 }
 
 async function refreshStats() {
@@ -2849,6 +2880,11 @@ function bindEvents() {
     if (!control) return;
     const form = control.closest('[data-desktop-settings]');
     if (!form) return;
+    const fieldError = desktopSettingsFieldError(form, control.name);
+    if (fieldError) {
+      showToast(fieldError);
+      return;
+    }
     void saveDesktopSettings(readDesktopSettingsPatch(form));
   });
 
@@ -3054,16 +3090,20 @@ async function loadDesktopSettings() {
   const desktop = getTransport().desktop;
   if (!desktop) return;
   try {
-    const [settings, catalog, info, syncHealth, snapshotMeta] = await Promise.all([
+    const [settings, catalog, info, syncHealth, snapshotMeta, appUpdateState, tokscaleState] = await Promise.all([
       desktop.getSettings(),
       desktop.getCatalog ? desktop.getCatalog() : Promise.resolve({}),
       desktop.getAppInfo ? desktop.getAppInfo() : Promise.resolve({}),
       desktop.getSyncHealth ? desktop.getSyncHealth() : Promise.resolve(null),
-      desktop.getSnapshotMeta ? desktop.getSnapshotMeta() : Promise.resolve(null)
+      desktop.getSnapshotMeta ? desktop.getSnapshotMeta() : Promise.resolve(null),
+      desktop.getAppUpdateState ? desktop.getAppUpdateState() : Promise.resolve(null),
+      desktop.getTokscaleStatus ? desktop.getTokscaleStatus() : Promise.resolve(null)
     ]);
     state.desktopSettings = settings || {};
     state.desktopCatalog = catalog || {};
     state.desktopInfo = info || {};
+    state.desktopAppUpdate = appUpdateState || null;
+    state.desktopTokscale = tokscaleState || null;
     state.desktopSyncHealth = syncHealth || null;
     state.desktopSnapshotMeta = snapshotMeta || syncHealth?.snapshot || null;
     renderDesktopSyncStatus();
@@ -3117,6 +3157,14 @@ async function runDesktopAction(action, element) {
         showToast(result?.ok === false ? tr('error.generic') : tr('toast.saved'));
         break;
       }
+      case 'export-diagnostics': {
+        // The save dialog is where the user reads the bundle, so a cancelled dialog
+        // is a normal outcome and says nothing.
+        const result = await desktop.exportDiagnostics?.();
+        if (result?.ok) showToast(tr('desktop.settings.diagnosticsWritten'));
+        else if (result && result.canceled !== true) showToast(result.error || tr('error.generic'));
+        break;
+      }
       case 'open-user-data':
         await desktop.openUserData();
         break;
@@ -3127,6 +3175,37 @@ async function runDesktopAction(action, element) {
         element?.removeAttribute('disabled');
         break;
       }
+      case 'download-update':
+        await desktop.downloadAppUpdate();
+        state.desktopAppUpdate = await desktop.getAppUpdateState();
+        render();
+        break;
+      case 'install-update': {
+        // This quits the app, so it never runs on a stray click.
+        const confirmed = await confirmAction(tr('desktop.settings.installUpdate'), { danger: true });
+        if (!confirmed) return;
+        await desktop.installAppUpdate();
+        break;
+      }
+      case 'dismiss-update':
+        await desktop.dismissAppUpdate(state.desktopAppUpdate?.latest?.version);
+        state.desktopAppUpdate = await desktop.getAppUpdateState();
+        render();
+        break;
+      case 'tokscale-check':
+        state.desktopTokscaleCheck = await desktop.checkTokscaleNpm();
+        render();
+        break;
+      case 'tokscale-download':
+        state.desktopTokscaleCheck = await desktop.downloadTokscaleFromNpm();
+        state.desktopTokscale = await desktop.getTokscaleStatus();
+        render();
+        break;
+      case 'tokscale-reset':
+        state.desktopTokscale = await desktop.resetTokscaleToBundled();
+        state.desktopTokscaleCheck = null;
+        render();
+        break;
       case 'clear-session-archive': {
         const confirmed = await confirmAction(tr('desktop.settings.sessionArchiveConfirm'), { danger: true });
         if (!confirmed) return;
@@ -3220,6 +3299,17 @@ async function init() {
     });
     desktop?.onOpenSettings?.(() => switchView('settings'));
     desktop?.onOpenView?.((view) => switchView(normalizeViewId(view)));
+    // Both panels below are driven by the main process, which owns the download
+    // and install lifecycles; without these they would only ever show boot state.
+    desktop?.onAppUpdatePush?.((next) => {
+      state.desktopAppUpdate = next || null;
+      render();
+    });
+    desktop?.onTokscalePush?.((payload) => {
+      if (payload?.status) state.desktopTokscale = payload.status;
+      else if (payload?.npm || payload?.newer != null) state.desktopTokscaleCheck = payload;
+      render();
+    });
   }
   renderChrome();
   // Paint the shell before any remote request. On desktop this is what keeps

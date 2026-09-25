@@ -9,7 +9,6 @@ import {
   formatRelative
 } from '../core/format.js';
 import {
-  clientIconPath,
   mapRows,
   modelColor,
   modelRows,
@@ -18,7 +17,7 @@ import {
   projectRows,
   sessionRows
 } from '../core/data.js';
-import { tr, escapeHtml, appState, viewHelper } from '../core/viewContext.js';
+import { tr, escapeHtml, appState, toolIconHtml, viewHelper } from '../core/viewContext.js';
 import { renderListView, usageMetricCard } from './rows.js';
 
 const panel = (...args) => viewHelper('panel')(...args);
@@ -47,7 +46,7 @@ export function renderTools() {
     return `
       <button type="button" class="tool-select-row${active ? ' selected' : ''}" aria-pressed="${active}" aria-label="${escapeHtml(`${row.name}, ${formatNumber(row.value)} tokens, ${formatCost(row.cost, appState().prefs.currency)}`)}" data-select-tool="${escapeHtml(row.key)}">
         <div class="row-main">
-          <img class="client-icon" src="${clientIconPath(row.key)}" alt="" onerror="this.style.display='none'" />
+          ${toolIconHtml(row.key)}
           <div class="row-copy">
             <div class="row-name">${escapeHtml(row.name)}</div>
             <div class="row-sub">${Math.round((row.value / Math.max(1, period.totalTokens || 0)) * 100)}%</div>
@@ -123,9 +122,9 @@ export function renderUsageSubnav() {
 }
 
 export function usageRowSummary(row, { icon = false, detail = '' } = {}) {
-  const iconHtml = icon
-    ? `<img class="client-icon" src="${clientIconPath(row.client || row.key)}" alt="" onerror="this.style.display='none'" />`
-    : `<span class="swatch" style="background:${row.color || 'var(--accent)'}"></span>`;
+  // A hidden tool icon falls back to the colour swatch, so the row keeps its shape.
+  const iconHtml = (icon && toolIconHtml(row.client || row.key))
+    || `<span class="swatch" style="background:${row.color || 'var(--accent)'}"></span>`;
   const suffix = row.percent != null ? ` · ${Math.round(row.percent)}%` : '';
   return `<div class="usage-table-row-main"><div class="row-main">${iconHtml}<div class="row-copy"><div class="row-name">${escapeHtml(row.name)}</div><div class="row-sub">${escapeHtml(`${row.sub || ''}${suffix}`.replace(/^ · | · $/g, ''))}</div></div></div><div class="row-metrics"><div class="row-value">${formatNumber(row.value)}</div><div class="row-cost">${formatCost(row.cost, appState().prefs.currency)}</div></div>${detail ? `<span class="usage-row-chevron">${uiIcon('chevronDown')}</span>` : ''}</div>`;
 }

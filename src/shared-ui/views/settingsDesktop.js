@@ -10,7 +10,7 @@
 // silently drop a user's configuration on upgrade, so the field `name`
 // attributes are the compatibility surface.
 
-import { tr, escapeHtml, settingsOptionList } from '../core/viewContext.js';
+import { tr, escapeHtml, appState, settingsOptionList } from '../core/viewContext.js';
 
 const SOFTWARE_GLASS = [['system', 'settings.appearance.glassEffectSystem'], ['off', 'settings.appearance.glassEffectTransparent']];
 const REDUCE_MOTION = [
@@ -67,6 +67,51 @@ function tokenListField(name, ids, selected, labelKey) {
   </div>`;
 }
 
+function actionRow(labelHtml, buttonsHtml) {
+  return `<div class="desktop-setting-row"><span class="row-sub">${labelHtml}</span><span class="drawer-actions">${buttonsHtml}</span></div>`;
+}
+
+function actionButton(action, labelKey, appearance = 'transparent') {
+  return `<fluent-button appearance="${appearance}" type="button" class="ghost-btn" data-desktop-action="${escapeHtml(action)}">${escapeHtml(tr(labelKey))}</fluent-button>`;
+}
+
+// The updater and the collector resolver already report every phase over IPC; these
+// panels only render what they say, so a menu-bar check and a main-process push
+// agree on what the user can do next.
+function updateRows() {
+  const update = appState()?.desktopAppUpdate;
+  if (!update?.currentVersion) return [];
+  const rows = [actionRow(
+    escapeHtml(`v${update.currentVersion}${update.latest?.version ? ` → ${update.latest.version}` : ''} · ${update.hasUpdate ? tr('desktop.settings.updateAvailable') : tr('desktop.settings.upToDate')}`),
+    `${update.hasUpdate && !update.downloaded && update.installSupported ? actionButton('download-update', 'desktop.settings.downloadUpdate') : ''}${update.downloaded && update.installSupported ? actionButton('install-update', 'desktop.settings.installUpdate', 'primary') : ''}${update.hasUpdate ? actionButton('dismiss-update', 'desktop.settings.dismissUpdate') : ''}`
+  )];
+  if (update.installPhase === 'downloading') {
+    rows.push(`<p class="row-sub">${escapeHtml(tr('desktop.settings.updateProgress', { pct: Math.round(Number(update.installProgress) || 0) }))}</p>`);
+  }
+  if (!update.installSupported && update.installSupportReason) {
+    rows.push(`<p class="row-sub">${escapeHtml(update.installSupportReason)}</p>`);
+  }
+  return rows;
+}
+
+function tokscaleRows() {
+  const status = appState()?.desktopTokscale;
+  if (!status || status.supported === false) return [];
+  const current = status.current || status.bundled || {};
+  const rows = [actionRow(
+    escapeHtml(tr('desktop.settings.tokscaleStatus', { source: current.source || 'bundled', version: current.version || '—' })),
+    actionButton('tokscale-check', 'desktop.settings.tokscaleCheck')
+  )];
+  const check = appState()?.desktopTokscaleCheck;
+  if (check?.supported && check.newer && check.npm?.version) {
+    rows.push(actionRow(escapeHtml(`v${check.npm.version}`), actionButton('tokscale-download', 'desktop.settings.tokscaleDownload')));
+  }
+  if (current.source && current.source !== 'bundled') {
+    rows.push(`<div class="drawer-actions">${actionButton('tokscale-reset', 'desktop.settings.tokscaleReset')}</div>`);
+  }
+  return rows;
+}
+
 /**
  * @param {object} settings  Current settings (redacted) from the main process.
  * @param {object} catalog   Lists owned by the shared modules.
@@ -81,13 +126,21 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
 
   // --- Collection ---------------------------------------------------------
   const collectionRows = [];
+  // First row of the group, because "why is nothing updating?" is the question this
+  // answers; the tray checkbox and the hero badge mirror it.
+  collectionRows.push(checkbox('collectionPaused', 'desktop.settings.collectionPaused', settings.collectionPaused === true));
   collectionRows.push(tokenListField('clients', clients, settings.clients, 'desktop.settings.trackedClients'));
   collectionRows.push(dropdownField('collectionMode', 'desktop.settings.collectionMode',
     [['live', tr('desktop.settings.modeLive')], ['smart', tr('desktop.settings.modeSmart')], ['interval', tr('desktop.settings.modeInterval')]],
     settings.collectionMode || 'live', { id: 'collectionModeInput' }));
+  // Offer the collector's sanctioned cadence, plus any value already stored, so
+  // saving the form never silently rewrites an interval the list has moved past.
+  const intervalOptions = [...new Set([
+    ...(catalog.collectionModeIntervals || []),
+    Number(settings.collectionIntervalMs) || 5 * 60 * 1000
+  ])].sort((a, b) => a - b);
   collectionRows.push(dropdownField('collectionIntervalMs', 'desktop.settings.collectionInterval',
-    (catalog.collectionModeIntervals || [5 * 60 * 1000, 10 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000])
-      .map((ms) => [String(ms), `${Math.round(ms / 60000)} min`]),
+    intervalOptions.map((ms) => [String(ms), `${Math.round(ms / 60000)} min`]),
     String(settings.collectionIntervalMs ?? 300000), { id: 'collectionIntervalInput' }));
   collectionRows.push(checkbox('projectsEnabled', 'desktop.settings.projectsEnabled', settings.projectsEnabled === true));
   collectionRows.push(checkbox('historyEnabled', 'desktop.settings.historyEnabled', settings.historyEnabled !== false));
@@ -95,11 +148,24 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
     (catalog.historyIntervals || []).map((ms) => [String(ms), `${Math.round(ms / 60000)} min`]),
     String(settings.historyIntervalMs ?? 900000)));
   collectionRows.push(checkbox('sessionUsageArchiveEnabled', 'desktop.settings.sessionArchive', settings.sessionUsageArchiveEnabled !== false));
+  // Watching the tools' own files is what produces the 3-5 second refresh promise,
+  // so the toggle and its debounce belong next to the tick interval, not hidden.
+  collectionRows.push(checkbox('watchEnabled', 'desktop.settings.watchEnabled', settings.watchEnabled !== false));
+  collectionRows.push(dropdownField('watchDebounceMs', 'desktop.settings.watchDebounce',
+    [500, 1000, 1500, 3000, 5000].map((ms) => [String(ms), `${ms / 1000}s`]),
+    String(settings.watchDebounceMs ?? 1500)));
   if (isWindows) {
     collectionRows.push(checkbox('wslScanEnabled', 'desktop.settings.wslScan', settings.wslScanEnabled !== false));
   }
   collectionRows.push(textField('allTimeSince', 'desktop.settings.allTimeSince', settings.allTimeSince || '2024-01-01', { placeholder: '2024-01-01' }));
   groups.push(group('collection', 'desktop.settings.groupCollection', collectionRows.join('')));
+
+  // The collector binary is a separate artifact from the app, and a broken or
+  // stale one silences every number on screen, so its state is inspectable here.
+  const engineRows = tokscaleRows();
+  if (engineRows.length) {
+    groups.push(group('engine', 'desktop.settings.tokscale', engineRows.join('')));
+  }
 
   // --- Data export --------------------------------------------------------
   groups.push(group('export', 'desktop.settings.groupExport', [
@@ -117,6 +183,13 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
   // --- Window & appearance ------------------------------------------------
   const appearanceRows = [];
   appearanceRows.push(dropdownField('systemGlass', 'desktop.settings.systemGlass', optionLabels(SOFTWARE_GLASS), settings.systemGlass === false ? 'off' : 'system'));
+  if (isWindows) {
+    // Which material fills the window when the backdrop is on. Offered only where
+    // Electron can actually apply a background material.
+    appearanceRows.push(dropdownField('windowsBackdrop', 'desktop.settings.windowsBackdrop',
+      [['acrylic', tr('desktop.settings.backdropAcrylic')], ['mica', tr('desktop.settings.backdropMica')]],
+      settings.windowsBackdrop || 'acrylic'));
+  }
   if (isMac) {
     appearanceRows.push(dropdownField('macosGlassStyle', 'desktop.settings.macosGlassStyle',
       [['vibrancy', tr('desktop.settings.glassVibrancy')], ['liquid-glass', tr('desktop.settings.glassLiquid')]],
@@ -126,10 +199,11 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
   appearanceRows.push(checkbox('showToolIcons', 'desktop.settings.showToolIcons', settings.showToolIcons !== false));
   appearanceRows.push(checkbox('showLiveDot', 'desktop.settings.showLiveDot', settings.showLiveDot !== false));
   appearanceRows.push(checkbox('showCompactTotalTokens', 'desktop.settings.showCompactTotalTokens', settings.showCompactTotalTokens === true));
-  // The title-bar icon is the window-title mark; Windows shows the app icon there
-  // instead, so the control is offered only where it has an effect.
-  if (!isWindows) {
-    appearanceRows.push(checkbox('titleIconOnly', 'desktop.settings.titleIconOnly', settings.titleIconOnly !== false));
+  // The web content owns the title strip only on Windows (Electron's
+  // titleBarOverlay); macOS and Linux have no product-drawn title text to collapse,
+  // so the switch is offered only where it has an effect.
+  if (isWindows) {
+    appearanceRows.push(checkbox('titleIconOnly', 'desktop.settings.titleIconOnly', settings.titleIconOnly === true));
   }
   appearanceRows.push(numberField('zoomFactor', 'desktop.settings.zoom', settings.zoomFactor ?? 1, { min: 0.7, max: 1.6, step: 0.05 }));
   groups.push(group('appearance', 'desktop.settings.groupAppearance', appearanceRows.join('')));
@@ -158,14 +232,24 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
     generalRows.push(`<p class="row-sub">${escapeHtml(tr('desktop.settings.startAtLoginUnavailable'))}</p>`);
   }
   generalRows.push(checkbox('automaticAppUpdates', 'desktop.settings.automaticAppUpdates', settings.automaticAppUpdates === true));
+  // Closing the window is not quitting the app by default; the collector keeps
+  // running and the tray is the way back.
+  generalRows.push(checkbox('closeToTray', 'desktop.settings.closeToTray', settings.closeToTray !== false));
+  if (info.loginItemSupported) {
+    generalRows.push(checkbox('startHidden', 'desktop.settings.startHidden', settings.startHidden !== false));
+  }
   generalRows.push(checkbox('discordRpcEnabled', 'desktop.settings.discordRpc', settings.discordRpcEnabled === true));
   generalRows.push(`<div class="desktop-setting-row">
       <span class="row-sub">${escapeHtml(tr('desktop.settings.appVersion'))}: <strong data-app-version>—</strong></span>
       <fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="check-updates">${escapeHtml(tr('desktop.settings.checkUpdates'))}</fluent-button>
     </div>`);
+  generalRows.push(...updateRows());
   generalRows.push(`<div class="desktop-setting-row">
       <span class="row-sub">${escapeHtml(tr('desktop.settings.openConfigHint'))}</span>
-      <fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="open-user-data">${escapeHtml(tr('desktop.settings.openConfig'))}</fluent-button>
+      <span class="drawer-actions">
+        <fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="export-diagnostics">${escapeHtml(tr('desktop.settings.exportDiagnostics'))}</fluent-button>
+        <fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="open-user-data">${escapeHtml(tr('desktop.settings.openConfig'))}</fluent-button>
+      </span>
     </div>`);
   groups.push(group('general', 'desktop.settings.groupGeneral', generalRows.join('')));
 
@@ -191,11 +275,6 @@ export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
   prefRows.push(checkbox('showHomeLimitBars', 'desktop.settings.showHomeLimitBars', settings.showHomeLimitBars === true));
   prefRows.push(checkbox('showHomeLimitProviderNames', 'desktop.settings.showHomeLimitProviderNames', settings.showHomeLimitProviderNames === true));
   prefRows.push(numberField('homeLimitAccountCount', 'desktop.settings.homeLimitAccountCount', settings.homeLimitAccountCount ?? 3, { min: 1, max: 12 }));
-  prefRows.push(tokenListField('serviceProviderDisplayOrder', catalog.serviceProviders || [], settings.serviceProviderDisplayOrder, 'desktop.settings.serviceProviderOrder'));
-  prefRows.push(tokenListField('hiddenServiceProviders', catalog.hiddenServiceProviders || [], settings.hiddenServiceProviders, 'desktop.settings.hiddenServiceProviders'));
-  prefRows.push(dropdownField('serviceStatusRefreshMs', 'desktop.settings.serviceStatusRefresh',
-    [0, 60000, 120000, 300000, 900000, 1800000].map((ms) => [String(ms), ms === 0 ? tr('desktop.settings.refreshOff') : `${Math.round(ms / 60000)} min`]),
-    String(settings.serviceStatusRefreshMs ?? 60000)));
   prefRows.push(dropdownField('heatmapMetric', 'desktop.settings.heatmapMetric',
     [['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')]],
     settings.heatmapMetric || 'cost'));
@@ -272,20 +351,46 @@ function group(id, titleKey, body) {
 const CSV_FIELDS = Object.freeze([
   'clients', 'viewDisplayOrder', 'hiddenViews', 'clientDisplayOrder', 'hiddenClients',
   'pinnedClients', 'homeModuleOrder', 'hiddenHomeModules', 'homeLimitProviderOrder',
-  'hiddenHomeLimitProviders', 'serviceProviderDisplayOrder', 'hiddenServiceProviders'
+  'hiddenHomeLimitProviders'
 ]);
 
 // Settings whose value is a JSON object or array.
 const JSON_FIELDS = Object.freeze(['currencyRates', 'themeColors', 'vendorColors', 'customModelPricing']);
 
-const NUMERIC_FIELDS = new Set(['collectionIntervalMs', 'historyIntervalMs', 'exportIntervalMs', 'syncUploadIntervalMs', 'zoomFactor', 'homeLimitAccountCount', 'serviceStatusRefreshMs']);
+const NUMERIC_FIELDS = new Set(['collectionIntervalMs', 'historyIntervalMs', 'exportIntervalMs', 'syncUploadIntervalMs', 'zoomFactor', 'homeLimitAccountCount', 'watchDebounceMs']);
 const CHECKBOX_FIELDS = new Set([
   'projectsEnabled', 'historyEnabled', 'sessionUsageArchiveEnabled', 'wslScanEnabled',
+  'collectionPaused', 'closeToTray', 'startHidden',
+  'watchEnabled',
   'exportAutoEnabled', 'showToolIcons', 'showLiveDot', 'showCompactTotalTokens',
   'titleIconOnly', 'startAtLogin', 'automaticAppUpdates', 'discordRpcEnabled',
   'allowInsecureHubHttp', 'showLimitSource', 'maskLimitAccountEmails',
   'showHomeLimitBars', 'showHomeLimitProviderNames'
 ]);
+
+/**
+ * A field-level problem the main process would otherwise only *silently* correct
+ * (an unparseable JSON map is dropped, a bad date falls back to the default).
+ * Returning the message lets the form refuse the write and say why.
+ */
+export function desktopSettingsFieldError(form, name) {
+  if (!form || !name) return '';
+  const input = form.querySelector(`[name="${name}"]`);
+  if (!input) return '';
+  const value = String(input.value ?? '').trim();
+  if (JSON_FIELDS.includes(name)) {
+    try {
+      JSON.parse(value || (name === 'customModelPricing' ? '[]' : '{}'));
+    } catch {
+      return tr('desktop.settings.jsonInvalid');
+    }
+    return '';
+  }
+  if (name === 'allTimeSince' && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return tr('desktop.settings.allTimeSinceInvalid');
+  }
+  return '';
+}
 
 /** Read a form back into a settings patch. */
 export function readDesktopSettingsPatch(form) {
@@ -306,10 +411,14 @@ export function readDesktopSettingsPatch(form) {
     const input = form.querySelector(`[name="${name}"]`);
     if (input) patch[name] = String(input.value || '').trim();
   }
-  for (const name of ['collectionMode', 'systemGlass', 'macosGlassStyle', 'reduceMotion', 'heatmapMetric', 'homeActiveDaysWindow']) {
+  for (const name of ['collectionMode', 'macosGlassStyle', 'windowsBackdrop', 'reduceMotion', 'heatmapMetric', 'homeActiveDaysWindow']) {
     const input = form.querySelector(`[name="${name}"]`);
     if (input) patch[name] = String(input.value || '');
   }
+  // The glass dropdown offers "system" and "transparent"; the settings document
+  // stores a boolean because that is what the window-material code reads.
+  const systemGlass = form.querySelector('[name="systemGlass"]');
+  if (systemGlass) patch.systemGlass = String(systemGlass.value || '') !== 'off';
   const barsShow = form.querySelector('[name="showLimitUsed"]');
   if (barsShow) patch.showLimitUsed = String(barsShow.value || '') === 'used';
   const hubMode = form.querySelector('fluent-radio-group[name="hubMode"]');

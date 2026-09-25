@@ -10,6 +10,7 @@
 
 export const SYNC_HEALTH_STATE_KEYS = Object.freeze({
   idle: 'settings.sync.healthState.idle',
+  paused: 'settings.sync.healthState.paused',
   collecting: 'settings.sync.healthState.collecting',
   relay: 'settings.sync.healthState.relay',
   ok: 'settings.sync.healthState.ok',

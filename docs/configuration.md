@@ -29,13 +29,14 @@ Device-local groups (desktop app only):
 
 | Group | What it controls |
 |---|---|
-| Collection | Tracked tools, collection mode (`live` / `smart` / `interval`) and interval, project metadata, trend history and its interval, **Keep usage from deleted sessions**, `allTimeSince`, and — on Windows — the built-in WSL scan toggle. |
+| Collection | **Pause collection** (mirrored in the tray menu and the sidebar status), tracked tools, collection mode (`live` / `smart` / `interval`) and interval, project metadata, trend history and its interval, the file-watch toggle with its debounce, **Keep usage from deleted sessions**, `allTimeSince`, and — on Windows — the built-in WSL scan toggle. |
+| Collector engine | Which collector binary is in use (bundled or downloaded, with its version), plus actions to check npm for a newer one, download it, or fall back to the bundled copy. Absent where the updater is unsupported. |
 | Data export | Automatic export toggle, export folder, export interval, and export-now. |
-| Window & appearance | Native window backdrop (plus the macOS glass style choice), motion, tool icons, live indicator, compact token total, title icon, and zoom. |
+| Window & appearance | Native window backdrop (plus the Windows material choice and the macOS glass style), motion, tool icons, live indicator, compact token total, the Windows title-strip toggle, and zoom. |
 | Limit display | Presentation of received quota windows only: show source, mask account e-mails, remaining vs used bars. Accounts and credentials live on the Hub — the device does not discover local developer-tool accounts. |
-| Startup & updates | Start at login (with the Linux AppImage caveat), automatic update downloads, check-for-updates now, Discord Rich Presence, and open the data folder. |
+| Startup & updates | Start at login (with the Linux AppImage caveat), start hidden when launched at sign-in, keep running in the tray when the window is closed, automatic update downloads, check-for-updates now with the download / restart-to-install / ignore-this-version actions, Discord Rich Presence, export a redacted diagnostics bundle, and open the data folder. |
 | Device identity | The device ID this machine reports to the Hub. |
-| View & list preferences | Per-list visibility and order for views, tools, home modules, home limit providers, and service providers; the home limit bar count; the service-status refresh cadence; the heatmap metric; and the active-days window. |
+| View & list preferences | Per-list visibility and order for views, tools, home modules, and home limit providers; the home limit bar count; the heatmap metric; and the active-days window. |
 | Currency & advanced | The exchange-rate override map and the theme colour map, both edited as JSON. |
 | Hub connection | **Local only** (no Hub) or **Connect to a hub** (Docker Compose Hub URL, upload interval, and the trusted-LAN HTTP opt-in). |
 

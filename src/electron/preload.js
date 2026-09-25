@@ -54,7 +54,6 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   // --- Shared-UI transport surface -----------------------------------------
   request: (path, options) => ipcRenderer.invoke('transport:request', path, options),
   validateSecret: (secret) => ipcRenderer.invoke('hub:validate-secret', secret),
-  getCapabilities: () => ipcRenderer.invoke('transport:capabilities'),
   readFlag: (key) => ipcRenderer.invoke('transport:flag:read', key),
   writeFlag: (key, value) => ipcRenderer.invoke('transport:flag:write', key, value),
   confirm: (message, options) => ipcRenderer.invoke('ui:confirm', message, options),
@@ -72,14 +71,12 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   clearSessionUsageArchive: () => ipcRenderer.invoke('sessionUsageArchive:clear'),
   lookupModelPricing: (modelId) => ipcRenderer.invoke('pricing:lookup', modelId),
   previewAppearance: (patch) => ipcRenderer.invoke('appearance:preview', patch),
-  getStats: (options) => ipcRenderer.invoke('stats:get', options),
   getCustomRangeStats: (range) => ipcRenderer.invoke('stats:getCustomRange', range),
   getSessionDetail: (args) => ipcRenderer.invoke('session:getDetail', args),
   getStreamStatus: () => ipcRenderer.invoke('stream:status'),
   recoverNow: () => ipcRenderer.invoke('sync:recover'),
   getSyncHealth: () => ipcRenderer.invoke('sync:health'),
   getSnapshotMeta: () => ipcRenderer.invoke('desktop:snapshot-meta'),
-  getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
   // The standalone trends window is gone; the trends view renders in the main
   // window. History is fetched through the transport's /api/history route.
   getHistory: () => ipcRenderer.invoke('history:get'),
@@ -127,6 +124,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     refresh: (id) => ipcRenderer.invoke('hubAccounts:refresh', id)
   },
   exportNow: () => ipcRenderer.invoke('export:now'),
+  exportDiagnostics: () => ipcRenderer.invoke('diagnostics:export'),
   pickExportDir: () => ipcRenderer.invoke('export:pickAutoDir'),
   getTokscaleStatus: () => ipcRenderer.invoke('tokscale:getStatus'),
   checkTokscaleNpm: () => ipcRenderer.invoke('tokscale:checkNpm'),

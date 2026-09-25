@@ -13,6 +13,10 @@ const DESKTOP_FILE_NAME = 'token-monitor.desktop';
 // now, but `isAutostartEnabled` still recognises the marker so an existing
 // autostart entry is not silently reported as off after an update.
 const STARTED_AT_LOGIN_ARG = '--started-at-login';
+// Written into the Exec line when a sign-in launch should stay in the tray. It is
+// a real instruction (unlike the retired marker above), so the reader must accept
+// entries with and without it.
+const HIDDEN_LAUNCH_ARG = '--hidden';
 
 function launchPath({ env = process.env, appPath = '' } = {}) {
   return String(appPath || env.APPIMAGE || '').trim();
@@ -37,13 +41,15 @@ function quoteExecArgument(value) {
   return `"${quoted.replace(/\\/g, '\\\\')}"`;
 }
 
-function desktopFileContents(executablePath) {
+function desktopFileContents(executablePath, { hidden = false } = {}) {
   const exec = quoteExecArgument(executablePath);
   return [
     '[Desktop Entry]',
     'Type=Application',
     'Name=Token Monitor',
-    `Exec=${exec}`,
+    // The argument belongs to the Exec line outside the quoted path, which is how
+    // the Desktop Entry spec separates the program from its arguments.
+    `Exec=${exec}${hidden ? ` ${HIDDEN_LAUNCH_ARG}` : ''}`,
     'X-GNOME-Autostart-enabled=true',
     ''
   ].join('\n');
@@ -57,7 +63,9 @@ function isAutostartEnabled(options = {}) {
     const contents = fs.readFileSync(desktopFilePath({ env }), 'utf8');
     const execLine = contents.split(/\r?\n/).find((line) => line.startsWith('Exec='));
     const expected = `Exec=${quoteExecArgument(appPath)}`;
-    return execLine === expected || execLine === `${expected} ${STARTED_AT_LOGIN_ARG}`;
+    return execLine === expected
+      || execLine === `${expected} ${STARTED_AT_LOGIN_ARG}`
+      || execLine === `${expected} ${HIDDEN_LAUNCH_ARG}`;
   }
   catch (_) { return false; }
 }
@@ -70,7 +78,7 @@ function setAutostartEnabled(enabled, options = {}) {
     if (enabled) {
       if (!appPath) return false;
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, desktopFileContents(appPath), 'utf8');
+      fs.writeFileSync(filePath, desktopFileContents(appPath, { hidden: Boolean(options.hidden) }), 'utf8');
     } else {
       fs.rmSync(filePath, { force: true });
     }
@@ -84,5 +92,6 @@ module.exports = {
   desktopFileContents,
   isAutostartEnabled,
   setAutostartEnabled,
+  HIDDEN_LAUNCH_ARG,
   STARTED_AT_LOGIN_ARG
 };

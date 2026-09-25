@@ -44,7 +44,9 @@
     return platform === 'win32' && windowsBuildNumber(osRelease) >= WINDOWS_NATIVE_MIN_BUILD;
   }
 
-  function windowsSurfaceProfile({ platform = '', osRelease = '', systemGlass = true } = {}) {
+  // `backdropMode` is the operator's material choice; it only reaches the window on
+  // the builds where Electron can apply a background material at all.
+  function windowsSurfaceProfile({ platform = '', osRelease = '', systemGlass = true, backdropMode = WINDOWS_BACKDROP_MICA } = {}) {
     if (platform !== 'win32' || systemGlass === false) {
       return {
         kind: WINDOWS_SURFACE_NONE,
@@ -57,7 +59,7 @@
       return {
         kind: WINDOWS_SURFACE_MICA,
         nativeBackdrop: true,
-        nativeMaterial: 'mica',
+        nativeMaterial: windowsElectronBackgroundMaterial(backdropMode),
         useLegacyAccent: false
       };
     }

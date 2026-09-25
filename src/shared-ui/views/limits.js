@@ -1,4 +1,4 @@
-// Limits view: per-provider quota cards plus the service-status panel.
+// Limits view: per-provider quota cards and their reset windows.
 //
 // Extracted from app.js so a view can be read and tested on its own. Renders
 // from the app's shared state; anything host-specific goes through transport/.
@@ -9,18 +9,19 @@ import {
 } from '../core/format.js';
 import {
   ALL_PROVIDERS_OPTION_VALUE,
-  clientIconPath,
   clientLabel,
   limitCards,
   limitRemainingTone,
+  maskAccountEmail,
   statusRows
 } from '../core/data.js';
-import { tr, escapeHtml, appState, viewHelper } from '../core/viewContext.js';
+import { tr, escapeHtml, appState, displayFlag, toolIconHtml, viewHelper } from '../core/viewContext.js';
 
 const emptyHtml = (key) => viewHelper('emptyHtml')(key);
 const panel = (...args) => viewHelper('panel')(...args);
 const viewStats = (...args) => viewHelper('viewStats')(...args);
 const usageMetricCard = (...args) => viewHelper('usageMetricCard')(...args);
+const showUsedQuotaBars = () => displayFlag('showLimitUsed', false);
 
 export function localizeWindowLabel(window) {
   if (window?.kind === 'balanceUsd') return tr('limits.balanceUsd');
@@ -66,9 +67,12 @@ export function renderSingleLimitWindow(window) {
   const isBalanceKind = window.kind === 'balance' || window.kind === 'balanceUsd';
   const showMeter = window.showMeter !== false && window.remaining != null && !isBalanceKind;
   const tone = showMeter ? limitRemainingTone(window.remaining) : 'unknown';
+  // The bar can read either way round, but the tone keeps describing how much is
+  // left, so "low quota" stays red whichever way the number is phrased.
+  const meterFill = showUsedQuotaBars() ? 100 - window.remaining : window.remaining;
   const primary = (isBalanceKind || !showMeter)
     ? (window.value || (window.remaining != null ? `${Math.round(window.remaining)}%` : '—'))
-    : `${Math.round(window.remaining)}%`;
+    : `${Math.round(meterFill)}%`;
   const metricHint = window.metric === 'credits' ? tr('limits.credits') : window.metric === 'resets' ? tr('limits.resetCredits') : '';
   const label = window.displayLabel || localizeWindowLabel(window);
   const isWide = window.kind === 'named' || window.kind === 'resetCredits' || isBalanceKind;
@@ -79,7 +83,7 @@ export function renderSingleLimitWindow(window) {
       <span>${escapeHtml(label)}${metricHint ? ` · ${escapeHtml(metricHint)}` : ''}</span>
       <strong class="remaining-tone remaining-tone-${tone}">${escapeHtml(String(primary))}</strong>
     </div>
-    ${showMeter ? `<div class="meter meter-${limitRemainingTone(window.remaining)}"><span style="width:${Math.max(0, Math.min(100, window.remaining))}%"></span></div>` : '<div class="limit-balance-line"></div>'}
+    ${showMeter ? `<div class="meter meter-${tone}"><span style="width:${Math.max(0, Math.min(100, meterFill))}%"></span></div>` : '<div class="limit-balance-line"></div>'}
     <div class="row-sub" style="margin-top:8px">
       ${window.value && showMeter ? escapeHtml(window.value) : ''}
       ${window.detail ? escapeHtml(window.detail) : ''}
@@ -164,17 +168,20 @@ export function renderLimitCards(cards, { compact = false, hideProvider = false 
   return `
     <div class="limit-list${compact ? ' limit-list-compact' : ''}">
       ${cards.map((card) => {
+        const account = card.accountEmail && card.name !== card.accountEmail
+          ? (displayFlag('maskLimitAccountEmails', false) ? maskAccountEmail(card.accountEmail) : card.accountEmail)
+          : '';
         const sub = [
           hideProvider ? '' : clientLabel(card.provider),
           card.plan || '',
-          card.source ? String(card.source).toUpperCase() : '',
-          card.accountEmail && card.name !== card.accountEmail ? card.accountEmail : ''
+          displayFlag('showLimitSource', true) && card.source ? String(card.source).toUpperCase() : '',
+          account
         ].filter(Boolean).join(' · ');
         return `
         <article class="limit-card${compact ? ' limit-card-compact' : ''}">
           <div class="limit-head">
             <div class="row-main">
-              <img class="client-icon" src="${clientIconPath(card.provider)}" alt="" onerror="this.style.display='none'" />
+              ${toolIconHtml(card.provider)}
               <div class="row-copy">
                 <div class="row-name">${escapeHtml(card.name)}</div>
                 <div class="row-sub">${escapeHtml(sub)}</div>
@@ -243,7 +250,7 @@ export function renderLimits() {
   });
   const providerGroups = [...grouped.entries()].map(([provider, rows]) => `
     <section class="provider-limit-group">
-      <header class="provider-limit-head"><div class="row-main"><img class="client-icon" src="${clientIconPath(provider)}" alt="" onerror="this.style.display='none'" /><h2>${escapeHtml(clientLabel(provider))}</h2></div><span class="muted tiny">${tr('limits.accountsCount', { count: rows.length })}</span></header>
+      <header class="provider-limit-head"><div class="row-main">${toolIconHtml(provider)}<h2>${escapeHtml(clientLabel(provider))}</h2></div><span class="muted tiny">${tr('limits.accountsCount', { count: rows.length })}</span></header>
       ${renderLimitCards(rows, { compact: true, hideProvider: true })}
     </section>`).join('');
   return `${healthSummary}${healthPanel}${filter}${providerGroups ? `<div class="provider-limit-groups">${providerGroups}</div>` : emptyHtml('empty.limits')}`;

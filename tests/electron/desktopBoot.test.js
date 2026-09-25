@@ -99,7 +99,7 @@ test('desktop secret input is not retained in shared renderer state', () => {
 
 test('the preload bridge exposes the transport contract the shared UI requires', () => {
   const preload = read(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'));
-  for (const member of ['request:', 'validateSecret:', 'getCapabilities:', 'hasSecret:', 'prefsFromSettings', 'prefsToSettingsPatch', 'confirm:', 'onStatsPush:']) {
+  for (const member of ['request:', 'validateSecret:', 'getSettings:', 'hasSecret:', 'prefsFromSettings', 'prefsToSettingsPatch', 'confirm:', 'onStatsPush:']) {
     assert.ok(preload.includes(member), `preload must expose ${member}`);
   }
   // The prefs mapping is what lets one shared preference model survive in both

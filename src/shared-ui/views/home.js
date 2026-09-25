@@ -10,7 +10,6 @@ import {
 } from '../core/format.js';
 import {
   clampHomeLimitAccountCount,
-  clientIconPath,
   clientLabel,
   countActiveDays,
   devicePlatformLabel,
@@ -21,7 +20,7 @@ import {
   modelRows,
   toolRows
 } from '../core/data.js';
-import { tr, escapeHtml, appState, viewHelper } from '../core/viewContext.js';
+import { tr, escapeHtml, appState, displayFlag, toolIconHtml, viewHelper } from '../core/viewContext.js';
 import { historySource, renderSparkline, renderHeatmap, renderHistoryScopeNotice } from './trends.js';
 
 const emptyHtml = (key) => viewHelper('emptyHtml')(key);
@@ -74,7 +73,7 @@ export function renderHome() {
           <fluent-button appearance="secondary" type="button" class="home-interactive-row" data-jump-view="tool" data-jump-tool="${escapeHtml(row.key)}">
             <div class="row">
               <div class="row-main">
-                <img class="client-icon" src="${clientIconPath(row.key)}" alt="" onerror="this.style.display='none'" />
+                ${toolIconHtml(row.key)}
                 <div class="row-copy">
                   <div class="row-name">${escapeHtml(row.name)}</div>
                   <div class="row-sub">${pct}% · ${formatCost(row.cost, appState().prefs.currency)}</div>
@@ -136,23 +135,29 @@ export function renderHome() {
     : emptyHtml('empty.usage');
 
   // Limits: graphical cards with progress bars and remaining tone
+  const showHomeLimitBars = displayFlag('showHomeLimitBars', true);
+  const showHomeLimitProviderNames = displayFlag('showHomeLimitProviderNames', true);
   const limitsBody = limits.length
     ? `<div class="home-limits-grid">${limits.map((card) => {
         const remaining = card.lowestRemaining;
         const tone = remaining == null ? 'unknown' : limitRemainingTone(remaining);
         const toneClass = `meter-${tone}`;
         const pct = remaining == null ? 0 : Math.max(0, Math.min(100, Math.round(remaining)));
+        const subParts = [
+          showHomeLimitProviderNames ? clientLabel(card.provider) : '',
+          card.plan || ''
+        ].filter(Boolean);
         return `
           <fluent-button appearance="secondary" type="button" class="home-limit-card" data-jump-view="limits">
             <div class="home-limit-head">
               <div class="home-limit-identity">
-                <img class="client-icon" src="${clientIconPath(card.provider)}" alt="" onerror="this.style.display='none'" />
+                ${toolIconHtml(card.provider)}
                 <span class="home-limit-name">${escapeHtml(card.name)}</span>
               </div>
               <span class="home-limit-val remaining-tone-${tone}">${remaining == null ? '—' : `${pct}%`}</span>
             </div>
-            <div class="home-limit-bar ${toneClass}"><span style="width:${pct}%"></span></div>
-            <div class="home-limit-sub">${escapeHtml(clientLabel(card.provider))}${card.plan ? ` · ${escapeHtml(card.plan)}` : ''}</div>
+            ${showHomeLimitBars ? `<div class="home-limit-bar ${toneClass}"><span style="width:${pct}%"></span></div>` : ''}
+            ${subParts.length ? `<div class="home-limit-sub">${escapeHtml(subParts.join(' · '))}</div>` : ''}
           </fluent-button>
         `;
       }).join('')}</div>`

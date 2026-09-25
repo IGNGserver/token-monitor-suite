@@ -5,8 +5,8 @@
 // renders the normalized result the Hub returns.
 
 import { formatRelative } from '../core/format.js';
-import { clientIconPath, clientLabel, HUB_ACCOUNT_PROVIDERS } from '../core/data.js';
-import { tr, escapeHtml, appState, viewHelper } from '../core/viewContext.js';
+import { clientLabel, maskAccountEmail, HUB_ACCOUNT_PROVIDERS } from '../core/data.js';
+import { tr, escapeHtml, appState, displayFlag, toolIconHtml, viewHelper } from '../core/viewContext.js';
 
 const emptyHtml = (key) => viewHelper('emptyHtml')(key);
 const panel = (...args) => viewHelper('panel')(...args);
@@ -73,14 +73,16 @@ export function renderAccounts() {
 
       const identityParts = [
         record.label ? escapeHtml(record.label) : '',
-        record.accountEmail || record.accountKey ? escapeHtml(record.accountEmail || record.accountKey) : ''
+        record.accountEmail || record.accountKey
+          ? escapeHtml(displayFlag('maskLimitAccountEmails', false) ? maskAccountEmail(record.accountEmail || record.accountKey) : (record.accountEmail || record.accountKey))
+          : ''
       ].filter(Boolean);
 
       const errorDetail = record.lastErrorMessage ? `<div class="row-sub row-error" style="color:var(--warn, #e06c75);margin-top:4px;">${escapeHtml(record.lastErrorMessage)}</div>` : '';
 
       const needsAttention = !isOk && !isDisabled && !isRefreshing;
       return `<article class="account-row${record.id === appState().accountEditId && appState().accountDrawerOpen ? ' is-editing' : ''}" role="row">
-        <div class="account-provider" role="cell"><img class="client-icon" src="${clientIconPath(record.provider)}" alt="" onerror="this.style.display='none'" /><span>${escapeHtml(providerLabel)}</span></div>
+        <div class="account-provider" role="cell">${toolIconHtml(record.provider)}<span>${escapeHtml(providerLabel)}</span></div>
         <div class="account-identity" role="cell"><span class="row-name">${escapeHtml(record.name || providerLabel)}</span>${identityParts.length ? `<span class="row-sub">${identityParts.join(' · ')}</span>` : ''}${errorDetail}</div>
         <div class="account-status" role="cell"><span class="badge ${badgeTone}">${badgeText}</span></div>
         <div class="account-updated" role="cell" data-label="${escapeHtml(tr('accounts.columnRefresh'))}">${record.lastSuccessAt ? escapeHtml(formatRelative(record.lastSuccessAt, appState().locale)) : '—'}</div>

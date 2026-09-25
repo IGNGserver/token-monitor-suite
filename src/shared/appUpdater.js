@@ -62,6 +62,22 @@ function appUpdateInstallSupport({
   return { supported: false, reason: 'unsupported-platform' };
 }
 
+function isPrereleaseVersion(version) {
+  const parsed = semver.valid(version) ? semver.parse(version) : null;
+  return Boolean(parsed?.prerelease?.length);
+}
+
+/**
+ * Update channel, decided by what is installed rather than by a setting: a formal
+ * release (`1.2.3`) only ever moves to another formal release, while a `-rev.N`
+ * build follows the newest publish. The project publishes `-rev.N` tags as GitHub
+ * prereleases, so the two views of "prerelease" agree.
+ */
+function releaseMatchesInstalledChannel(candidate, installedVersion) {
+  if (isPrereleaseVersion(installedVersion)) return true;
+  return !(candidate?.prerelease === true || isPrereleaseVersion(candidate?.version));
+}
+
 function parseTag(tag) {
   if (typeof tag !== 'string') return null;
   const trimmed = tag.trim();
@@ -392,6 +408,7 @@ function parseLatestReleasePayload(payload) {
   return {
     version,
     tag,
+    prerelease: payload.prerelease === true || isPrereleaseVersion(version),
     name: (typeof payload.name === 'string' && payload.name.trim()) ? payload.name : tag,
     htmlUrl,
     publishedAt: typeof payload.published_at === 'string' ? payload.published_at : '',
@@ -419,7 +436,11 @@ function providerUpdateCheckAvailability(result, currentVersion) {
   const latest = latestFromUpdaterInfo(result?.updateInfo);
   if (!latest) return { valid: false, newer: false, latest: null, clearLatest: false };
   const current = parseTag(currentVersion);
-  const newer = Boolean(result?.isUpdateAvailable === true && current && semver.gt(latest.version, current));
+  // electron-updater reads whatever `latest*.yml` the newest publish wrote, which
+  // is a prerelease file right after one ships. Without this gate a formal install
+  // would be offered a prerelease that the release-list check already rejected.
+  const onChannel = releaseMatchesInstalledChannel(latest, parseTag(currentVersion) || currentVersion);
+  const newer = Boolean(onChannel && result?.isUpdateAvailable === true && current && semver.gt(latest.version, current));
   const isCurrent = Boolean(current && latest.version === current);
   return {
     valid: true,
@@ -570,7 +591,8 @@ async function checkLatestRelease(currentVersion) {
       if (!response.ok) throw new Error(`GitHub responded ${response.status}`);
       return response.json();
     });
-    const latest = parseReleaseListPayload(payload)[0] || null;
+    const releases = parseReleaseListPayload(payload);
+    const latest = releases.find((release) => releaseMatchesInstalledChannel(release, currentVersion)) || null;
     if (!latest) {
       return { ok: false, newer: false, latest: null, error: 'Release list missing a valid project release', checkedAt };
     }
@@ -589,6 +611,8 @@ module.exports = {
   classifyAppUpdateError,
   resolveAppUpdateCheckError,
   parseTag,
+  isPrereleaseVersion,
+  releaseMatchesInstalledChannel,
   parseLatestReleasePayload,
   shouldSkipAppUpdateCheck,
   downloadedAppUpdateMatchesLatest,

@@ -46,6 +46,17 @@ export function syncFluentMotion(preference = 'system') {
   document.documentElement.dataset.motion = motion;
 }
 
+/**
+ * Two desktop preferences act on the shell rather than on a view, so they land as
+ * body classes the host stylesheet reads: the sidebar live dot, and the window
+ * title strip on Windows. `flags` arrives already resolved by the caller.
+ */
+export function syncShellDisplayFlags({ hideLiveDot = false, titleIconOnly = false } = {}) {
+  if (typeof document === 'undefined' || !document.body?.classList) return;
+  document.body.classList.toggle('hide-live-dot', hideLiveDot === true);
+  document.body.classList.toggle('title-icon-only', titleIconOnly === true);
+}
+
 export function animateNavigation() {
   pendingNavigation = true;
 }

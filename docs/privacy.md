@@ -7,7 +7,7 @@ Token Monitor is local-first. It processes AI-tool usage logs on the device and 
 Token Monitor makes network requests only for documented or user-enabled features:
 
 - Packaged builds check GitHub Releases for updates.
-- Exchange-rate and service-status views fetch their public data sources.
+- The exchange-rate lookup fetches its public data source.
 - Quota accounts you add to the Hub contact their provider when the Hub refreshes them. A credential you pasted or an OAuth sign-in you completed is sent only to that provider; the desktop app itself does not probe provider accounts or upload local credentials.
 - Discord Rich Presence sends the selected activity details to Discord when explicitly enabled.
 - Multi-device sync sends data to the hub URL configured by the operator.

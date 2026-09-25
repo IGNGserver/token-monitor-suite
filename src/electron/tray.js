@@ -28,12 +28,43 @@ function translatedLabel(translate, key) {
   }
 }
 
-function buildTrayMenuTemplate({ translate, onShowWindow, onOpenSettings, onQuit }) {
+// The tray is the only surface that stays reachable while the window is hidden, so
+// it carries the two things a user needs without a window: whether collection is
+// running, and a way back into the app.
+function buildTrayMenuTemplate({
+  translate,
+  onShowWindow,
+  onOpenSettings,
+  onOpenView,
+  onQuit,
+  onToggleCollectionPaused,
+  isCollectionPaused = () => false
+}) {
+  const paused = isCollectionPaused() === true;
   return [
     {
       label: translatedLabel(translate, 'trayMenu.showWindow'),
       click: onShowWindow
     },
+    {
+      label: translatedLabel(translate, paused ? 'trayMenu.resumeCollection' : 'trayMenu.pauseCollection'),
+      type: 'checkbox',
+      checked: paused,
+      click: () => {
+        if (typeof onToggleCollectionPaused === 'function') onToggleCollectionPaused();
+      }
+    },
+    { type: 'separator' },
+    ...(onOpenView
+      ? [{
+          label: translatedLabel(translate, 'trayMenu.openView'),
+          submenu: [
+            { label: translatedLabel(translate, 'nav.overview'), click: () => onOpenView('overview') },
+            { label: translatedLabel(translate, 'nav.limits'), click: () => onOpenView('limits') },
+            { label: translatedLabel(translate, 'nav.settings'), click: () => onOpenView('settings') }
+          ]
+        }]
+      : []),
     {
       label: translatedLabel(translate, 'trayMenu.settings'),
       click: onOpenSettings
@@ -70,17 +101,33 @@ function createApplicationTray(options = {}) {
   const quit = () => {
     if (typeof options.onQuit === 'function') options.onQuit();
   };
+  const openView = (viewId) => {
+    if (typeof options.onOpenView === 'function') options.onOpenView(viewId);
+  };
+  const toggleCollectionPaused = () => {
+    if (typeof options.onToggleCollectionPaused === 'function') options.onToggleCollectionPaused();
+  };
+  // The tooltip is the only always-visible tray surface, so the live numbers ride
+  // on it. It takes a function so each refresh reads current state.
+  const trayTooltip = () => {
+    const value = typeof options.tooltip === 'function' ? options.tooltip() : options.tooltip;
+    return String(value || '').trim() || DEFAULT_TOOLTIP;
+  };
   const refreshMenu = () => {
     if (tray.isDestroyed?.()) return;
     tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate({
       translate: options.translate,
       onShowWindow: showWindow,
       onOpenSettings: openSettings,
-      onQuit: quit
+      onOpenView: typeof options.onOpenView === 'function' ? openView : null,
+      onQuit: quit,
+      onToggleCollectionPaused: toggleCollectionPaused,
+      isCollectionPaused: options.isCollectionPaused
     })));
+    tray.setToolTip(trayTooltip());
   };
 
-  tray.setToolTip(options.tooltip || DEFAULT_TOOLTIP);
+  tray.setToolTip(trayTooltip());
   refreshMenu();
   tray.on('click', showWindow);
 

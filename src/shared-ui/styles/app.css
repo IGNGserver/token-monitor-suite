@@ -1437,7 +1437,7 @@ html[data-theme="dark"] .heat.heat-cost.lvl-4 { fill: rgba(251, 191, 36, 0.92); 
 
 @media (max-width: 860px) {
   .page-intro { align-items: stretch; flex-direction: column; gap: 14px; }
-  .page-tabs { width: 100%; overflow-x: auto; flex-wrap: nowrap; }
+  .page-tabs { width: 100%; overflow: auto hidden; flex-wrap: nowrap; }
   .usage-metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .settings-layout { grid-template-columns: 1fr; }
 }
@@ -1479,7 +1479,12 @@ fluent-dropdown > button[slot="control"]:focus-visible { outline: none; outline-
 .scope-commandbar .device-filter { margin-right: auto; }
 .device-filter fluent-dropdown { max-width: 240px; }
 .period-tabs { display: flex; flex-wrap: wrap; gap: var(--spacingVerticalXS); background: transparent; border: 0; padding: 0; border-radius: 0; }
-tm-tablist { min-width: 0; max-width: 100%; overflow-x: auto; }
+/* The strip wraps on wide screens, so it must not be a scroll container there:
+   `overflow-x: auto` also computes overflow-y to auto, and the tablist's scrollable
+   box is 8px taller than the 44px row it holds — so every tab bar reserved a
+   vertical scrollbar, and 15px of dead width with it, for nothing.
+   Only the nowrap layout under 860px scrolls, and only along the inline axis. */
+tm-tablist { min-width: 0; max-width: 100%; }
 fluent-tab { white-space: nowrap; }
 fluent-button { vertical-align: middle; max-width: 100%; }
 fluent-button[icon-only] { flex-shrink: 0; }

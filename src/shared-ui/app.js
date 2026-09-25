@@ -124,11 +124,10 @@ const LEGACY_VIEWS = [
   { id: 'pricing', icon: 'pricing' }
 ];
 
-const PERIODS = ['today', 'month', 'allTime'];
-
-// The scope bar's tab order: the three periods the collector puts on the wire,
-// plus two calendar presets that resolve through /api/usage/range like a picked
-// custom range does. A host without the range API hides the preset tabs.
+// The scope bar's tab order: today / month / allTime are the periods the collector
+// puts on the wire, and yesterday / week are calendar presets that resolve through
+// /api/usage/range like a picked custom range does. A host without the range API
+// hides the preset tabs.
 const PERIOD_TABS = ['today', 'yesterday', 'week', 'month', 'allTime'];
 
 const VIEW_PATHS = Object.freeze({

@@ -23,6 +23,11 @@ import {
   writeRoute
 } from './transport/index.js';
 import { applyI18n, resolveLocale, t } from './core/i18n.js';
+import {
+  isPresetRangePeriod,
+  presetRangeWindow,
+  presetRangeWindowMatches
+} from './core/dateRanges.js';
 import { configureViewContext, displayFlag, VIEW_HELPER_NAMES } from './core/viewContext.js';
 import { syncHealthStateLabel } from './core/syncHealth.js';
 import { renderLimits } from './views/limits.js';
@@ -120,6 +125,11 @@ const LEGACY_VIEWS = [
 ];
 
 const PERIODS = ['today', 'month', 'allTime'];
+
+// The scope bar's tab order: the three periods the collector puts on the wire,
+// plus two calendar presets that resolve through /api/usage/range like a picked
+// custom range does. A host without the range API hides the preset tabs.
+const PERIOD_TABS = ['today', 'yesterday', 'week', 'month', 'allTime'];
 
 const VIEW_PATHS = Object.freeze({
   overview: '/',
@@ -335,6 +345,13 @@ const state = {
   error: null,
   customRange: null,
   customPeriod: null,
+  // Calendar presets (yesterday / this week) are fetched ranges, not snapshot
+  // periods, so they carry their own request bookkeeping.
+  presetRangeRequest: null,
+  presetRangeRequestKey: '',
+  presetRangeSequence: 0,
+  presetRangeFailedKey: '',
+  presetRangeRetryAfter: 0,
   stream: 'offline',
   // Wall-clock time of the last data frame, so the UI can state how old the
   // displayed numbers are instead of implying they are current.
@@ -416,6 +433,25 @@ function activePeriod() {
     projects: {},
     sessions: {}
   };
+}
+
+// The range API is what makes the calendar presets answerable; a Hub that does not
+// expose it must not offer tabs that would only ever render zeros.
+function presetRangesEnabled() {
+  const capabilities = state.authorization?.capabilities || state.health?.capabilities || {};
+  return capabilities.usageRange !== false;
+}
+
+function periodTabs() {
+  return PERIOD_TABS.filter((period) => !isPresetRangePeriod(period) || presetRangesEnabled());
+}
+
+/** Drop a persisted or stale selection that this host cannot answer. */
+function normalizePeriodSelection() {
+  const period = String(state.prefs.period || '');
+  if (periodTabs().includes(period)) return;
+  state.prefs.period = 'today';
+  savePrefs({ period: 'today' });
 }
 
 function formatDuration(milliseconds) {
@@ -721,6 +757,7 @@ function viewDescription(view = state.prefs.view) {
 function renderChrome() {
   const capabilities = state.authorization?.capabilities || state.health?.capabilities || {};
   const admin = state.authorization?.scopes?.includes('admin');
+  normalizePeriodSelection();
   // Two flags act on the shell rather than a view (live dot, title strip).
   syncShellDisplayFlags({
     hideLiveDot: !displayFlag('showLiveDot', true),
@@ -756,11 +793,16 @@ function renderChrome() {
   document.querySelector('.scope-commandbar')?.classList.toggle('hidden', !scoped);
   els.deviceFilter?.closest('.device-filter')?.classList.toggle('hidden', !scoped);
   els.periodTabs?.classList.toggle('hidden', !scoped);
-  els.customRangeBtn?.classList.toggle('hidden', !scoped || capabilities.usageRange === false);
+  els.customRangeBtn?.classList.toggle('hidden', !scoped || !presetRangesEnabled());
 
-  const selectedPeriod = state.customPeriod ? 'custom' : state.prefs.period;
-  const periodOptions = PERIODS.map((period) => [period, tr(`period.${period}`)]);
-  if (state.customPeriod) periodOptions.push(['custom', tr('period.custom')]);
+  // A fetched calendar preset keeps its own tab selected; only a hand-picked range
+  // falls back to the transient "custom" chip.
+  const rangeKind = state.customRange?.kind || '';
+  const selectedPeriod = rangeKind === 'custom'
+    ? 'custom'
+    : (isPresetRangePeriod(rangeKind) ? rangeKind : state.prefs.period);
+  const periodOptions = periodTabs().map((period) => [period, tr(`period.${period}`)]);
+  if (rangeKind === 'custom') periodOptions.push(['custom', tr('period.custom')]);
   els.periodTabs.dataset.selection = 'period';
   els.periodTabs.setAttribute('name', 'period');
   els.periodTabs.setAttribute('aria-label', tr('period.label'));
@@ -770,9 +812,7 @@ function renderChrome() {
   els.pageTitle.textContent = tr(`nav.${state.prefs.view}`);
   const allDevices = state.stats?.devices || [];
   const totalDevices = allDevices.length;
-  const periodLabel = state.customPeriod
-    ? tr('period.custom')
-    : tr(`period.${state.prefs.period}`);
+  const periodLabel = tr(`period.${selectedPeriod}`);
   const selectedDevice = allDevices.find((device) => device.deviceId === state.prefs.deviceFilter);
   const scopedDeviceCount = selectedDevice ? 1 : totalDevices;
   const dataAsOf = state.dataAsOf && Number.isFinite(new Date(state.dataAsOf).getTime())
@@ -1588,7 +1628,12 @@ function applyStatsSnapshot(stats, meta = null) {
   if (subscriptionsChanged && state.subscriptions) {
     void loadSubscriptions({ force: true, preserveDraft: hasDirtyFormDraft('subscription:') });
   }
+  // Also the boot and post-auth retry path for a persisted preset: the selection is
+  // restored before any range has been fetched, and the first snapshot is the signal
+  // that the host can answer it.
+  const presetRange = pendingPresetRangeWindow();
   render();
+  if (presetRange) void loadPresetRange(presetRange).then(() => render());
   // Painted with real data: release a desktop window that is waiting to reveal.
   signalContentReady();
 }
@@ -2292,6 +2337,31 @@ async function fetchAllPricing() {
   }
 }
 
+// The range API answers both a hand-picked range and the calendar presets, so the
+// payload is folded into a period once, here.
+function customPeriodFromRangePayload(payload) {
+  return {
+    totalTokens: payload.totalTokens || 0,
+    costUsd: payload.costUsd || 0,
+    clients: payload.clients || {},
+    clientCosts: payload.clientCosts || {},
+    models: payload.models || {},
+    modelCosts: payload.modelCosts || {},
+    // /api/usage/range does not nest client->model maps, so derive them from the
+    // returned sessions. Without this the per-client model split read "No usage"
+    // for every custom range while the preset periods showed it.
+    clientModels: payload.clientModels || deriveClientModels(payload.sessions, 'models'),
+    clientModelCosts: payload.clientModelCosts || deriveClientModels(payload.sessions, 'modelCosts'),
+    projects: payload.projects || {},
+    sessions: payload.sessions || {}
+  };
+}
+
+async function requestUsageRange(from, to) {
+  const query = `from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`;
+  return fetchJson(`/api/usage/range?${query}`, { secret: state.secret });
+}
+
 async function applyCustomRange() {
   const fromValue = els.rangeFrom.value;
   const toValue = els.rangeTo.value;
@@ -2308,25 +2378,9 @@ async function applyCustomRange() {
     return;
   }
   try {
-    const payload = await fetchJson(`/api/usage/range?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`, {
-      secret: state.secret
-    });
-    state.customRange = { from: from.toISOString(), to: to.toISOString() };
-    state.customPeriod = {
-      totalTokens: payload.totalTokens || 0,
-      costUsd: payload.costUsd || 0,
-      clients: payload.clients || {},
-      clientCosts: payload.clientCosts || {},
-      models: payload.models || {},
-      modelCosts: payload.modelCosts || {},
-      // /api/usage/range does not nest client->model maps, so derive them from the
-      // returned sessions. Without this the per-client model split read "No usage"
-      // for every custom range while the preset periods showed it.
-      clientModels: payload.clientModels || deriveClientModels(payload.sessions, 'models'),
-      clientModelCosts: payload.clientModelCosts || deriveClientModels(payload.sessions, 'modelCosts'),
-      projects: payload.projects || {},
-      sessions: payload.sessions || {}
-    };
+    const payload = await requestUsageRange(from, to);
+    state.customRange = { kind: 'custom', from: from.toISOString(), to: to.toISOString() };
+    state.customPeriod = customPeriodFromRangePayload(payload);
     openRange(false);
     render();
   } catch {
@@ -2338,8 +2392,82 @@ async function applyCustomRange() {
 function clearCustomRange() {
   state.customRange = null;
   state.customPeriod = null;
+  // A preset has no snapshot period to fall back to, so clearing it lands on Day.
+  if (isPresetRangePeriod(state.prefs.period)) {
+    state.prefs.period = 'today';
+    savePrefs({ period: 'today' });
+  }
   openRange(false);
   render();
+}
+
+const PRESET_RANGE_RETRY_MS = 30_000;
+
+function presetRangeKey(rangeWindow) {
+  return `${rangeWindow.period}:${rangeWindow.startDate}:${rangeWindow.endDate}`;
+}
+
+/**
+ * The calendar window the current selection asks for but does not have yet, or null.
+ *
+ * The window identity is what makes a range that crossed midnight refetch on the
+ * next snapshot, and it is also the guard against re-requesting on every frame:
+ * once `customRange` describes this window, nothing is pending.
+ */
+function pendingPresetRangeWindow() {
+  if (!presetRangesEnabled()) return null;
+  const rangeWindow = presetRangeWindow(state.prefs.period, new Date(), state.locale);
+  if (!rangeWindow) return null;
+  if (presetRangeWindowMatches(rangeWindow, state.customRange)) return null;
+  const key = presetRangeKey(rangeWindow);
+  if (state.presetRangeRequest && state.presetRangeRequestKey === key) return null;
+  if (key === state.presetRangeFailedKey && Date.now() < state.presetRangeRetryAfter) return null;
+  return rangeWindow;
+}
+
+/**
+ * Fetch one preset calendar range.
+ *
+ * Deliberately not a poll: in local mode a range request runs tokscale, so it stays
+ * a user action plus the snapshot-driven rollover check in pendingPresetRangeWindow().
+ * A failure keeps the zeros rather than showing the previous window's numbers, and
+ * backs off before the next snapshot retries it — a background retry stays quiet,
+ * because the toast belongs to the click that asked for the number.
+ */
+function loadPresetRange(rangeWindow, { notify = false } = {}) {
+  const key = presetRangeKey(rangeWindow);
+  const sequence = ++state.presetRangeSequence;
+  state.presetRangeRequestKey = key;
+  const request = (async () => {
+    try {
+      const payload = await requestUsageRange(rangeWindow.from, rangeWindow.to);
+      if (sequence !== state.presetRangeSequence) return;
+      state.customRange = {
+        kind: rangeWindow.period,
+        from: rangeWindow.from.toISOString(),
+        to: rangeWindow.to.toISOString(),
+        startDate: rangeWindow.startDate,
+        endDate: rangeWindow.endDate
+      };
+      state.customPeriod = customPeriodFromRangePayload(payload);
+      state.presetRangeFailedKey = '';
+    } catch (error) {
+      if (sequence !== state.presetRangeSequence) return;
+      if (error?.status === 401) showAuth(true);
+      state.customRange = null;
+      state.customPeriod = null;
+      state.presetRangeFailedKey = key;
+      state.presetRangeRetryAfter = Date.now() + PRESET_RANGE_RETRY_MS;
+      if (notify) showToast(tr('range.failed'));
+    } finally {
+      if (sequence === state.presetRangeSequence) {
+        state.presetRangeRequest = null;
+        state.presetRangeRequestKey = '';
+      }
+    }
+  })();
+  state.presetRangeRequest = request;
+  return request;
 }
 
 function switchView(viewId, { updateHistory = true, replace = false, tab = '' } = {}) {
@@ -2425,13 +2553,17 @@ function bindEvents() {
       openRange(true);
       return;
     }
-    if (!PERIODS.includes(period)) return;
+    if (!periodTabs().includes(period)) return;
+    // Clear the previous window first: a preset that is still loading must not keep
+    // rendering the numbers of the period or range the user just left.
     state.customPeriod = null;
     state.customRange = null;
     state.prefs.period = period;
     savePrefs({ period: state.prefs.period });
     animateDataUpdate();
     render();
+    const rangeWindow = presetRangeWindow(period, new Date(), state.locale);
+    if (rangeWindow) void loadPresetRange(rangeWindow, { notify: true }).then(() => render());
   });
 
 

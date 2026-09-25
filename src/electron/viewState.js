@@ -12,7 +12,10 @@
 // would fall back to the first custom-ordered view — silently discarding a
 // persisted last view.
 
-const INITIAL_RENDERER_PERIODS = new Set(['today', 'month', 'allTime']);
+// 'yesterday' and 'week' are calendar presets the renderer resolves through the
+// range API rather than snapshot periods, but the window restores them the same
+// way, so they belong in the accepted set.
+const INITIAL_RENDERER_PERIODS = new Set(['today', 'yesterday', 'week', 'month', 'allTime']);
 const INITIAL_RENDERER_BREAKDOWNS = new Set([
   'home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'
 ]);

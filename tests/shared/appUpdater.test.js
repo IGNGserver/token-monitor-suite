@@ -347,6 +347,8 @@ test('parseLatestReleasePayload returns normalized object for valid payload', ()
   assert.deepEqual(result, {
     version: '0.1.3',
     tag: 'v0.1.3',
+    // The payload omits the flag and 0.1.3 carries no -rev.N suffix, so this is formal.
+    prerelease: false,
     name: 'Token Monitor 0.1.3',
     htmlUrl: 'https://github.com/IGNGserver/token-monitor-suite/releases/tag/v0.1.3',
     publishedAt: '2026-05-26T12:00:00Z',

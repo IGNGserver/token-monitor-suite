@@ -15,7 +15,7 @@ const {
   diagnosticsFileName
 } = require('../../src/electron/diagnostics');
 
-function bundle(overrides = {}) {
+function bundle() {
   return buildDiagnosticsBundle({
     appInfo: () => ({ version: '1.2.0-rev.3', platform: 'win32', arch: 'x64', userData: 'C:\\Users\\me\\token-monitor' }),
     settings: () => ({

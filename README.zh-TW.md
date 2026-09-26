@@ -57,7 +57,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/`（預設 `~/.dsh/sessions/`；`session.jsonl[.zstd]` 及帶版本號的 `session.v<N>.jsonl[.zstd]`） | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（僅限中國版）；Qoder dashboard cookie（透過 Qoder usage API 查詢 big-model credits） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder / Qoder CN | 本機介接，兩個版本各自選用啟用：`~/.qoder/projects/` 與 `~/.qoder-cn/projects/` transcript，以及存在時的 `<platform-app-data>/Qoder/` 與 `QoderCN/SharedClientCache/cache/db/local.db`、`com.qoder.app.stable/` 與 `com.qodercn.app.stable/main.sqlite`；Qoder dashboard cookie（透過 Qoder usage API 查詢 big-model credits） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/gemini.png" width="28" alt="Gemini CLI" /> | Gemini CLI | `~/.gemini/tmp/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/roocode.png" width="28" alt="Roo Code" /> | Roo Code | VS Code globalStorage tasks（`.../rooveterinaryinc.roo-cline/tasks/`） | ✅ | — | — |
@@ -104,21 +104,25 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 
 - Custom 會從一個 GET 餘額端點映射數值 JSON 欄位；僅相容 OpenAI 或 Anthropic API 並不足夠。
 
-#### Qoder CN（本機介接）
+#### Qoder / Qoder CN（本機介接）
 
-Qoder CN 0.1.x 也會將對話訊息儲存在平台應用程式支援目錄下的 `com.qoder.app.stable/main.sqlite`；必要時可用 `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH` 覆寫。此來源與舊版 `QoderCN/.../local.db` 及 `~/.qoder-cn/projects/**/*.jsonl` transcript 一起偵測。
+Qoder 的 Token 用量來自應用程式自身的本機檔案，而非 API。國際版與中國版以兩個獨立客戶端追蹤 —— `qoder` 與 `qodercn`，因為兩者使用各自獨立的設定目錄；兩者都在 設定 → 收集 → 追蹤的工具 中選用啟用（預設關閉）。每個版本偵測三個來源，實際存在的那些都會貢獻資料：
 
-若 Qoder CN 使用搬移後的設定目錄，請設定 Qoder CN 自帶的 `QODERCN_CONFIG_DIR`；除非設定 `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`，Token Monitor 會監看該目錄下的 `projects`。
+- **Transcript 目錄 —— 目前版本的主要來源。** `~/.qoder/projects/**/*.jsonl`（國際版）或 `~/.qoder-cn/projects/**/*.jsonl`（中國版），每個請求一行 JSON。它會被監看以即時更新，且只需要檔案系統。可用 `TOKEN_MONITOR_QODER_TRANSCRIPTS_DIR` / `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` 指向其他目錄；若整個設定目錄被搬移，則設定 Qoder CN 自帶的 `QODERCN_CONFIG_DIR`。
+- **桌面訊息庫。** 平台應用程式支援目錄下的 `com.qoder.app.stable/main.sqlite`（國際版）或 `com.qodercn.app.stable/main.sqlite`（中國版），可用 `TOKEN_MONITOR_QODER_MAIN_DB_PATH` / `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH` 覆寫。Qoder CN 0.1.x 使用國際版的拼法，因此中國版會依序嘗試兩個候選。
+- **舊版快取資料庫。** `<platform-app-data>/Qoder/SharedClientCache/cache/db/local.db`（國際版），中國版為同一路徑但位於 `QoderCN/` 之下 —— macOS `~/Library/Application Support/`、Windows `%APPDATA%\`、Linux `~/.config/`；可用 `TOKEN_MONITOR_QODER_DB_PATH` / `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆寫。
 
-Qoder CN 的 Token 用量來自應用程式本機 SQLite 資料庫，而非 API —— 在 設定 → 收集 → 追蹤的工具 中啟用（選用，預設關閉）。資料庫路徑依平台自動偵測：macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`、Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`、Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` —— 可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆寫。Qoder CN 0.1.x 也可能寫入 `~/.qoder-cn/projects/**/*.jsonl`；此 transcript 目錄會被監看以即時更新，也可用 `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` 覆寫。
+`com.qoder.app.stable` 由兩個版本共同宣告，因此只有當某版本自身的足跡（應用程式支援目錄或設定目錄）也存在時，該版本才會讀取它：只裝國際版的機器不會被計入 `qodercn`，只裝 Qoder CN 0.1.x 的機器也不會被計入 `qoder`。實際存在哪些來源隨版本與安裝方式而異 —— 在核實本文的 Linux 機器上（2026-09-26，Qoder CN 0.4.2），中國版有 transcript 與 `com.qodercn.app.stable/main.sqlite`，但沒有舊版快取資料庫；國際版只安裝了 CLI，僅有 transcript。
 
-這是進階本機整合：讀取需要 PATH 上的 `sqlite3` CLI，或內建免 flag 即可用 `node:sqlite` 的 Node 執行環境（Node ≥ 23.4；Electron 元件可能需要 CLI）。讀取失敗會寫入日誌；若已有完整快照，採集器會保留它，而不會以零用量覆蓋。Transcript 行使用 CJK 字元 / 1.5 與其他字元 / 4 的混合公式估算；請求輸入是該 session 到目前請求的累計上下文，輸出是該請求的內容。系統提示與工具 schema 不在 transcript 中，因此 transcript 得出的用量與成本會標記為 `estimated`，不等於供應商的精確計費 Token。成本依每個對應模型在 models.dev 目錄中的價格估算；Qoder 若變更資料庫 schema，介接器可能失效。
+各來源的列會依請求身分累加合併並去重。當一筆 transcript 列無法證明與資料庫列不同時，以資料庫列為準 —— 兩個重疊的來源不能重複計數。
 
-Main SQLite 的對話內容同樣只提供估算用量，沒有供應商計費欄位、系統提示或工具 schema，因此會標記為 `estimated`，不等於精確計費 Token。
+這是進階本機整合。兩個 SQLite 來源需要 PATH 上的 `sqlite3` CLI，或內建免 flag 即可用 `node:sqlite` 的 Node 執行環境（Node ≥ 23.4；Electron 元件可能需要 CLI）；transcript 目錄兩者都不需要。讀取失敗會寫入日誌；若已有完整快照，採集器會保留它，而不會以零用量覆蓋。Main SQLite 與 transcript 列使用 CJK 字元 / 1.5 與其他字元 / 4 的混合公式估算；每個請求的輸入是**上一個請求之後**新增的對話內容，輸出是該請求儲存的內容，因此一個 session 中的每則訊息只計一次，而不會被之後的每個請求重複累加。這些本機記錄沒有供應商計費欄位、系統提示與工具 schema，因此其用量與成本會標記為 `estimated`，不等於供應商的精確計費 Token。成本依每個對應模型在 models.dev 目錄中的價格估算；Qoder 若變更磁碟格式，介接器可能失效。
+
+這份記錄裡有一個數字不是估算。Qoder 按 Credits 而不是 Token 計費 —— 它把 usage 區塊中的每個 Token 欄位都留作 `0`，同時在旁邊給出精確的每請求 `credits` 數量 —— 所以 Qoder 工具列會在標著 `~` 的 Token 與成本旁邊顯示真實的 Credits 消耗。Credits 的涵蓋範圍與 Qoder 用量本身完全一致，也就是 今日 / 本月 / 總計 三個分頁：昨天與本週這兩個自訂區間目前根本不包含 Qoder（該掃描涵蓋由 Tokscale 支援的工具加上 Proma 與 Claude Desktop），而 Hub 上由已儲存歷史回答的區間同樣不會報告 Credits。
 
 #### Qoder 帳號額度
 
-`qoder` 額度帳號必須手動加入 Hub，與本機 `qodercn` 用量介接器分開。Hub 會加密保存使用者提交的憑證、自動重新整理帳號額度，並將規範化結果分發給已連線裝置。裝置端已移除對本機 Qoder 登入、瀏覽器 profile、環境憑證與 CLI 帳號的自動偵測；這些憑證不會由裝置上報，也不會作為額度來源。
+`qoder` 額度帳號必須手動加入 Hub，與上面的本機用量介接器分開。Hub 會加密保存使用者提交的憑證、自動重新整理帳號額度，並將規範化結果分發給已連線裝置。裝置端已移除對本機 Qoder 登入、瀏覽器 profile、環境憑證與 CLI 帳號的自動偵測；這些憑證不會由裝置上報，也不會作為額度來源。
 </details>
 
 ## 介面展示

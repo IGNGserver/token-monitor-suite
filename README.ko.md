@@ -57,7 +57,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/` (기본 `~/.dsh/sessions/`, `session.jsonl[.zstd]` 및 버전이 붙은 `session.v<N>.jsonl[.zstd]`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`(중국판 전용); Qoder dashboard cookie (Qoder usage API로 big-model credits 조회) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder / Qoder CN | 로컬 어댑터, 에디션별 옵트인: `~/.qoder/projects/`와 `~/.qoder-cn/projects/` transcript, 그리고 존재할 경우 `<platform-app-data>/Qoder/`와 `QoderCN/SharedClientCache/cache/db/local.db`, `com.qoder.app.stable/`과 `com.qodercn.app.stable/main.sqlite`; Qoder dashboard cookie (Qoder usage API로 big-model credits 조회) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/gemini.png" width="28" alt="Gemini CLI" /> | Gemini CLI | `~/.gemini/tmp/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/roocode.png" width="28" alt="Roo Code" /> | Roo Code | VS Code globalStorage tasks (`.../rooveterinaryinc.roo-cline/tasks/`) | ✅ | — | — |
@@ -104,17 +104,25 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 
 - Custom은 하나의 GET 잔액 엔드포인트에서 숫자 JSON 필드를 매핑합니다. OpenAI 또는 Anthropic API 호환만으로는 충분하지 않습니다.
 
-#### Qoder CN(로컬 어댑터)
+#### Qoder / Qoder CN(로컬 어댑터)
 
-Qoder CN의 설정 디렉터리를 옮겼다면 Qoder CN 자체의 `QODERCN_CONFIG_DIR`을 설정하세요. `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`을 지정하지 않으면 그 아래의 `projects`를 감시합니다.
+Qoder 토큰 사용량은 API가 아닌 앱 자신의 로컬 파일에서 읽습니다. 국제판과 중국판은 프로필이 분리되어 있으므로 `qoder`와 `qodercn` 두 개의 독립된 클라이언트로 추적합니다. 둘 다 설정 → 수집 → 추적 도구에서 옵트인(기본 꺼짐)입니다. 각 에디션마다 세 개의 출처를 탐색하며, 실제로 존재하는 것만 기여합니다:
 
-Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이스에서 읽습니다. 설정 → 수집 → 추적 도구에서 활성화합니다(옵트인, 기본 꺼짐). 레거시 데이터베이스는 플랫폼별로 자동 감지됩니다: macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`, Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`, Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — `TOKEN_MONITOR_QODER_CN_DB_PATH`로 재정의할 수 있습니다. Qoder CN 0.1.x는 플랫폼 애플리케이션 지원 디렉터리의 `com.qoder.app.stable/main.sqlite`에도 대화 메시지를 저장하며, 필요하면 `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH`로 재정의할 수 있습니다. 또한 `~/.qoder-cn/projects/**/*.jsonl`에 transcript를 기록할 수 있고, 이 디렉터리는 실시간 업데이트를 위해 감시되며 `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`로 변경할 수 있습니다.
+- **Transcript 디렉터리 — 현재 빌드의 주 출처.** `~/.qoder/projects/**/*.jsonl`(국제판) 또는 `~/.qoder-cn/projects/**/*.jsonl`(중국판), 요청당 JSON 한 줄. 실시간 업데이트를 위해 감시되며 파일 시스템 외에는 아무것도 필요로 하지 않습니다. 다른 루트를 지정하려면 `TOKEN_MONITOR_QODER_TRANSCRIPTS_DIR` / `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`를, 프로필 전체를 옮긴 경우에는 Qoder CN 자체의 `QODERCN_CONFIG_DIR`을 설정하세요.
+- **데스크톱 메시지 저장소.** 플랫폼 애플리케이션 지원 디렉터리의 `com.qoder.app.stable/main.sqlite`(국제판) 또는 `com.qodercn.app.stable/main.sqlite`(중국판). `TOKEN_MONITOR_QODER_MAIN_DB_PATH` / `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH`로 재정의할 수 있습니다. Qoder CN 0.1.x는 국제판 표기를 사용했으므로 중국판은 두 후보를 순서대로 시도합니다.
+- **레거시 캐시 데이터베이스.** `<platform-app-data>/Qoder/SharedClientCache/cache/db/local.db`(국제판), 중국판은 `QoderCN/` 아래의 같은 경로 — macOS `~/Library/Application Support/`, Windows `%APPDATA%\`, Linux `~/.config/`. `TOKEN_MONITOR_QODER_DB_PATH` / `TOKEN_MONITOR_QODER_CN_DB_PATH`로 재정의할 수 있습니다.
 
-고급 로컬 통합입니다: 읽기에는 PATH의 `sqlite3` CLI 또는 플래그 없는 `node:sqlite`를 갖춘 Node 런타임(Node ≥ 23.4, Electron에서는 CLI가 필요할 수 있음)이 필요합니다. 읽기 실패는 로그에 기록되며, 완전한 기존 스냅샷이 있으면 0 사용량으로 덮어쓰지 않고 유지합니다. Main SQLite와 Transcript 행은 CJK 문자 수 / 1.5와 기타 문자 수 / 4를 섞은 방식으로 추정합니다. 로컬 기록에는 제공자 청구 필드, 시스템 프롬프트와 도구 schema가 없으므로 이 사용량과 비용에는 `estimated`가 표시되며 정확한 청구 Token이 아닙니다. 비용은 매핑된 각 모델의 models.dev 카탈로그 요금에서 추정됩니다. Qoder가 데이터베이스 스키마를 변경하면 어댑터가 작동하지 않을 수 있습니다.
+`com.qoder.app.stable`은 두 에디션이 모두 소유권을 주장하므로, 한 에디션은 자신의 흔적(애플리케이션 지원 디렉터리 또는 프로필 디렉터리)도 함께 존재할 때만 이를 읽습니다: 국제판만 설치된 기기가 `qodercn`으로 계상되지 않고, Qoder CN 0.1.x만 설치된 기기도 `qoder`로 계상되지 않습니다. 어떤 출처가 실제로 존재하는지는 에디션과 설치 형태에 따라 다릅니다 — 이 설명을 확인한 Linux 기기(2026-09-26, Qoder CN 0.4.2)에서 중국판은 transcript와 `com.qodercn.app.stable/main.sqlite`를 갖고 레거시 캐시 데이터베이스는 없었으며, 국제판은 CLI만 설치되어 transcript뿐이었습니다.
+
+각 출처의 행은 요청 식별자로 가산 병합되고 중복 제거됩니다. transcript 행이 데이터베이스 행과 다르다고 증명할 수 없을 때는 데이터베이스 행이 우선합니다 — 겹치는 두 출처가 이중 계상되어서는 안 됩니다.
+
+고급 로컬 통합입니다. 두 SQLite 출처에는 PATH의 `sqlite3` CLI 또는 플래그 없는 `node:sqlite`를 갖춘 Node 런타임(Node ≥ 23.4, Electron에서는 CLI가 필요할 수 있음)이 필요하지만, transcript 디렉터리에는 둘 다 필요하지 않습니다. 읽기 실패는 로그에 기록되며, 완전한 기존 스냅샷이 있으면 0 사용량으로 덮어쓰지 않고 유지합니다. Main SQLite와 Transcript 행은 CJK 문자 수 / 1.5와 기타 문자 수 / 4를 섞은 방식으로 추정합니다. 요청의 입력은 **이전 요청 이후** 추가된 대화 내용이고 출력은 그 요청에 저장된 내용이므로, 한 session의 각 메시지는 이후 요청마다 다시 합산되지 않고 정확히 한 번만 계산됩니다. 로컬 기록에는 제공자 청구 필드, 시스템 프롬프트와 도구 schema가 없으므로 이 사용량과 비용에는 `estimated`가 표시되며 정확한 청구 Token이 아닙니다. 비용은 매핑된 각 모델의 models.dev 카탈로그 요금에서 추정됩니다. Qoder가 디스크 형식을 변경하면 어댑터가 작동하지 않을 수 있습니다.
+
+이 기록에는 추정이 아닌 숫자가 하나 있습니다. Qoder는 토큰이 아니라 크레딧으로 과금합니다 — usage 블록의 모든 토큰 필드를 `0`으로 남기고 그 옆에 정확한 요청별 `credits` 값을 함께 공개합니다 — 따라서 Qoder 도구 행은 `~`가 붙은 토큰과 비용 옆에 실제 크레딧 소모량을 표시합니다. 크레딧의 적용 범위는 Qoder 사용량과 정확히 동일하며, 그것은 오늘 / 이번 달 / 전체 탭입니다. 어제와 이번 주 사용자 지정 범위는 현재 Qoder를 전혀 포함하지 않고(이 스캔은 Tokscale 지원 도구와 Proma / Claude Desktop을 대상으로 합니다), 저장된 이력에서 답변되는 허브 범위 역시 크레딧을 보고하지 않습니다.
 
 #### Qoder 계정 한도
 
-`qoder` 한도 계정은 Hub에 수동으로 추가하며, 로컬 `qodercn` 사용량 어댑터와는 별개입니다. Hub는 입력한 자격 증명을 암호화해 저장하고 계정 한도를 자동 갱신한 뒤 정규화된 결과를 연결된 기기로 배포합니다. 기기 측에서는 로컬 Qoder 로그인, 브라우저 프로필, 환경 자격 증명, CLI 계정의 자동 탐지를 제거했으며 이런 자격 증명을 업로드하거나 한도 소스로 사용하지 않습니다.
+`qoder` 한도 계정은 Hub에 수동으로 추가하며, 위의 로컬 사용량 어댑터와는 별개입니다. Hub는 입력한 자격 증명을 암호화해 저장하고 계정 한도를 자동 갱신한 뒤 정규화된 결과를 연결된 기기로 배포합니다. 기기 측에서는 로컬 Qoder 로그인, 브라우저 프로필, 환경 자격 증명, CLI 계정의 자동 탐지를 제거했으며 이런 자격 증명을 업로드하거나 한도 소스로 사용하지 않습니다.
 </details>
 
 ## 쇼케이스

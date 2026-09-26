@@ -57,7 +57,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/`（デフォルト `~/.dsh/sessions/`、`session.jsonl[.zstd]` およびバージョン付き `session.v<N>.jsonl[.zstd]`） | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（中国版のみ）；Qoder dashboard cookie（Qoder usage API で big-model credits 取得） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder / Qoder CN | ローカルアダプター、エディションごとにオプトイン：`~/.qoder/projects/` と `~/.qoder-cn/projects/` transcript、および存在する場合の `<platform-app-data>/Qoder/` と `QoderCN/SharedClientCache/cache/db/local.db`、`com.qoder.app.stable/` と `com.qodercn.app.stable/main.sqlite`；Qoder dashboard cookie（Qoder usage API で big-model credits 取得） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/gemini.png" width="28" alt="Gemini CLI" /> | Gemini CLI | `~/.gemini/tmp/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/roocode.png" width="28" alt="Roo Code" /> | Roo Code | VS Code globalStorage tasks (`.../rooveterinaryinc.roo-cline/tasks/`) | ✅ | — | — |
@@ -104,17 +104,25 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 - Custom は1つの GET 残高エンドポイントから数値 JSON フィールドをマッピングします。OpenAI または Anthropic API 互換だけでは不十分です。
 
-#### Qoder CN（ローカルアダプター）
+#### Qoder / Qoder CN（ローカルアダプター）
 
-Qoder CN の設定ディレクトリを移動している場合は、Qoder CN 自身の `QODERCN_CONFIG_DIR` を設定してください。`TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` を指定しない限り、その下の `projects` を監視します。
+Qoder のトークン使用量は API ではなくアプリ自身のローカルファイルから読み取ります。国際版と中国版はプロファイルが分かれているため、`qoder` と `qodercn` の2つの独立したクライアントとして追跡します。どちらも 設定 → 収集 → 追跡するツール でのオプトイン（デフォルト無効）です。各エディションで3つのソースを調べ、実在するものが寄与します：
 
-Qoder CN のトークン使用量は API ではなくアプリのローカル SQLite データベースから読み取ります。設定 → 収集 → 追跡するツール で有効化します（オプトイン、デフォルト無効）。旧データベースはプラットフォームごとに自動検出されます：macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`、Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`、Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — `TOKEN_MONITOR_QODER_CN_DB_PATH` で上書き可能です。Qoder CN 0.1.x はアプリケーションサポートディレクトリ下の `com.qoder.app.stable/main.sqlite` に会話メッセージも保存します。必要なら `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH` で上書きできます。また `~/.qoder-cn/projects/**/*.jsonl` に transcript を追加する場合もあり、このディレクトリはライブ更新のため監視され、`TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` で変更できます。
+- **Transcript ディレクトリ — 現在のビルドでの主要ソース。** `~/.qoder/projects/**/*.jsonl`（国際版）または `~/.qoder-cn/projects/**/*.jsonl`（中国版）、リクエストごとに JSON 1行。ライブ更新のため監視され、必要なのはファイルシステムだけです。別のルートを指すには `TOKEN_MONITOR_QODER_TRANSCRIPTS_DIR` / `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` を、プロファイル全体を移動している場合は Qoder CN 自身の `QODERCN_CONFIG_DIR` を設定してください。
+- **デスクトップのメッセージストア。** プラットフォームのアプリケーションサポートディレクトリ下の `com.qoder.app.stable/main.sqlite`（国際版）または `com.qodercn.app.stable/main.sqlite`（中国版）。`TOKEN_MONITOR_QODER_MAIN_DB_PATH` / `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH` で上書きできます。Qoder CN 0.1.x は国際版の表記を使っていたため、中国版は両方の候補を順に試します。
+- **旧キャッシュデータベース。** `<platform-app-data>/Qoder/SharedClientCache/cache/db/local.db`（国際版）、中国版は `QoderCN/` 下の同じパス — macOS `~/Library/Application Support/`、Windows `%APPDATA%\`、Linux `~/.config/`。`TOKEN_MONITOR_QODER_DB_PATH` / `TOKEN_MONITOR_QODER_CN_DB_PATH` で上書きできます。
 
-これは高度なローカル統合です：読み取りには PATH 上の `sqlite3` CLI、またはフラグ不要の `node:sqlite` を備えた Node ランタイム（Node ≥ 23.4、Electron では CLI が必要な場合あり）が必要です。読み取りエラーはログに記録され、完全な既存スナップショットがあればゼロ使用量で上書きせず保持します。Main SQLite と Transcript の行は CJK 文字数 / 1.5 とその他の文字数 / 4 の混合式で推定します。ローカルレコードにはプロバイダーの請求フィールド、システムプロンプト、ツール schema がないため、これらの使用量とコストには `estimated` が付き、正確な請求 Token ではありません。コストはマッピングされた各モデルの models.dev カタログ料金から推定されます。Qoder がデータベーススキーマを変更すると動作しなくなる可能性があります。
+`com.qoder.app.stable` は両エディションが主張するため、あるエディションは自分自身の痕跡（アプリケーションサポートディレクトリまたはプロファイルディレクトリ）も実在する場合にのみ読み取ります：国際版だけのマシンが `qodercn` に計上されることはなく、Qoder CN 0.1.x だけのマシンが `qoder` に計上されることもありません。どのソースが実在するかはエディションとインストール形態によって異なります — 本記述を確認した Linux マシン（2026-09-26、Qoder CN 0.4.2）では、中国版は transcript と `com.qodercn.app.stable/main.sqlite` を持ち旧キャッシュデータベースはなく、国際版は CLI のみのインストールで transcript だけでした。
+
+各ソースの行はリクエスト識別子で加算的にマージされ、重複排除されます。transcript の行がデータベースの行と異なると証明できない場合はデータベースの行が優先されます — 重なる2つのソースを二重計上してはいけません。
+
+これは高度なローカル統合です。2つの SQLite ソースには PATH 上の `sqlite3` CLI、またはフラグ不要の `node:sqlite` を備えた Node ランタイム（Node ≥ 23.4、Electron では CLI が必要な場合あり）が必要ですが、transcript ディレクトリにはどちらも不要です。読み取りエラーはログに記録され、完全な既存スナップショットがあればゼロ使用量で上書きせず保持します。Main SQLite と Transcript の行は CJK 文字数 / 1.5 とその他の文字数 / 4 の混合式で推定します。リクエストの入力は**直前のリクエスト以降**に追加された会話内容、出力はそのリクエストに保存された内容で、session の各メッセージは後続のリクエストごとに再加算されず 1 度だけ計上されます。ローカルレコードにはプロバイダーの請求フィールド、システムプロンプト、ツール schema がないため、これらの使用量とコストには `estimated` が付き、正確な請求 Token ではありません。コストはマッピングされた各モデルの models.dev カタログ料金から推定されます。Qoder がディスク形式を変更すると動作しなくなる可能性があります。
+
+この記録の中にひとつだけ推定ではない数値があります。Qoder はトークンではなくクレジットで課金します — usage ブロックのトークン欄はすべて `0` のまま、正確なリクエスト単位の `credits` 値を併せて公開するのです — そのため Qoder のツール行は、`~` の付いたトークンとコストの隣に実際のクレジット消費量を表示します。クレジットの適用範囲は Qoder 使用量そのものと完全に一致し、それは 今日 / 今月 / 合計 の各タブです：昨日と今週のカスタム範囲は現時点で Qoder を一切含みません（このスキャンは Tokscale 対応ツールと Proma / Claude Desktop が対象です）。また Hub で保存済み履歴から回答される範囲もクレジットを報告しません。
 
 #### Qoder アカウント制限
 
-`qoder` の制限アカウントは Hub に手動で追加します。ローカルの `qodercn` 使用量アダプターとは別です。Hub は入力された認証情報を暗号化して保存し、アカウント制限を自動更新して、正規化した結果を接続中のデバイスへ配布します。デバイス側ではローカル Qoder ログイン、ブラウザプロファイル、環境認証情報、CLI アカウントの自動検出を削除しており、それらの認証情報を送信したり制限の情報源にしたりしません。
+`qoder` の制限アカウントは Hub に手動で追加します。上記のローカル使用量アダプターとは別です。Hub は入力された認証情報を暗号化して保存し、アカウント制限を自動更新して、正規化した結果を接続中のデバイスへ配布します。デバイス側ではローカル Qoder ログイン、ブラウザプロファイル、環境認証情報、CLI アカウントの自動検出を削除しており、それらの認証情報を送信したり制限の情報源にしたりしません。
 </details>
 
 ## ショーケース

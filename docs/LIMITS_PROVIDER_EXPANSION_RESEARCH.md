@@ -75,7 +75,9 @@ minimax, minimax-token-plan, warp, sakana, opencode-go
 
 上游 13 家与本项目并非严格包含关系：`minimax-token-plan` 与 `opencode-go` 在上游是独立 id，在本项目分别并入 `minimax` 与 `opencode`；除去这一命名差异，当时未覆盖的只有 **`warp`** 一家（见 T3），**现已接入**，因此上游 13 家现已全部覆盖。反向差集当时是 10 家、现在是 16 家（cursor, cline, kilocode, commandcode, mimo, zaiteam, kiro, qoder, gemini, droid, deepseek, openrouter, volcengine, ollama, thirdparty 等）——额度覆盖面我们**领先上游**，所以**不应**用 tokscale 替换（详见 §四）。
 
-> ⚠️ 重要澄清：tokscale 二进制里那串长 provider 名（"Claude Code Codex CLI Cursor IDE Gemini CLI Amp Droid … 9router"）是**客户端扫描枚举**（`crates/tokscale-core/src/clients.rs`，53 项），**不是** `usage` 注册表。Cursor / Gemini / DeepSeek / kiro / Trae / Augment / Devin / Cline / Zed / Qoder / Volcengine / OpenRouter / Ollama / MiMo / Command Code 都**没有** tokscale 的额度实现。
+> ⚠️ 重要澄清：tokscale 二进制里那串长 provider 名（"Claude Code Codex CLI Cursor IDE Gemini CLI Amp Droid … 9router"）是**客户端扫描枚举**（`crates/tokscale-core/src/clients.rs`，`main` 分支 57 项 / 本仓库内置 4.17.0 的 `--client` 枚举 55 个 id），**不是** `usage` 注册表。Cursor / Gemini / DeepSeek Harness / Kiro / Trae / Augment / Devin / Cline / Zed / MiMo / Command Code 都**没有** tokscale 的额度实现。
+>
+> 2026-09-26 复核更正：此处旧版本把 `Qoder` / `Volcengine` / `OpenRouter` / `Ollama` 也列进了客户端枚举，**这是错的**。`clients.rs` 里没有这些 display 名，对内置二进制 `grep -a` 搜 `Qoder`/`qoder`、`Volcengine`、`Ollama` 均为 **0 命中**；那份名单其实是 models.dev 风格的**模型 provider** 列表被误读成了客户端枚举（上面引用的真实字符串里也没有这些名字）。对本仓库的影响：**Qoder 与 Qoder CN 完全不是 tokscale 客户端**，传 `--client qoder` 是 clap 硬用法错误（exit 2、stdout 为空）会让整次扫描失败，所以两者都由 `src/shared/qoderCnUsage.js` 本地解析，并和 `proma`、`claude-desktop` 一起登记在 `LOCAL_PARSED_CLIENTS`。`tests/shared/clientTracking.test.js` 会断言每个默认客户端都能被内置二进制接受，正是防止此类错误的守卫。（`OpenRouter` 确实在二进制里出现 4 次，但那是 tokscale 的**定价目录源**之一 —— `https://openrouter.ai/api/v1/models`，与 `models.dev`、LiteLLM 并列 —— 既不是客户端也不是 `usage` provider。）
 
 ---
 

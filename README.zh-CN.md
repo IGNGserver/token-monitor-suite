@@ -57,7 +57,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/`（默认 `~/.dsh/sessions/`；`session.jsonl[.zstd]` 及带版本号的 `session.v<N>.jsonl[.zstd]`） | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（仅限中国版）；Qoder dashboard cookie（通过 Qoder usage API 查询 big-model credits） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder / Qoder CN | 本地适配器，两个版本各自可选启用：`~/.qoder/projects/` 与 `~/.qoder-cn/projects/` transcript，以及存在时的 `<platform-app-data>/Qoder/` 与 `QoderCN/SharedClientCache/cache/db/local.db`、`com.qoder.app.stable/` 与 `com.qodercn.app.stable/main.sqlite`；Qoder dashboard cookie（通过 Qoder usage API 查询 big-model credits） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/gemini.png" width="28" alt="Gemini CLI" /> | Gemini CLI | `~/.gemini/tmp/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/roocode.png" width="28" alt="Roo Code" /> | Roo Code | VS Code globalStorage tasks（`.../rooveterinaryinc.roo-cline/tasks/`） | ✅ | — | — |
@@ -104,17 +104,25 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 
 - Custom 会从一个 GET 余额端点映射数值 JSON 字段；仅兼容 OpenAI 或 Anthropic API 并不足够。
 
-#### Qoder CN（本地适配器）
+#### Qoder / Qoder CN（本地适配器）
 
-如果 Qoder CN 使用了迁移后的配置目录，请设置 Qoder CN 自带的 `QODERCN_CONFIG_DIR`；除非设置 `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`，Token Monitor 会监听该目录下的 `projects`。
+Qoder 的 Token 用量来自应用自身的本地文件，而非 API。国际版与中国版按两个独立客户端跟踪 —— `qoder` 与 `qodercn`，因为二者使用各自独立的配置目录；两者都在 设置 → 采集 → 跟踪的工具 中可选启用（默认关闭）。每个版本探测三个来源，实际存在的那些都会贡献数据：
 
-Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API —— 在 设置 → 采集 → 跟踪的工具 中启用（可选，默认关闭）。旧版数据库路径按平台自动探测：macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`、Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`、Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` —— 可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆盖。Qoder CN 0.1.x 还会把对话消息存入平台应用支持目录下的 `com.qoder.app.stable/main.sqlite`，必要时可用 `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH` 覆盖；也可能写入 `~/.qoder-cn/projects/**/*.jsonl`，该 transcript 目录会被监听以实时更新，也可用 `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` 覆盖。
+- **Transcript 目录 —— 当前版本的主要来源。** `~/.qoder/projects/**/*.jsonl`（国际版）或 `~/.qoder-cn/projects/**/*.jsonl`（中国版），每个请求一行 JSON。它会被监听以实时更新，且只需要文件系统。可用 `TOKEN_MONITOR_QODER_TRANSCRIPTS_DIR` / `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` 指向其他目录；若整个配置目录被迁移，则设置 Qoder CN 自带的 `QODERCN_CONFIG_DIR`。
+- **桌面消息库。** 平台应用支持目录下的 `com.qoder.app.stable/main.sqlite`（国际版）或 `com.qodercn.app.stable/main.sqlite`（中国版），可用 `TOKEN_MONITOR_QODER_MAIN_DB_PATH` / `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH` 覆盖。Qoder CN 0.1.x 使用国际版的拼写，因此中国版会依次尝试两个候选。
+- **旧版缓存数据库。** `<platform-app-data>/Qoder/SharedClientCache/cache/db/local.db`（国际版），中国版为同一路径但位于 `QoderCN/` 下 —— macOS `~/Library/Application Support/`、Windows `%APPDATA%\`、Linux `~/.config/`；可用 `TOKEN_MONITOR_QODER_DB_PATH` / `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆盖。
 
-这是高级本地集成：读取需要 PATH 上的 `sqlite3` CLI，或内置无需 flag 即可用 `node:sqlite` 的 Node 运行时（Node ≥ 23.4；Electron 组件可能需要 CLI）。读取失败会写入日志；若已有完整快照，采集器会保留它而不是用零用量覆盖。Main SQLite 和 transcript 行使用 CJK 字符 / 1.5 与其他字符 / 4 的混合公式估算；请求输入是该 session 到当前请求的累计上下文，输出是该请求保存的内容。本地记录没有提供方计费字段、系统提示和工具 schema，因此这些来源的用量和成本会标记为 `estimated`，并不等于提供方的精确计费 Token。成本按每个映射模型在 models.dev 目录中的价格估算；Qoder 若改变数据库 schema，适配器可能失效。
+`com.qoder.app.stable` 被两个版本共同声明，因此只有当某版本自己的痕迹（应用支持目录或配置目录）也存在时，该版本才会读取它：只装了国际版的机器不会被计入 `qodercn`，只装了 Qoder CN 0.1.x 的机器也不会被计入 `qoder`。实际存在哪些来源随版本和安装方式而异 —— 在核实本文的 Linux 机器上（2026-09-26，Qoder CN 0.4.2），中国版有 transcript 和 `com.qodercn.app.stable/main.sqlite`，但没有旧版缓存数据库；国际版只安装了 CLI，仅有 transcript。
+
+各来源的行按请求身份累加合并并去重。当一条 transcript 行无法证明与数据库行不同时，以数据库行为准 —— 两个重叠的来源不能重复计数。
+
+这是高级本地集成。两个 SQLite 来源需要 PATH 上的 `sqlite3` CLI，或内置无需 flag 即可用 `node:sqlite` 的 Node 运行时（Node ≥ 23.4；Electron 组件可能需要 CLI）；transcript 目录两者都不需要。读取失败会写入日志；若已有完整快照，采集器会保留它而不是用零用量覆盖。Main SQLite 和 transcript 行使用 CJK 字符 / 1.5 与其他字符 / 4 的混合公式估算；每个请求的输入是**上一个请求之后**新增的对话内容，输出是该请求保存的内容，因此一个 session 中的每条消息只计一次，而不是被之后的每个请求重复累加。本地记录没有提供方计费字段、系统提示和工具 schema，因此这些来源的用量和成本会标记为 `estimated`，并不等于提供方的精确计费 Token。成本按每个映射模型在 models.dev 目录中的价格估算；Qoder 若改变磁盘格式，适配器可能失效。
+
+这份记录里有一个数字不是估算。Qoder 按 Credits 而不是 Token 计费 —— 它把 usage 块中的每个 Token 字段都留作 `0`，同时在旁边给出精确的每请求 `credits` 数量 —— 所以 Qoder 工具行会在标着 `~` 的 Token 与成本旁边显示真实的 Credits 消耗。Credits 的覆盖范围与 Qoder 用量本身完全一致，也就是 今日 / 本月 / 总计 三个页签：昨天与本周这两个自定义区间目前根本不包含 Qoder（该扫描覆盖由 Tokscale 支持的工具加上 Proma 与 Claude Desktop），而 Hub 上由已存储历史回答的区间同样不会报告 Credits。
 
 #### Qoder 账号额度
 
-`qoder` 额度账号必须手动添加到 Hub，与本地 `qodercn` 用量适配器分开。Hub 会加密保存用户提交的凭证、自动刷新账号额度，并把规范化结果分发给已连接设备。设备端已经移除对本地 Qoder 登录、浏览器 profile、环境凭据和 CLI 账号的自动探测；这些凭证不会被设备上报，也不会作为额度来源。
+`qoder` 额度账号必须手动添加到 Hub，与上面的本地用量适配器分开。Hub 会加密保存用户提交的凭证、自动刷新账号额度，并把规范化结果分发给已连接设备。设备端已经移除对本地 Qoder 登录、浏览器 profile、环境凭据和 CLI 账号的自动探测；这些凭证不会被设备上报，也不会作为额度来源。
 </details>
 
 ## 界面展示

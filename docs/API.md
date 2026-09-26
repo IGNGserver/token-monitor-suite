@@ -125,6 +125,7 @@ Example payload:
     "clientCosts": {
       "codex": 0.01
     },
+    "clientCredits": {},
     "clientCacheReads": {
       "codex": 1100
     },
@@ -191,13 +192,15 @@ Example payload:
     "totalTokens": 4567,
     "costUsd": 0.04,
     "clients": {},
-    "clientCosts": {}
+    "clientCosts": {},
+    "clientCredits": {}
   },
   "allTime": {
     "totalTokens": 8901,
     "costUsd": 0.08,
     "clients": {},
     "clientCosts": {},
+    "clientCredits": {},
     "projects": {
       "token monitor": {
         "label": "Token Monitor",
@@ -245,7 +248,10 @@ Current agents and the desktop app include `osName` and, when known, `osVersion`
 `limits.providers[].balance` is an optional native-currency prepaid balance block. DeepSeek uses `{ amount, currency, todaySpend, monthSpend, allTimeSpend, trackingSince, monthSinceTracking }`: `amount` is the spendable balance in the account's own currency (e.g. `CNY`/`USD`); the spend fields are derived from locally observed paid-balance drawdown, `allTimeSpend` keeps accumulating after old daily buckets are pruned, `trackingSince` records when that local observation began, and `monthSinceTracking` is `true` until a full month of history has accrued. OpenRouter uses USD: `/key` supplies `todaySpend`, `weekSpend`, `monthSpend`, and the provider-reported lifetime `allTimeSpend`; when OpenRouter authorizes `/credits` (officially documented for Management keys), `amount` and the corresponding real Credits meter are also included. Other API keys can still report their own spend and configured key limit without inventing an account balance. MiMo may additionally send `giftBalance`, `cashBalance`, Token Plan usage fields, and `planStatus` (`active`, `expired`, `none`, or `null`). An expired MiMo Token Plan has no quota window even when its prepaid balance remains available. `null` when not applicable. DeepSeek uses `source: "api"` with an empty `windows` array (it has no rate-limit windows). OpenRouter, GLM/Z.ai, Volcengine, Qoder, Kimi, and Ollama report quota/credit windows through the same `windows` array.
 `windows[].kind` is `session`, `weekly`, `billing`, `named`, or `credits`. `named` marks an allowance that is metered separately from the plan cadence and therefore carries its own bounded `label` (Codex's Luna Reserve and Spark allowances, code review, per-account individual spend limits); `credits` is a purchased credit pool reported as an absolute `remaining` amount without a percentage, because the provider never reports its maximum. `windows[].metric` is an optional stable machine-readable role; `credits` identifies the OpenRouter account-credits meter independently of its display label. `windows[].detail` is an optional bounded display-only description for a window, such as the Kimi-vs-Code composition of the single shared monthly membership meter; it must not contain credentials or raw provider response data.
 
-Qoder CN local usage is opt-in as the `qodercn` client. Its legacy SQLite adapter, the 0.1.x `com.qoder.app.stable/main.sqlite` message adapter, and transcript adapter may all contribute to a record; main-database and transcript-derived periods, sessions, and costs carry `estimated: true` because those sources do not expose exact provider token billing. `qoderCnDiagnostics` is optional, bounded, and non-secret; it reports source selection, candidate/read counts, byte/event counts, last-data time, truncation, fallback, and stable failure codes. It never contains transcript paths, content, cookies, account credentials, or session identifiers.
+Qoder usage is opt-in and tracked as two independent clients: `qodercn` for the China site (`~/.qoder-cn`, app support `QoderCN`) and `qoder` for the international site (`~/.qoder`, app support `Qoder`). Both are read by one adapter with three sources — the legacy SQLite database, the desktop `main.sqlite` message store, and the Claude-Code-style transcript tree — and any of them may contribute to a record. Main-database and transcript-derived periods, sessions, and costs carry `estimated: true` because those sources do not expose exact provider token billing. Both sites list `com.qoder.app.stable` as a `main.sqlite` candidate, so that directory is read only when the claiming site's own footprint (app-support or profile directory) is present; one installer's messages are never billed to the other client.
+The transcript tree is the exception to that blanket estimate: Qoder publishes a per-request `credits` meter there (alongside `original_credits` and a `billable` flag) while leaving `input_tokens`, `output_tokens` and both cache fields at `0`, so the credit total reported in `periods.*.clientCredits` is exact and is not covered by the `estimated` flag. Only the transcript source carries it; a device whose usage came entirely from the SQLite sources reports no entry for that client rather than a zero.
+
+`qoderDiagnostics` is an optional, bounded, non-secret map keyed by tracked client id (`qodercn`, `qoder`). Each entry reports that site's source selection, candidate/read counts, byte/event counts, last-data time, truncation, fallback, and stable failure codes. `qoderCnDiagnostics` is retained as the `qodercn` entry of that map so existing consumers keep working, but a device running both installers must be read through `qoderDiagnostics` — one field can only describe one site. Neither field ever contains transcript paths, content, cookies, account credentials, or session identifiers.
 
 ## `GET /api/stats`
 
@@ -258,6 +264,9 @@ Response includes:
 - `periods.month`
 - `periods.allTime`
 - `periods.*.clientModels` and `periods.*.clientModelCosts` for preserving model breakdowns when a tracked tool is disabled
+- `periods.*.clientEstimated` is the sparse per-client provenance map behind the `~` the UI puts on a tool's tokens and cost: a client is present only when some of its tokens were content-estimated. The period-level `estimated` flag is retained and still means "at least one row here was estimated", which on a machine tracking both Claude and Qoder would otherwise brand every client's total as a guess. Values are strictly `true` — a truthy non-boolean from a device record is dropped, and a client that contributed no tokens is never flagged. Merging is OR-semantics, so a combined total that mixes exact and estimated tokens is not presented as exact. Model and project rows carry no label of their own: either axis can mix an exact client's tokens with an estimated one
+- `periods.*.clientCredits` is an optional per-client map of credits consumed in the provider's own metered unit. Only Qoder publishes it (`qoder` and `qodercn`): Qoder bills in credits and leaves every token field of its usage block at zero, so this is the one Qoder figure that is exact rather than `estimated`. It is deliberately not folded into `costUsd` / `clientCosts` — Qoder has never published a credit-to-USD or credit-to-token rate, and adding one would invent it. A client that is absent from the map reports no credit meter, which is not the same as `0`; the map is sparse. On `/api/usage/range` the answer depends on which source served it: a live `today` / `month` window (`source: "live_today"` / `"live_month"` / `"live_periods"`) and a window answered wholly from `usage_events` both report credits, while `history_daily` has no credit concept and reports none — and for the `history_daily+usage_events` top-up the Hub deliberately discards the ledger's credits rather than publishing the covered head as the range's total. Custom ranges do not include Qoder usage at all today, because `collectCustomRangeOnce()` scans Tokscale-backed tools plus Proma and Claude Desktop; making it collect Qoder requires extracting the adapter's three-source row collection out of the tick path so both share one implementation
+- `periods.*.clientModelCredits` is the same figure at client×model grain, and `sessions.*.credits` / `sessions.*.modelCredits` at session grain. Both are exact rollups of rows the adapter already attributes per session and model — neither splits a client total across the models it used — and they exist so the `usage_events` ledger can store a credit on the same `(client, session, model)` row it already keys on. Only the client-level map is forwarded by the range endpoints; the finer maps have no consumer in a range response yet
 - `periods.*.projects` for workspace-level tokens, cost, and client attribution; the same canonical folder label aggregates across devices
 - `periods.today.sessions` / `periods.month.sessions` keyed by `client:sessionId` for session-level usage when tokscale exposes session groups; clients may use `lastUsedAt` for recent-first sorting and optional `projectId` / `projectLabel` for workspace-level aggregation. Absolute workspace paths stay on the collecting device and are never part of the wire shape. Synchronized clients omit the unbounded `allTime.sessions` collection and may bound `today` / `month` detail when required by the ingest limit while preserving all aggregate totals and breakdowns.
 - `sessionDetailsOmitted`, when one or more synchronized devices omitted session rows to stay within the ingest limit; the aggregate contains summed `today` / `month` counts and each affected device reports its own counts

@@ -94,9 +94,11 @@ TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # optional — defaults on; 0 stops
 TOKEN_MONITOR_LIMITS_ENABLED=        # legacy compatibility; device quota probing is removed
 TOKEN_MONITOR_LIMIT_PROVIDERS=       # legacy compatibility; Hub accounts select providers
 TOKEN_MONITOR_HUB_CREDENTIAL_KEY=    # optional legacy account-encryption override; normally leave empty
+TOKEN_MONITOR_QODER_TRANSCRIPTS_DIR=    # optional direct override for the international Qoder JSONL transcripts
+TOKEN_MONITOR_QODER_MAIN_DB_PATH=       # optional direct override for the international Qoder main.sqlite store
 QODERCN_CONFIG_DIR=                   # Qoder CN's optional config root; transcript default is $QODERCN_CONFIG_DIR/projects
-TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR= # optional direct override for Qoder CN 0.1.x JSONL transcripts
-TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH=    # optional direct override for the Qoder 0.1.x main.sqlite store
+TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR= # optional direct override for Qoder CN JSONL transcripts
+TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH=    # optional direct override for the Qoder CN main.sqlite store
 ```
 
 For a trusted LAN/VPN Hub that still uses `http://<lan-ip>:17321`, also set
@@ -121,19 +123,32 @@ stats TTL, account concurrency, probe deadline, trusted-proxy) that the supporte
 deployment passes in `docker-compose.yml`, nor per-provider CLI/timeout overrides;
 those are read from the environment but are not meant to be configured by hand.
 
-`qoder` quota accounts are manual Hub accounts. `qodercn` is a separate local
-usage integration: it reads local Qoder CN usage from its legacy SQLite database
-and, for 0.1.x installs, the `com.qoder.app.stable/main.sqlite` conversation
-store plus the transcript tree under `QODERCN_CONFIG_DIR/projects` (default
-`~/.qoder-cn/projects`). The main database is auto-detected under the platform
-application-support directory and can be overridden with
-`TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH`; `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`
-overrides the transcript tree directly. Main-database and transcript token
-counts and costs are content estimates and are marked `estimated` in the record;
-they do not include provider billing fields, system-prompt, or tool-schema
-overhead.
+`qoder` quota accounts are manual Hub accounts. The `qoder` and `qodercn` local
+usage integrations are separate from them, and separate from each other: the
+international and China editions keep distinct profiles, so each is tracked as
+its own opt-in client. Each site probes three sources and uses whichever exist:
+the transcript tree under its profile (`~/.qoder/projects`, or
+`QODERCN_CONFIG_DIR/projects` defaulting to `~/.qoder-cn/projects`), which is the
+primary source in current builds; the desktop `com.qoder.app.stable/main.sqlite`
+(or `com.qodercn.app.stable/main.sqlite`) conversation store, auto-detected under
+the platform application-support directory and overridable with
+`TOKEN_MONITOR_QODER_MAIN_DB_PATH` / `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH`; and
+the legacy `Qoder/SharedClientCache/cache/db/local.db` (or the same path under
+`QoderCN/`) cache database, overridable with `TOKEN_MONITOR_QODER_DB_PATH` /
+`TOKEN_MONITOR_QODER_CN_DB_PATH`. `TOKEN_MONITOR_QODER_TRANSCRIPTS_DIR` and
+`TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` override each transcript tree directly.
+`com.qoder.app.stable` is claimed by both sites, so one reads it only when that
+site's own footprint is also present — an international-only machine is never
+billed to `qodercn`, and a Qoder CN 0.1.x-only machine is never billed to
+`qoder`. Rows from every present source are merged additively and de-duplicated
+by request identity; where a transcript row cannot be proven distinct from a
+database row, the database row wins. The two SQLite sources need a `sqlite3` CLI
+on PATH or a Node runtime with unflagged `node:sqlite`; the transcript tree needs
+neither. Main-database and transcript token counts and costs are content
+estimates and are marked `estimated` in the record; they do not include provider
+billing fields, system-prompt, or tool-schema overhead.
 
-For a target-machine Qoder CN check, run `QODERCN_VERSION=0.1.x npm run evidence:qodercn -- --require-version --require-data`. The command prints only platform/version, source presence, bounded read diagnostics, row counts, model names, and period totals; it never prints source paths, transcript content, cookies, account IDs, or session IDs. Use `--version-file <path>` when the installed app exposes its version in a local manifest. A result of `NOT RUN` means the machine has no readable source or no non-zero usage yet; a result of `FAIL` requires investigation before claiming the real-environment acceptance as complete.
+For a target-machine Qoder CN check, run `npm run evidence:qodercn -- --version-file ~/.qoder-cn/.qoder-app-status.json --require-version --require-data`, or pass `QODERCN_VERSION=<installed version>` instead of `--version-file`. The command prints only platform/version, source presence, bounded read diagnostics, row counts, model names, and period totals; it never prints source paths, transcript content, cookies, account IDs, or session IDs. A result of `NOT RUN` means the machine has no readable source or no non-zero usage yet; a result of `FAIL` requires investigation before claiming the real-environment acceptance as complete.
 
 For a trusted LAN/VPN Hub that still uses non-loopback HTTP, keep the default blocked state until the user explicitly enables the trusted-LAN option in the app (or sets `TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1` for the agent). Upgrading an old HTTP profile does not silently enable cleartext transport; the app continues local collection while Hub read/write/stream status reports the blocked transport.
 

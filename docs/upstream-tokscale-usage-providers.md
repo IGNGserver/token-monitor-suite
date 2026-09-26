@@ -77,9 +77,26 @@ Junie ZCode OpenCode Review CodeBuddy WorkBuddy Devin CLI Devin Desktop Senpi (O
 Augment Code Kimchi Prime Agent Cherry Studio MiniMax Code FxLM Studio Hindsight 9router Synthetic 9Router ...
 ```
 
-Those 53 display names come from `crates/tokscale-core/src/clients.rs` (`display: "..."` × 53). Cursor,
-Gemini, DeepSeek, Trae, Augment, Devin, Cline, Zed, Qoder, Volcengine, OpenRouter, Ollama, MiMo,
-commandcode, kiro-cli, etc. are **tracked clients**, and most have **no** `tokscale usage` provider.
+Those display names come from `crates/tokscale-core/src/clients.rs` (`display: "..."` × **57** on
+`main`, re-verified 2026-09-26; the bundled 4.17.0 `--client` clap enum exposes 55 of them as
+comma-separated ids). Every one of them is a **tracked client** for local token accounting, and most
+have **no** `tokscale usage` provider.
+
+> **Correction (2026-09-26).** An earlier revision of this paragraph listed `Qoder`, `Volcengine`,
+> `OpenRouter`, `Ollama` and `DeepSeek` among the tracked clients. They are not. `clients.rs` on
+> `main` contains no such display name, and `grep -a` over the bundled
+> `@tokscale/cli-linux-x64-gnu` binary returns **zero** hits for `Qoder`/`qoder`, `Volcengine` and
+> `Ollama`. That list was a models.dev-style *provider* enumeration mistakenly read as the client
+> enum — note the blob quoted above, which is the real thing, contains none of those names either.
+> The only DeepSeek entry is `DeepSeek Harness` (id `dsh`); `Trae` and `Kiro` are the real display
+> names, not `Trae IDE` / `kiro-cli`.
+>
+> This matters to this repository: **Qoder and Qoder CN are not tokscale clients at all.** Passing
+> `--client qoder` is a hard clap usage error (exit 2, empty stdout) that fails the entire scan, so
+> both are parsed locally by `src/shared/qoderCnUsage.js` and listed in `LOCAL_PARSED_CLIENTS`
+> alongside `proma` and `claude-desktop`. `tests/shared/clientTracking.test.js` asserts every default
+> client maps to an id the bundled binary actually accepts, which is the guard that would catch a
+> repeat of this mistake.
 
 The usage registry is a plain `Vec` in `usage/mod.rs` (not a clap enum), so its labels appear in the
 binary as adjacent literals, e.g. `minimax-token-planWarp/Ozusage provider filtered out: no
@@ -271,10 +288,15 @@ an implementation.
 
 Important non-finding to prevent a false positive: the binary's long concatenated provider-name
 string (`Claude Code Codex CLI Cursor IDE Gemini CLI Amp Droid …`) is the **client/scanner enum**
-(`crates/tokscale-core/src/clients.rs`, 53 display names), not a usage-provider list. Names such as
-`Cursor IDE`, `Gemini CLI`, `DeepSeek`, `kiro-cli`, `Trae IDE`, `Augment Code`, `Devin CLI`,
-`Cline`, `Zed Agent`, `Qoder`, `Volcengine`, `OpenRouter`, `Ollama`, `MiMo Code`, `Command Code`
-are tracked clients for local token accounting and have **no** `tokscale usage` provider.
+(`crates/tokscale-core/src/clients.rs`, 57 display names on `main`, 55 ids in the bundled 4.17.0
+`--client` enum), not a usage-provider list. Names such as `Cursor IDE`, `Gemini CLI`, `Trae`,
+`Augment Code`, `Devin CLI`, `Cline`, `Zed Agent`, `Kiro`, `MiMo Code`, `Command Code` and
+`DeepSeek Harness` are tracked clients for local token accounting and have **no** `tokscale usage`
+provider.
+
+`Qoder`, `Qoder CN`, `Volcengine`, `OpenRouter` and `Ollama` are **not** in that enum — see the
+correction in §1. This repository parses Qoder and Qoder CN itself (`src/shared/qoderCnUsage.js`),
+which is why they appear in `LOCAL_PARSED_CLIENTS` rather than in any `--client` CSV.
 
 ### Documentation drift found (upstream, informational)
 

@@ -127,11 +127,11 @@ function enter(element, kind = 'fade', delay = 0) {
   if (!element || reduceMotion() || typeof element.animate !== 'function') return;
   const frames = kind === 'fade'
     ? [{ opacity: 0 }, { opacity: 1 }]
-    : [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'translateY(0)' }];
+    : [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }];
   element.animate(frames, {
-    duration: motionDuration(kind === 'fade' ? 'durationFast' : 'durationNormal', kind === 'fade' ? 150 : 200),
+    duration: motionDuration(kind === 'fade' ? 'durationFast' : 'durationGentle', kind === 'fade' ? 150 : 250),
     delay,
-    easing: motionEasing('curveDecelerateMid', 'cubic-bezier(0.1, 0.9, 0.2, 1)')
+    easing: motionEasing('curveDecelerateMax', 'cubic-bezier(0.1, 0.9, 0.2, 1)')
   });
 }
 
@@ -142,15 +142,18 @@ function animateCharts(root) {
   const bars = [...root.querySelectorAll('.chart-bar')];
   bars.forEach((bar, index) => {
     bar.animate([
-      { opacity: 0.35, transform: 'scaleY(0.04)' },
+      { opacity: 0, transform: 'scaleY(0.04)' },
       { opacity: 1, transform: 'scaleY(1)' }
     ], { duration, delay: Math.min(index * 12, 180), easing });
   });
   const cells = [...root.querySelectorAll('.chart-svg-heat .heat')];
   cells.forEach((cell, index) => {
-    cell.animate([{ opacity: 0 }, { opacity: 1 }], {
+    cell.animate([
+      { opacity: 0, transform: 'scale(0.8)' },
+      { opacity: 1, transform: 'scale(1)' }
+    ], {
       duration: motionDuration('durationGentle', 250),
-      delay: Math.min(index * 4, 120),
+      delay: Math.min(index * 3, 150),
       easing
     });
   });
@@ -247,9 +250,9 @@ export function finishFluentRender(root, view) {
   const chartTargets = root.querySelector('.chart-bar, .chart-svg-heat .heat');
   const shouldAnimateChart = Boolean(chartTargets)
     && (changedView || pendingDataUpdate || !animatedChartViews.has(view));
-  if (changedView) enter(root);
+  if (changedView) enter(root, 'enter');
   if (changedView || pendingDataUpdate) {
-    if (!lastView) [...root.querySelectorAll('.panel')].slice(0, 5).forEach((panel, index) => enter(panel, 'enter', index * 20));
+    if (!lastView) [...root.querySelectorAll('.panel')].slice(0, 6).forEach((panel, index) => enter(panel, 'enter', index * 24));
     else if (pendingDataUpdate) {
       const cards = [
         ...document.querySelectorAll('#heroStrip .hero-card'),

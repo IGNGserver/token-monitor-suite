@@ -1,10 +1,13 @@
-// Transfer view: move one device's recorded history onto another device.
+// Device data transfer panel.
 //
-// The source device keeps reporting normally — only the ownership of the
-// already-recorded data changes. The Hub moves the ledger, merges the target's
-// periods and sessions, and pins the source's ingest baseline, so its next
-// upload books only new usage. This view just states that contract and asks
-// the Hub to do it; every mutation happens inside one Hub transaction.
+// Move one device's entire recorded history onto another existing device.
+// The Hub rewrites every ledger row to the target, additively merges its
+// periods and sessions, and then removes the source device — the warning the
+// UI shows is the contract the endpoint implements. Every mutation happens
+// inside one Hub transaction.
+//
+// The panel renders inside the settings page (group `transfer`) and as a
+// standalone view; both call sites share renderTransferPanel().
 
 import { request, confirmAction } from '../transport/index.js';
 import { tr, escapeHtml, appState, viewHelper, showToast, rerender } from '../core/viewContext.js';
@@ -17,18 +20,16 @@ function deviceOptions(rows, selectedId) {
   return rows.map((row) => `<fluent-option value="${escapeHtml(row.key)}"${row.key === selectedId ? ' selected' : ''}>${escapeHtml(row.name)}</fluent-option>`).join('');
 }
 
-export function renderTransfer() {
-  const stats = viewStats();
-  const rows = deviceRows(stats, 'allTime');
-  if (!rows.length) return emptyHtml('empty.usage');
-
+/** The transfer form as it appears inside the settings page. */
+export function renderTransferPanel() {
+  const rows = deviceRows(viewStats(), 'allTime');
   const admin = appState().authorization?.scopes?.includes('admin');
+  if (!rows.length) return `<p class="muted tiny">${escapeHtml(tr('transfer.noDevices'))}</p>`;
   const selectedId = appState().prefs.selectedDeviceId || rows[0].key;
   return `
+    <p class="muted tiny">${escapeHtml(tr('transfer.description'))}</p>
     <div class="notice warn" role="status">${escapeHtml(tr('transfer.notice'))}</div>
-    <form class="panel transfer-form" data-transfer-form>
-      <div class="panel-head"><h2 class="panel-title">${escapeHtml(tr('transfer.title'))}</h2></div>
-      <p class="muted tiny">${escapeHtml(tr('transfer.description'))}</p>
+    <form class="transfer-form" data-transfer-form>
       <div class="form-grid">
         <label class="field"><span>${tr('transfer.source')}</span>
           <fluent-dropdown name="sourceDevice">${deviceOptions(rows, selectedId)}</fluent-dropdown>
@@ -43,14 +44,26 @@ export function renderTransfer() {
     </form>`;
 }
 
+/** The standalone transfer view wraps the same panel. */
+export function renderTransfer() {
+  const rows = deviceRows(viewStats(), 'allTime');
+  if (!rows.length) return emptyHtml('empty.usage');
+  return `<div class="settings-layout settings-transfer-layout">
+      <section class="panel desktop-settings-group" data-desktop-group="transfer">
+        <div class="panel-head"><h2 class="panel-title">${escapeHtml(tr('transfer.title'))}</h2></div>
+        <div class="desktop-settings-body">${renderTransferPanel()}</div>
+      </section>
+    </div>`;
+}
+
 /** Submit the transfer. Returns an error message or ''. */
 export async function submitTransfer(form) {
   const source = String(form.querySelector('[name="sourceDevice"]')?.value || '').trim();
   const target = String(form.querySelector('[name="targetDevice"]')?.value || '').trim();
   if (!source || !target) return tr('transfer.missingFields');
   if (source === target) return tr('transfer.sameDevice');
-  // The Hub refuses a missing target and never touches the source's identity,
-  // so the confirm dialog is the only gate this destructive action needs.
+  // The confirm dialog is the only gate: the Hub moves every recorded row to
+  // the target and deletes the source device in one transaction.
   const confirmed = await confirmAction(tr('transfer.confirm', { source, target }), { danger: true });
   if (!confirmed) return '';
   try {

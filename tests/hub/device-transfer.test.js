@@ -55,7 +55,7 @@ async function startTransferHub() {
   return { hub, repository, port, transfer, ingest };
 }
 
-test('transfer moves the ledger and merges periods into the existing target', async () => {
+test('transfer moves the ledger, merges periods, and removes the source device', async () => {
   const ctx = await startTransferHub();
   const { hub, transfer, ingest } = ctx;
   try {
@@ -69,14 +69,14 @@ test('transfer moves the ledger and merges periods into the existing target', as
     const target = stats.devices.find((device) => device.deviceId === 'dev-b');
     const source = stats.devices.find((device) => device.deviceId === 'dev-a');
     assert.equal(target.periods.allTime.totalTokens, 140, 'target owns both devices\' history');
-    assert.equal(source.periods.allTime.totalTokens, 0, 'source display snapshot is cleared');
+    assert.equal(source, undefined, 'the source device is removed by the Hub');
     assert.equal(stats.periods.allTime.totalTokens, 140, 'the aggregate does not double-count');
   } finally {
     await hub.stop();
   }
 });
 
-test('the source device keeps recording and only new usage is booked', async () => {
+test('a removed source re-registering under the same id only books new usage', async () => {
   const ctx = await startTransferHub();
   const { hub, repository, transfer, ingest } = ctx;
   try {
@@ -86,8 +86,9 @@ test('the source device keeps recording and only new usage is booked', async () 
     assert.equal(transferred.status, 200);
     const eventsAfterTransfer = repository.events.length;
 
-    // The source's next upload repeats its cumulative counters (it does not
-    // know the transfer happened) plus genuinely new usage.
+    // The operator re-identified this machine; until then its agent keeps
+    // uploading under the old cumulative id. The pinned baseline means the
+    // replayed cumulative counters book nothing; only new usage counts.
     await ingest(payload(120, { deviceId: 'dev-a', updatedAt: '2026-07-18T02:00:00.000Z' }));
 
     assert.equal(repository.events.length - eventsAfterTransfer, 1, 'exactly one new event');

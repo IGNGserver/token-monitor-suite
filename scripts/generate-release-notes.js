@@ -2,169 +2,143 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
 
-const CATEGORY_ORDER = ['Added', 'Changed', 'Improved', 'Fixed'];
-const CATEGORY_ZH = Object.freeze({
-  Added: '新增',
-  Changed: '变更',
-  Improved: '改进',
-  Fixed: '修复'
-});
-const SCOPE_ZH = Object.freeze({
-  android: 'Android',
-  collector: '采集器',
-  desktop: '桌面端',
-  electron: '桌面端',
-  home: '首页',
-  hub: 'Hub',
-  limits: '用量限制',
-  release: '发布流程',
-  renderer: '界面',
-  settings: '设置',
-  sync: '同步',
-  tray: '托盘',
-  updater: '更新器',
-  windows: 'Windows'
-});
-const IGNORED_TYPES = new Set(['build', 'ci', 'chore', 'docs', 'style', 'test']);
-const START_MARKERS = Object.freeze({
-  en: '<!-- app-update-notes:en:start -->',
-  zh: '<!-- app-update-notes:zh:start -->'
-});
-const END_MARKERS = Object.freeze({
-  en: '<!-- app-update-notes:en:end -->',
-  zh: '<!-- app-update-notes:zh:end -->'
-});
+const DEFAULT_REPOSITORY = 'IGNGserver/token-monitor-suite';
+const DEFAULT_TEMPLATE = '.github/RELEASE_TEMPLATE.md';
+const DEFAULT_OUTPUT = 'release-body.md';
+const HUB_IMAGE_NAME = 'token-monitor-hub';
 
-function parseCommitSubject(subject) {
-  const text = String(subject || '').trim();
-  if (!text || /^merge\b/i.test(text)) return null;
-  const match = /^(?<type>[a-z]+)(?:\((?<scope>[^)]+)\))?(?<breaking>!)?:\s*(?<summary>.+)$/i.exec(text);
-  if (!match) return null;
+const NOTES_START_MARKER = '<!-- app-update-notes:zh:start -->';
+const NOTES_END_MARKER = '<!-- app-update-notes:zh:end -->';
+const DOWNLOADS_MARKER = '<!-- release-downloads -->';
+const HUB_MARKER = '<!-- release-hub-image -->';
 
-  const type = match.groups.type.toLowerCase();
-  if (IGNORED_TYPES.has(type) || /^(?:release|prepare version)\b/i.test(match.groups.summary)) return null;
-  let category;
-  if (match.groups.breaking) category = 'Changed';
-  else if (type === 'feat') category = 'Added';
-  else if (type === 'fix') category = 'Fixed';
-  else if (type === 'perf' || type === 'refactor' || type === 'revert') category = 'Improved';
-  else return null;
+/**
+ * The download list and the only place release artifact file names are spelled out.
+ * `tests/shared/releaseArtifactNames.test.js` ties every row back to the
+ * electron-builder `artifactName` patterns and to the release job's upload globs, so an
+ * artifact that exists on the release page can no longer be missing from the list —
+ * that is how the Android APK stayed off every release body.
+ */
+const RELEASE_ARTIFACTS = Object.freeze([
+  { label: 'macOS Apple Silicon', file: 'Token-Monitor-{version}-arm64.dmg', note: '' },
+  { label: 'macOS Intel', file: 'Token-Monitor-{version}-x64.dmg', note: '' },
+  { label: 'Windows 安装版', file: 'Token-Monitor-Setup-{version}.exe', note: '推荐' },
+  { label: 'Windows 便携版', file: 'Token-Monitor-{version}.exe', note: '免安装' },
+  { label: 'Linux x64 AppImage', file: 'Token-Monitor-{version}.AppImage', note: '应用内自动更新用这个' },
+  { label: 'Linux x64 Debian 包', file: 'Token-Monitor-{version}.deb', note: 'App Center / APT 更新链路用这个' },
+  { label: 'Android 手机端', file: 'Token-Monitor-Android-{version}.apk', note: 'Hub 的读端，已用长期签名密钥签名' }
+]);
 
-  return {
-    category,
-    scope: String(match.groups.scope || '').trim(),
-    summary: match.groups.summary.trim()
-  };
+function projectVersion(version) {
+  return String(version || '').trim().replace(/^v/i, '');
 }
 
-function normalizeCommit(commit) {
-  if (typeof commit === 'string') return parseCommitSubject(commit);
-  if (!commit || typeof commit !== 'object') return null;
-  if (commit.category && CATEGORY_ORDER.includes(commit.category) && commit.summary) {
-    return {
-      category: commit.category,
-      scope: String(commit.scope || '').trim(),
-      summary: String(commit.summary).trim()
-    };
+function assertExactlyOne(body, marker, description) {
+  const count = body.split(marker).length - 1;
+  if (count !== 1) {
+    throw new Error(`expected exactly one ${description} marker (${marker}) in the release template, found ${count}`);
   }
-  return parseCommitSubject(commit.subject || commit.message || '');
 }
 
-function scopeLabel(scope, locale) {
-  const value = String(scope || '').trim();
-  if (!value) return '';
-  if (locale === 'zh') return SCOPE_ZH[value.toLowerCase()] || value;
-  return value;
-}
-
-function releaseNoteBullet(commit, locale) {
-  const scope = scopeLabel(commit.scope, locale);
-  return scope ? `- **${scope}:** ${commit.summary}` : `- ${commit.summary}`;
-}
-
-function collectReleaseNoteGroups(commits, version) {
-  const groups = new Map(CATEGORY_ORDER.map((category) => [category, []]));
-  const seen = new Set();
-  for (const raw of commits || []) {
-    const commit = normalizeCommit(raw);
-    if (!commit) continue;
-    const key = `${commit.category}\u0000${commit.scope}\u0000${commit.summary}`.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    groups.get(commit.category).push(commit);
+function markedNotesSection(body) {
+  assertExactlyOne(body, NOTES_START_MARKER, 'Chinese release-note start');
+  assertExactlyOne(body, NOTES_END_MARKER, 'Chinese release-note end');
+  const start = body.indexOf(NOTES_START_MARKER) + NOTES_START_MARKER.length;
+  const end = body.indexOf(NOTES_END_MARKER, start);
+  const section = body.slice(start, end).trim();
+  // Prose is allowed (the whole point is a human-written Chinese summary), but a block
+  // that still holds only headings means nobody wrote this release's notes.
+  const content = section.split(/\r?\n/).filter((line) => line.trim() && !/^\s*#/.test(line));
+  if (content.length === 0) {
+    throw new Error(
+      'the 本次更新 block is empty: write what this release changed into the marked block of the release template before tagging'
+    );
   }
+  return section;
+}
 
-  if (CATEGORY_ORDER.every((category) => groups.get(category).length === 0)) {
-    groups.get('Fixed').push({
-      category: 'Fixed',
-      scope: 'release',
-      summary: `Maintenance updates for v${String(version || 'this release').replace(/^v/i, '')}.`
-    });
+function artifactFile(artifact, version) {
+  return artifact.file.replaceAll('{version}', version);
+}
+
+function releaseDownloadLines({ version, repository }) {
+  const base = `https://github.com/${repository}/releases/download/v${version}`;
+  return RELEASE_ARTIFACTS.map((artifact) => {
+    const file = artifactFile(artifact, version);
+    const note = artifact.note ? `（${artifact.note}）` : '';
+    return `- **${artifact.label}** — [${file}](${base}/${file})${note}`;
+  }).join('\n');
+}
+
+function hubDeploymentSection({ version, repositoryOwner, releaseType }) {
+  const image = `ghcr.io/${String(repositoryOwner || '').toLowerCase()}/${HUB_IMAGE_NAME}`;
+  const lines = [
+    '---',
+    '',
+    '## Hub 镜像与 Compose',
+    '',
+    '```bash',
+    `docker pull ${image}:${version}`
+  ];
+  if (releaseType === 'release') lines.push(`docker pull ${image}:latest`);
+  lines.push('```', '');
+  if (releaseType === 'release') {
+    lines.push(`Compose：在 \`.env\` 里设 \`TOKEN_MONITOR_VERSION=${version}\`（或 \`latest\`），然后 \`docker compose pull && docker compose up -d\`。`);
+  } else {
+    lines.push(`Compose：在 \`.env\` 里设 \`TOKEN_MONITOR_VERSION=${version}\`，然后 \`docker compose pull && docker compose up -d\`。本次是 prerelease，不会移动 \`latest\` 标签。`);
   }
-  return groups;
+  lines.push(
+    '',
+    `最小部署包是 Assets 里的 \`Token-Monitor-Hub-Compose-${version}.zip\`；不带图形界面的采集器用 \`Token-Monitor-Headless-${version}.tar.gz\`，解压后执行 \`npm ci --omit=dev\`。`
+  );
+  return lines.join('\n');
 }
 
-function formatReleaseNoteSection(groups, locale) {
-  const lines = [];
-  for (const category of CATEGORY_ORDER) {
-    const entries = groups.get(category) || [];
-    if (entries.length === 0) continue;
-    lines.push(`### ${locale === 'zh' ? CATEGORY_ZH[category] : category}`);
-    lines.push(...entries.map((entry) => releaseNoteBullet(entry, locale)));
-    lines.push('');
+function substitutePlaceholders(text, values) {
+  return text.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key) => {
+    if (!Object.prototype.hasOwnProperty.call(values, key)) {
+      throw new Error(`unknown release template placeholder: ${match}`);
+    }
+    return values[key];
+  });
+}
+
+function renderReleaseBody(template, {
+  version,
+  repository = DEFAULT_REPOSITORY,
+  repositoryOwner,
+  releaseType = 'prerelease'
+} = {}) {
+  const cleanVersion = projectVersion(version);
+  if (!cleanVersion) throw new Error('renderReleaseBody requires a version');
+
+  const substituted = substitutePlaceholders(template, {
+    version: cleanVersion,
+    tag: `v${cleanVersion}`,
+    repository,
+    repositoryUrl: `https://github.com/${repository}`
+  });
+
+  // Read the notes after substitution so a version token can never leak into the
+  // section the app updater parses out of the release body.
+  markedNotesSection(substituted);
+  assertExactlyOne(substituted, DOWNLOADS_MARKER, 'download list');
+  assertExactlyOne(substituted, HUB_MARKER, 'Hub deployment');
+
+  const body = substituted
+    .replace(DOWNLOADS_MARKER, releaseDownloadLines({ version: cleanVersion, repository }))
+    .replace(HUB_MARKER, hubDeploymentSection({
+      version: cleanVersion,
+      repositoryOwner: repositoryOwner || repository.split('/')[0],
+      releaseType
+    }));
+
+  if (/\{\{/.test(body)) {
+    throw new Error('the rendered release body still contains an unresolved {{ placeholder');
   }
-  return lines.join('\n').trim();
-}
-
-function replaceMarkedSection(body, locale, content) {
-  const startMarker = START_MARKERS[locale];
-  const endMarker = END_MARKERS[locale];
-  const start = body.indexOf(startMarker);
-  if (start < 0) throw new Error(`Release template is missing the ${locale} start marker`);
-  const contentStart = start + startMarker.length;
-  const end = body.indexOf(endMarker, contentStart);
-  if (end < 0) throw new Error(`Release template is missing the ${locale} end marker`);
-  return `${body.slice(0, contentStart)}\n${content}\n${body.slice(end)}`;
-}
-
-function renderReleaseBody(template, { version, commits = [] } = {}) {
-  const groups = collectReleaseNoteGroups(commits, version);
-  let body = replaceMarkedSection(template, 'en', formatReleaseNoteSection(groups, 'en'));
-  body = replaceMarkedSection(body, 'zh', formatReleaseNoteSection(groups, 'zh'));
+  markedNotesSection(body);
   return body;
-}
-
-function git(args, cwd = process.cwd()) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
-}
-
-function resolvePreviousTag(headRef = 'HEAD', cwd = process.cwd()) {
-  try {
-    const exactTag = git(['describe', '--exact-match', '--tags', '--match', 'v*', headRef], cwd);
-    if (exactTag) return git(['describe', '--tags', '--abbrev=0', '--match', 'v*', `${headRef}^`], cwd);
-  } catch (_) {}
-  try {
-    return git(['describe', '--tags', '--abbrev=0', '--match', 'v*', headRef], cwd);
-  } catch (_) {
-    return '';
-  }
-}
-
-function readGitCommits({ baseRef = '', headRef = 'HEAD', cwd = process.cwd() } = {}) {
-  const range = baseRef ? `${baseRef}..${headRef}` : headRef;
-  let output;
-  try {
-    output = execFileSync('git', [
-      'log', '--no-merges', '--pretty=format:%s%x1f%b%x1e', range, '--'
-    ], { cwd, encoding: 'utf8' });
-  } catch (_) {
-    return [];
-  }
-  return output.split('\x1e')
-    .map((record) => record.split('\x1f')[0].trim())
-    .filter(Boolean);
 }
 
 function parseArgs(argv) {
@@ -186,41 +160,50 @@ function parseArgs(argv) {
 
 function generateReleaseBody({
   version,
-  templatePath,
-  outputPath,
-  baseRef,
-  headRef = 'HEAD',
+  templatePath = DEFAULT_TEMPLATE,
+  outputPath = DEFAULT_OUTPUT,
+  repository = DEFAULT_REPOSITORY,
+  repositoryOwner,
+  releaseType = 'prerelease',
   cwd = process.cwd()
-}) {
+} = {}) {
   const template = fs.readFileSync(path.resolve(cwd, templatePath), 'utf8');
-  const previousTag = baseRef || resolvePreviousTag(headRef, cwd);
-  const commits = readGitCommits({ baseRef: previousTag, headRef, cwd });
-  const body = renderReleaseBody(template, { version, commits });
-  fs.writeFileSync(path.resolve(cwd, outputPath), body, 'utf8');
-  return { body, previousTag, commits };
+  const body = renderReleaseBody(template, {
+    version,
+    repository,
+    repositoryOwner,
+    releaseType
+  });
+  const resolvedOutput = path.resolve(cwd, outputPath);
+  fs.writeFileSync(resolvedOutput, `${body.trimEnd()}\n`, 'utf8');
+  return { body, outputPath: resolvedOutput };
 }
 
 if (require.main === module) {
   const args = parseArgs(process.argv.slice(2));
-  const version = String(args.version || '').replace(/^v/i, '').trim();
+  const repository = String(args.repository || DEFAULT_REPOSITORY).trim();
   const result = generateReleaseBody({
-    version: version || 'unknown',
-    templatePath: args.template || '.github/RELEASE_TEMPLATE.md',
-    outputPath: args.output || 'release-body.md',
-    baseRef: args.base || '',
-    headRef: args.head || 'HEAD'
+    version: args.version || '',
+    templatePath: args.template || DEFAULT_TEMPLATE,
+    outputPath: args.output || DEFAULT_OUTPUT,
+    repository,
+    repositoryOwner: args.owner,
+    releaseType: args['release-type'] || 'prerelease'
   });
-  console.log(`Rendered release notes from ${result.previousTag || 'repository history'} (${result.commits.length} commits).`);
+  console.log(`Rendered release body for ${projectVersion(args.version)} -> ${result.outputPath}`);
 }
 
 module.exports = {
-  CATEGORY_ORDER,
-  CATEGORY_ZH,
-  collectReleaseNoteGroups,
-  formatReleaseNoteSection,
+  DEFAULT_REPOSITORY,
+  DOWNLOADS_MARKER,
+  HUB_MARKER,
+  NOTES_END_MARKER,
+  NOTES_START_MARKER,
+  RELEASE_ARTIFACTS,
+  artifactFile,
   generateReleaseBody,
-  parseCommitSubject,
-  readGitCommits,
-  renderReleaseBody,
-  resolvePreviousTag
+  hubDeploymentSection,
+  projectVersion,
+  releaseDownloadLines,
+  renderReleaseBody
 };

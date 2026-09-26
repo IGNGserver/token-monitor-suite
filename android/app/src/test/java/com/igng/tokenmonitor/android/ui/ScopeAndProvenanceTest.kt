@@ -1,11 +1,16 @@
 package com.igng.tokenmonitor.android.ui
 
 import com.igng.tokenmonitor.android.data.model.HistoryDayDto
+import com.igng.tokenmonitor.android.data.model.PeriodDto
+import com.igng.tokenmonitor.android.data.model.PeriodsDto
+import com.igng.tokenmonitor.android.data.model.StatsDto
 import com.igng.tokenmonitor.android.data.model.SubscriptionDto
+import com.igng.tokenmonitor.android.data.model.UsageRangeDto
 import com.igng.tokenmonitor.android.ui.components.heatmapWeekdayLabels
 import com.igng.tokenmonitor.android.ui.components.topShareEntries
 import com.igng.tokenmonitor.android.ui.core.DateRanges
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -26,7 +31,7 @@ class ScopeAndProvenanceTest {
 
   @Test
   fun yesterdayIsAClosedOneDayWindow() {
-    val window = DateRanges.presetRangeWindow("yesterday", monday, Locale.UK)!!
+    val window = DateRanges.presetRangeWindow("yesterday", monday)!!
     assertEquals(monday.minusDays(1), window.startDate)
     assertEquals(monday.minusDays(1), window.endDate)
     // Day boundaries are inclusive end-to-start so a preset and a hand-picked range
@@ -36,30 +41,207 @@ class ScopeAndProvenanceTest {
   }
 
   @Test
-  fun weekRunsUpToTodayAndStartsOnTheLocalesFirstDay() {
-    val week = DateRanges.presetRangeWindow("week", wednesday, Locale.UK)!!
+  fun theWeekWindowIsIsoMondayWhateverTheDeviceLocaleIs() {
+    val week = DateRanges.presetRangeWindow("week", wednesday)!!
     assertEquals(wednesday, week.endDate)
-    assertEquals(DayOfWeek.MONDAY, DateRanges.firstDayOfWeek(Locale.UK))
     // A Wednesday inside a Monday-start week sits two days in.
     assertEquals(wednesday.minusDays(2), week.startDate)
 
-    val sundayStart = DateRanges.presetRangeWindow("week", wednesday, Locale.US)!!
+    // A US locale's CLDR week starts on Sunday, and the grid still shows that
+    // (`firstDayOfWeek` is display).  The *window* must not follow it: the web scope bar
+    // answers Monday-through-today, so a locale-driven port would report a different
+    // figure for the same 本周 label — a second measurement, not a second rendering.
     assertEquals(DayOfWeek.SUNDAY, DateRanges.firstDayOfWeek(Locale.US))
-    assertEquals(wednesday.minusDays(3), sundayStart.startDate)
+    assertEquals(wednesday.minusDays(2), DateRanges.scopeWeekStart(wednesday))
+    assertEquals(monday, DateRanges.scopeWeekStart(monday))
+    // Sunday is the last day of the ISO week that started the previous Monday.
+    assertEquals(
+      LocalDate.of(2026, 9, 21),
+      DateRanges.presetRangeWindow("week", LocalDate.of(2026, 9, 27))!!.startDate
+    )
   }
 
   @Test
   fun aWindowStopsMatchingWhenTheDateRollsOver() {
-    val morning = DateRanges.presetRangeWindow("week", monday, Locale.UK)!!
+    val morning = DateRanges.presetRangeWindow("week", monday)!!
     assertTrue(morning.stillMatches(morning))
-    val nextDay = DateRanges.presetRangeWindow("week", monday.plusDays(1), Locale.UK)!!
+    val nextDay = DateRanges.presetRangeWindow("week", monday.plusDays(1))!!
     assertTrue(
       "the fetched window must be re-resolved after midnight, not kept",
       !morning.stillMatches(nextDay)
     )
-    assertNull(DateRanges.presetRangeWindow("today", monday, Locale.UK))
-    assertNull(DateRanges.presetRangeWindow("month", monday, Locale.UK))
+    assertNull(DateRanges.presetRangeWindow("today", monday))
+    assertNull(DateRanges.presetRangeWindow("month", monday))
   }
+
+  @Test
+  fun aSnapshotTabNeverRendersTheCachedRangeAnswer() {
+    // The regression the overview shipped: it preferred `customRangeResult` for every tab,
+    // so one fetched 昨日 range silently replaced 今日/本月/全部 — two groups of tabs
+    // printing the identical figure while the analytics page showed something else.
+    val yesterday = DateRanges.presetRangeWindow("yesterday", wednesday)!!
+    val state = rangeState(
+      AnalyticsPeriodKind.Yesterday,
+      yesterday,
+      UsageRangeDto(startDate = yesterday.startDate.toString(), endDate = yesterday.endDate.toString(), totalTokens = 500)
+    )
+    for ((kind, expected) in listOf(
+      AnalyticsPeriodKind.Today to 100L,
+      AnalyticsPeriodKind.Month to 2000L,
+      AnalyticsPeriodKind.AllTime to 9000L
+    )) {
+      val resolved = ScopePeriod.resolve(state.copy(analyticsPeriod = kind), today = wednesday)
+      assertEquals("$kind reads the snapshot", expected, resolved?.totalTokens)
+    }
+    assertEquals(500L, ScopePeriod.resolve(state, today = wednesday)?.totalTokens)
+  }
+
+  @Test
+  fun aRangeTabRefusesAnotherWindowsAnswerAndASnapshotPeriod() {
+    val yesterday = DateRanges.presetRangeWindow("yesterday", wednesday)!!
+    val week = DateRanges.presetRangeWindow("week", wednesday)!!
+    val yesterdayAnswer = UsageRangeDto(
+      startDate = yesterday.startDate.toString(),
+      endDate = yesterday.endDate.toString(),
+      totalTokens = 500
+    )
+    val weekAnswer = UsageRangeDto(
+      startDate = week.startDate.toString(),
+      endDate = week.endDate.toString(),
+      totalTokens = 4000
+    )
+    // Mid-transition the week tab is still holding the yesterday selection: it must not
+    // borrow that answer.
+    assertNull(ScopePeriod.resolve(rangeState(AnalyticsPeriodKind.Week, yesterday, yesterdayAnswer), today = wednesday))
+    // A payload whose own day keys do not describe the window is refused as well, so a
+    // misrouted response cannot be rendered under the wrong label.
+    assertNull(ScopePeriod.resolve(rangeState(AnalyticsPeriodKind.Week, week, yesterdayAnswer), today = wednesday))
+    // Nor may a range tab fall back to the snapshot, which is how 昨日 used to print the
+    // same figure as 今日.
+    assertNull(ScopePeriod.resolve(rangeState(AnalyticsPeriodKind.Week, week, null), today = wednesday))
+    assertEquals(
+      4000L,
+      ScopePeriod.resolve(rangeState(AnalyticsPeriodKind.Week, week, weekAnswer), today = wednesday)?.totalTokens
+    )
+  }
+
+  @Test
+  fun aPresetGoesPendingOnlyAfterTheWindowActuallyMoves() {
+    val week = DateRanges.presetRangeWindow("week", wednesday)!!
+    val fetched = UsageRangeDto(
+      startDate = week.startDate.toString(),
+      endDate = week.endDate.toString(),
+      totalTokens = 4000
+    )
+    val state = rangeState(AnalyticsPeriodKind.Week, week, fetched)
+    // Same day: nothing to do, so a stream frame costs a date comparison, not a request.
+    assertNull(ScopePeriod.pendingRangeWindow(state, wednesday))
+    // Past midnight the week grew, so the cached number no longer names the tab.
+    assertEquals(
+      DateRanges.presetRangeWindow("week", wednesday.plusDays(1))!!,
+      ScopePeriod.pendingRangeWindow(state, wednesday.plusDays(1))
+    )
+    // A snapshot tab has no window to re-resolve, and a picked range is fixed.
+    assertNull(ScopePeriod.pendingRangeWindow(state.copy(analyticsPeriod = AnalyticsPeriodKind.Month)))
+    assertNull(
+      ScopePeriod.pendingRangeWindow(
+        state.copy(
+          analyticsPeriod = AnalyticsPeriodKind.Custom,
+          activePresetWindow = null
+        )
+      )
+    )
+  }
+
+  @Test
+  fun aCustomTabNeedsItsOwnSelectionAndNoPresetWindow() {
+    val selection = CustomRangeSelection("2026-09-01", "2026-09-20", 0, 23, "09-01 → 09-20")
+    val fetched = UsageRangeDto(startDate = "2026-09-01", endDate = "2026-09-20", totalTokens = 777)
+    val picked = HubUiState(
+      stats = statsState(),
+      analyticsPeriod = AnalyticsPeriodKind.Custom,
+      customRange = selection,
+      customRangeResult = fetched
+    )
+    assertEquals(777L, ScopePeriod.resolve(picked)?.totalTokens)
+    // A leftover preset window means this result belongs to a preset, not to Custom.
+    assertNull(
+      ScopePeriod.resolve(
+        picked.copy(activePresetWindow = DateRanges.presetRangeWindow("week", wednesday))
+      )
+    )
+    // Custom with no selection yet renders no figure at all rather than someone else's.
+    assertNull(ScopePeriod.resolve(picked.copy(customRange = null, customRangeResult = null)))
+  }
+
+  @Test
+  fun everyRangeSourceIsNamedOnScreen() {
+    // Provenance matters: only some sources carry credits or the estimate flag, so a tab
+    // that hides which one answered is free to present a day-rounded aggregate as if it
+    // were an event-precision total.
+    assertEquals("数据来源：事件账本（小时精度）", ScopePeriod.rangeSourceLabel("usage_events"))
+    assertEquals("数据来源：每日历史（天精度）", ScopePeriod.rangeSourceLabel("history_daily"))
+    assertNull(ScopePeriod.rangeSourceLabel(null))
+    assertNull(ScopePeriod.rangeSourceLabel(""))
+    assertTrue(ScopePeriod.rangeSourceLabel("some_future_source")!!.startsWith("数据来源："))
+    val week = DateRanges.presetRangeWindow("week", wednesday)!!
+    assertTrue(
+      ScopePeriod.rangeLacksModelSplit(
+        rangeState(
+          AnalyticsPeriodKind.Week,
+          week,
+          UsageRangeDto(
+            startDate = week.startDate.toString(),
+            endDate = week.endDate.toString(),
+            source = "history_daily"
+          )
+        ),
+        today = wednesday
+      )
+    )
+    assertFalse(
+      "the event ledger does carry the client×model split",
+      ScopePeriod.rangeLacksModelSplit(
+        rangeState(
+          AnalyticsPeriodKind.Week,
+          week,
+          UsageRangeDto(
+            startDate = week.startDate.toString(),
+            endDate = week.endDate.toString(),
+            source = "usage_events"
+          )
+        ),
+        today = wednesday
+      )
+    )
+  }
+
+  private fun statsState() = StatsDto(
+    periods = PeriodsDto(
+      today = PeriodDto(totalTokens = 100),
+      month = PeriodDto(totalTokens = 2000),
+      allTime = PeriodDto(totalTokens = 9000)
+    )
+  )
+
+  /** A state as the ViewModel would leave it after one range request for [window]. */
+  private fun rangeState(
+    kind: AnalyticsPeriodKind,
+    window: com.igng.tokenmonitor.android.ui.core.PresetRangeWindow,
+    result: UsageRangeDto?
+  ) = HubUiState(
+    stats = statsState(),
+    analyticsPeriod = kind,
+    customRange = CustomRangeSelection(
+      startDate = window.startDate.toString(),
+      endDate = window.endDate.toString(),
+      startHour = window.startHour,
+      endHour = window.endHour,
+      label = window.label()
+    ),
+    customRangeResult = result,
+    activePresetWindow = window
+  )
 
   @Test
   fun creditsOnlyClientsStillProduceAShareRow() {

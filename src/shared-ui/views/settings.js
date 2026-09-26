@@ -1,19 +1,21 @@
 // Settings view: web preferences plus, on the desktop host, the device groups.
 //
-// Extracted from app.js. The web side configures the browser only; the desktop
-// side additionally renders the device-owned groups from settingsDesktop.js.
-// Device data redistribution lives in the transfer page, not here.
+// The page carries no "desktop settings" headline of its own — the groups
+// speak for themselves. The web side configures the browser only; the desktop
+// side additionally renders the device-owned groups from settingsDesktop.js
+// and the device data transfer panel.
 
 import { isCapable } from '../transport/index.js';
 import { tr, escapeHtml, appState, settingsOptionList } from '../core/viewContext.js';
 import { clampHomeLimitAccountCount } from '../core/data.js';
 import { renderDesktopSettings } from './settingsDesktop.js';
+import { renderTransferPanel } from './transfer.js';
 
 export function renderSettingsPage() {
   const desktopHost = isCapable('desktopSettings');
-  const settingsLabel = desktopHost ? tr('settings.desktopTitle') : tr('settings.webOnly');
-  const settingsDescription = desktopHost ? tr('settings.desktopDescription') : tr('settings.pageDescription');
-  return `<section class="page-intro settings-page-intro"><div><div class="eyebrow">${escapeHtml(settingsLabel)}</div><h2>${escapeHtml(desktopHost ? tr('settings.desktopTitle') : tr('settings.pageTitle'))}</h2><p>${escapeHtml(settingsDescription)}</p></div></section>
+  const settingsLabel = tr('settings.appTitle');
+  const settingsDescription = tr('settings.pageDescription');
+  return `<section class="page-intro settings-page-intro"><div><div class="eyebrow">${escapeHtml(settingsLabel)}</div><h2>${escapeHtml(tr('settings.pageTitle'))}</h2><p>${escapeHtml(settingsDescription)}</p></div></section>
     <div class="settings-layout">
       <form class="panel settings-form" data-web-settings-form data-draft-key="preferences">
         <div class="panel-head"><h2 class="panel-title">${escapeHtml(settingsLabel)}</h2><span class="panel-meta tiny">${escapeHtml(settingsDescription)}</span></div>
@@ -29,7 +31,11 @@ export function renderSettingsPage() {
         <div class="drawer-actions settings-actions"><fluent-button appearance="primary" type="submit" class="primary-btn" data-settings-submit disabled>${escapeHtml(tr('settings.savePage'))}</fluent-button>${desktopHost ? '' : `<fluent-button appearance="transparent" type="button" class="ghost-btn" data-web-signout>${escapeHtml(tr('settings.signOut'))}</fluent-button>`}</div>
       </form>
       ${desktopHost
-        ? `<div class="settings-desktop-stack" data-desktop-settings>${renderDesktopSettings(appState().desktopSettings || {}, appState().desktopCatalog || {}, appState().desktopInfo || {})}</div>`
+        ? `<div class="settings-desktop-stack" data-desktop-settings>${renderDesktopSettings(appState().desktopSettings || {}, appState().desktopCatalog || {}, appState().desktopInfo || {})}</div>
+      <section class="panel desktop-settings-group" data-desktop-group="transfer">
+        <div class="panel-head"><h2 class="panel-title">${escapeHtml(tr('transfer.title'))}</h2></div>
+        <div class="desktop-settings-body">${renderTransferPanel()}</div>
+      </section>`
         : ''}
     </div>`;
 }

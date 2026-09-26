@@ -16,6 +16,7 @@ const {
 const { mergeMacUpdaterMetadata } = require('../../scripts/merge-mac-updater-metadata');
 const { resolveElectronVersionOverride } = require('../../scripts/electron-builder-version');
 const { extractReleaseNotes } = require('../../src/shared/appUpdater');
+const { RELEASE_ARTIFACTS, renderReleaseBody } = require('../../scripts/generate-release-notes');
 const { MAC_APP_MIN_DARWIN_VERSION } = require('../../src/shared/macSystemRequirements');
 
 function macUpdaterMetadata(version, arch) {
@@ -56,18 +57,45 @@ test('release artifact templates use GitHub-safe names', () => {
   for (const pattern of patterns) assert.doesNotMatch(pattern, /\s/);
 });
 
-test('updater metadata embeds every localized release-note section', () => {
+test('updater metadata embeds the Chinese release-note section', () => {
   assert.equal(rootPackage.build.releaseInfo?.releaseNotesFile, '.github/RELEASE_TEMPLATE.md');
   const releaseTemplate = fs.readFileSync(
     path.join(__dirname, '..', '..', rootPackage.build.releaseInfo.releaseNotesFile),
     'utf8'
   );
   const notes = extractReleaseNotes(releaseTemplate);
-  assert.deepEqual(Object.keys(notes), ['en', 'zh', 'zh-TW', 'ko', 'ja']);
-  for (const locale of Object.keys(notes)) {
-    assert.ok(notes[locale].length > 0, `${locale} has no release-note groups`);
-    assert.ok(notes[locale].every((group) => group.items.length > 0), `${locale} has an empty release-note group`);
+  // The release body is Chinese-only by project decision; `.github/RELEASE_NOTES_FORMAT.md`
+  // is the shape, and a second language here would silently become a stale one.
+  assert.deepEqual(Object.keys(notes), ['zh']);
+  assert.ok(notes.zh.length > 0, 'zh has no release-note groups');
+  assert.ok(notes.zh.every((group) => group.items.length > 0), 'zh has an empty release-note group');
+  assert.doesNotMatch(releaseTemplate, /releases\/download\//, 'download links are rendered from RELEASE_ARTIFACTS; the template must not hand-write them');
+});
+
+test('download list names match the artifacts the build actually produces', () => {
+  const version = rootPackage.version;
+  const expand = (pattern, ext, arch) => pattern
+    .replaceAll('${version}', version)
+    .replaceAll('${arch}', arch || '')
+    .replaceAll('${ext}', ext);
+  const builtNames = new Set([
+    expand(rootPackage.build.mac.artifactName, 'dmg', 'arm64'),
+    expand(rootPackage.build.mac.artifactName, 'dmg', 'x64'),
+    expand(rootPackage.build.linux.artifactName, 'AppImage'),
+    expand(rootPackage.build.linux.artifactName, 'deb'),
+    expand(rootPackage.build.nsis.artifactName, 'exe'),
+    expand(rootPackage.build.portable.artifactName, 'exe'),
+    `Token-Monitor-Android-${version}.apk`
+  ]);
+
+  const listed = RELEASE_ARTIFACTS.map((artifact) => artifact.file.replaceAll('{version}', version));
+  assert.equal(listed.length, builtNames.size, 'every built artifact should be downloadable from the release body');
+  for (const name of listed) {
+    assert.ok(builtNames.has(name), `${name} is offered for download but no build target produces it`);
   }
+
+  const workflow = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'release.yml'), 'utf8');
+  assert.match(workflow, /Token-Monitor-Android-\$\{version\}\.apk/);
 });
 
 test('mac release scripts build native Apple Silicon and Intel artifacts', () => {
@@ -82,22 +110,16 @@ test('mac release scripts build native Apple Silicon and Intel artifacts', () =>
   assert.doesNotMatch(workflow, /latest-mac-(?:arm64|x64)\.yml/);
 
   const releaseTemplate = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'RELEASE_TEMPLATE.md'), 'utf8');
-  const intelBullets = releaseTemplate.split('\n').filter((line) => line.startsWith('- **macOS Intel**'));
+  const body = renderReleaseBody(releaseTemplate, { version: rootPackage.version });
+  const intelBullets = body.split('\n').filter((line) => line.startsWith('- **macOS Intel**'));
   const intelDmg = `Token-Monitor-${rootPackage.version}-x64.dmg`;
-  assert.equal(intelBullets.length, 5);
-  assert.ok(intelBullets.every((line) => line.split(intelDmg).length === 3));
-  assert.ok(intelBullets.every((line) => line.includes(`/download/v${rootPackage.version}/`)));
-  const fullChangelogSummaries = releaseTemplate
-    .split('\n')
-    .filter((line) => line.startsWith('<summary><strong>Full Changelog:</strong>'));
-  assert.equal(fullChangelogSummaries.length, 1);
-  assert.match(fullChangelogSummaries[0], />v\d+\.\d+\.\d+(?:-rev\.\d+)?\.\.\.v\d+\.\d+\.\d+(?:-rev\.\d+)?<\/a>/);
-  assert.match(fullChangelogSummaries[0], /https:\/\/github\.com\/IGNGserver\/token-monitor-suite\/compare\/v\d+\.\d+\.\d+(?:-rev\.\d+)?\.\.\.v\d+\.\d+\.\d+(?:-rev\.\d+)?/);
-  assert.ok(fullChangelogSummaries[0].includes(`v${rootPackage.version}`));
-  assert.match(
-    releaseTemplate,
-    /---\s*<details>\s*<summary><strong>Full Changelog:<\/strong> <a href="[^"]+">v\d+\.\d+\.\d+(?:-rev\.\d+)?\.\.\.v\d+\.\d+\.\d+(?:-rev\.\d+)?<\/a><\/summary>\s*<!-- github-generated-release-notes -->\s*<\/details>\s*<details>\s*<summary>繁體中文 · 한국어 · 日本語<\/summary>/
-  );
+  assert.equal(intelBullets.length, 1);
+  assert.equal(intelBullets[0].split(intelDmg).length, 3);
+  assert.ok(intelBullets[0].includes(`/download/v${rootPackage.version}/`));
+  // GitHub's generated changelog was English PR prose, and no workflow step ever filled it
+  // in, so the block shipped empty; the version diff already lives on the tag page.
+  assert.doesNotMatch(body, /Full Changelog|github-generated-release-notes/);
+  assert.doesNotMatch(body, /繁體中文|한국어|日本語/);
 });
 
 test('release workflow pins Electron only for the Linux artifact', () => {

@@ -31,7 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import com.igng.tokenmonitor.android.data.model.PeriodDto
-import com.igng.tokenmonitor.android.ui.toPeriodDto
+import com.igng.tokenmonitor.android.ui.ScopePeriod
 import com.igng.tokenmonitor.android.ui.AnalyticsPeriodKind
 import com.igng.tokenmonitor.android.ui.HubUiState
 import com.igng.tokenmonitor.android.ui.HubViewModel
@@ -53,6 +53,7 @@ import com.igng.tokenmonitor.android.ui.components.HeatmapMetric
 import com.igng.tokenmonitor.android.ui.components.LimitsSection
 import com.igng.tokenmonitor.android.ui.components.MonthlyTrendChart
 import com.igng.tokenmonitor.android.ui.components.SectionHeader
+import com.igng.tokenmonitor.android.ui.components.ScopeRangeNotice
 import com.igng.tokenmonitor.android.ui.components.ShareBarList
 import com.igng.tokenmonitor.android.ui.components.ShareEntry
 import com.igng.tokenmonitor.android.ui.components.StackedDailyTrendChart
@@ -178,6 +179,9 @@ private fun ShareAnalyticsTab(
   val emptyText = when {
     state.analyticsPeriod.needsRange && state.customRangeLoading -> "正在加载所选范围…"
     state.analyticsPeriod == AnalyticsPeriodKind.Custom && state.customRange == null -> "点「自定义」选择起止时间。"
+    // No answer for a range tab is not the same statement as "this window is empty":
+    // the request failed, or the cached window stopped matching after midnight.
+    state.analyticsPeriod.needsRange && period == null -> "该范围目前没有可用数据，可在上方重试。"
     clients -> "这个周期没有客户端用量。"
     else -> "这个周期没有模型用量。"
   }
@@ -208,7 +212,7 @@ private fun ShareAnalyticsTab(
       contentPadding = FluentSpacingDefaults.l,
     )
 
-    if (state.analyticsPeriod == AnalyticsPeriodKind.Custom) {
+    if (state.analyticsPeriod.needsRange) {
       Row(
         Modifier
           .fillMaxWidth()
@@ -219,27 +223,21 @@ private fun ShareAnalyticsTab(
         horizontalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.s),
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Column(Modifier.weight(1f)) {
-          Text(
-            state.customRange?.label ?: "未选择范围",
-            style = FluentTypeRamp.caption1,
-            color = colors.neutralForeground2
-          )
-          state.customRangeResult?.source?.takeIf { it.isNotBlank() }?.let { source ->
-            // Provenance stays on screen: an hour-precision event ledger range and
-            // a day-precision history fallback are not the same measurement.
-            Text(
-              when (source) {
-                "usage_events" -> "数据来源：事件账本（小时精度）"
-                "history_daily" -> "数据来源：每日历史（天精度回退）"
-                else -> "数据来源：$source"
-              },
-              style = FluentTypeRamp.caption2,
-              color = colors.neutralForeground3
-            )
-          }
+        // Presets get the same window-and-source read-out as a picked range: they are the
+        // same kind of answer (a calendar span resolved through `/api/usage/range`), and a
+        // day-rounded daily history is not the same measurement as an hour-precision
+        // event ledger even when both print the same token figure.
+        ScopeRangeNotice(
+          windowLabel = state.customRange?.label ?: "未选择范围",
+          sourceLabel = ScopePeriod.rangeSourceLabel(state.customRangeResult?.source),
+          loading = state.customRangeLoading,
+          unavailable = !state.customRangeLoading && resolvePeriod(state) == null,
+          onRetry = { viewModel.retryScopeRange() },
+          modifier = Modifier.weight(1f)
+        )
+        if (state.analyticsPeriod == AnalyticsPeriodKind.Custom) {
+          FluentTextButton(label = "调整", onClick = { showPicker = true })
         }
-        FluentTextButton(label = "调整", onClick = { showPicker = true })
       }
     }
 
@@ -415,21 +413,15 @@ fun ClientDetailScreen(
   val period = resolvePeriod(state)
   val tokens = period?.clients?.get(clientId) ?: 0L
   val cost = period?.clientCosts?.get(clientId) ?: 0.0
-  val (modelTokens, modelCosts) = when (state.analyticsPeriod) {
-    AnalyticsPeriodKind.Custom,
-    AnalyticsPeriodKind.Yesterday,
-    AnalyticsPeriodKind.Week -> {
-      val range = state.customRangeResult
-      (range?.clientModels?.get(clientId).orEmpty()) to (range?.clientModelCosts?.get(clientId).orEmpty())
-    }
-    else -> {
-      val mapped = period?.clientModels?.get(clientId).orEmpty()
-      if (mapped.isNotEmpty()) {
-        mapped to period?.clientModelCosts?.get(clientId).orEmpty()
-      } else {
-        modelsFromSessions(period, clientId)
-      }
-    }
+  // One rule for every scope tab: prefer the attribution the period carries, and fall
+  // back to session rows only where it has none.  The presets used to read the raw range
+  // payload here while the snapshot tabs read the folded period, which is how a tab could
+  // show a client's total and then claim it had no models at all.
+  val attributed = period?.clientModels?.get(clientId).orEmpty()
+  val (modelTokens, modelCosts) = if (attributed.isNotEmpty()) {
+    attributed to period?.clientModelCosts?.get(clientId).orEmpty()
+  } else {
+    modelsFromSessions(period, clientId)
   }
   val shares = topShareEntries(modelTokens, modelCosts, limit = 12)
   val title = ClientBranding.label(clientId)
@@ -441,7 +433,11 @@ fun ClientDetailScreen(
     heroTokens = tokens,
     heroCost = cost,
     leading = { ClientMonogram(clientId, size = 36.dp) },
-    emptyText = "该客户端在此范围内没有模型拆分。",
+    emptyText = when {
+      period == null && state.analyticsPeriod.needsRange -> "该范围目前没有可用数据。"
+      ScopePeriod.rangeLacksModelSplit(state) -> "该范围由每日历史答复，它按天汇总客户端与模型，不含客户端×模型拆分。"
+      else -> "该客户端在此范围内没有模型拆分。"
+    },
     shares = shares,
     brandClients = false,
     onHome = onHome
@@ -459,28 +455,15 @@ fun ModelDetailScreen(
   val period = resolvePeriod(state)
   val tokens = period?.models?.get(modelId) ?: 0L
   val cost = period?.modelCosts?.get(modelId) ?: 0.0
-  val (clientTokens, clientCosts) = when (state.analyticsPeriod) {
-    AnalyticsPeriodKind.Custom,
-    AnalyticsPeriodKind.Yesterday,
-    AnalyticsPeriodKind.Week -> {
-      val range = state.customRangeResult
-      val t = linkedMapOf<String, Long>()
-      val c = linkedMapOf<String, Double>()
-      range?.clientModels?.forEach { (client, models) ->
-        val value = models[modelId] ?: return@forEach
-        t[client] = value
-        c[client] = range.clientModelCosts[client]?.get(modelId) ?: 0.0
-      }
-      t to c
-    }
-    // Prefer the same `clientModels` attribution the client-detail screen uses, so the
-    // two directions of the same split cannot disagree.  The session-derived fallback
-    // apportioned a session's cost across its models by token share, which is a
-    // different measurement and is only used where the wire carries no client×model
-    // map at all.
-    else -> clientsFromPeriod(period, modelId).let { attributed ->
-      if (attributed.first.isNotEmpty()) attributed else clientsFromSessions(period, modelId)
-    }
+  // Prefer the same `clientModels` attribution the client-detail screen uses, so the two
+  // directions of the same split cannot disagree.  The session-derived fallback apportioned
+  // a session's cost across its models by token share, which is a different measurement and
+  // is only used where the period carries no client×model map at all.
+  val attributed = clientsFromPeriod(period, modelId)
+  val (clientTokens, clientCosts) = if (attributed.first.isNotEmpty()) {
+    attributed
+  } else {
+    clientsFromSessions(period, modelId)
   }
   val shares = topShareEntries(clientTokens, clientCosts, limit = 12)
 
@@ -491,7 +474,11 @@ fun ModelDetailScreen(
     heroTokens = tokens,
     heroCost = cost,
     leading = null,
-    emptyText = "该模型在此范围内没有客户端拆分。",
+    emptyText = when {
+      period == null && state.analyticsPeriod.needsRange -> "该范围目前没有可用数据。"
+      ScopePeriod.rangeLacksModelSplit(state) -> "该范围由每日历史答复，它按天汇总客户端与模型，不含模型×客户端拆分。"
+      else -> "该模型在此范围内没有客户端拆分。"
+    },
     shares = shares,
     brandClients = true,
     onHome = onHome
@@ -596,22 +583,13 @@ private fun DetailScaffold(
 /**
  * The one place a scope tab becomes a [PeriodDto].
  *
- * There were two copies of this mapping — this function and an inline one in the share
- * tab — and the inline copy had already dropped `clientModels` once, which made the
- * tool-detail list read "no usage" for every custom range while the share tab showed
- * numbers for the same range.  A range answer also has to carry the provenance maps,
- * so it goes through the single `toPeriodDto()`.
+ * This was the analytics screen's private copy of a rule the overview also needed, and it
+ * had already diverged twice: an inline version dropped `clientModels`, and the overview
+ * preferred the cached range answer for *every* tab, so 今日/本月/全部 silently showed the
+ * last range's numbers while this screen gated them on `needsRange`.  Both surfaces now
+ * call [ScopePeriod.resolve], and the JVM suite asserts the rule there.
  */
-private fun resolvePeriod(state: HubUiState): PeriodDto? =
-  state.customRangeResult
-    ?.takeIf { state.analyticsPeriod.needsRange }
-    ?.toPeriodDto()
-    ?: when (state.analyticsPeriod) {
-      AnalyticsPeriodKind.Today -> state.stats?.periods?.today
-      AnalyticsPeriodKind.Month -> state.stats?.periods?.month
-      AnalyticsPeriodKind.AllTime -> state.stats?.periods?.allTime
-      else -> null
-    }
+private fun resolvePeriod(state: HubUiState): PeriodDto? = ScopePeriod.resolve(state)
 
 /**
  * Names the *window*, not just the tab.  "今日" is a collector-defined period whose

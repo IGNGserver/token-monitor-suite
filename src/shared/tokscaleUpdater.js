@@ -5,7 +5,6 @@ const crypto = require('node:crypto');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const semver = require('semver');
-const tar = require('tar');
 const { sharedDataDir } = require('./config');
 const { decideResolver, locateBundledBinary, readDownloadedPointer } = require('./collector');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
@@ -134,7 +133,9 @@ async function extractTarball(buffer, stagingDir) {
   await fsp.mkdir(stagingDir, { recursive: true });
   const archivePath = path.join(stagingDir, 'package.tgz');
   await fsp.writeFile(archivePath, buffer);
-  await tar.x({
+  // The archive parser is only needed after a user downloads a new tokscale.
+  // Keep it out of every desktop/agent startup and normal version check.
+  await require('tar').x({
     file: archivePath,
     cwd: stagingDir,
     preservePaths: false,

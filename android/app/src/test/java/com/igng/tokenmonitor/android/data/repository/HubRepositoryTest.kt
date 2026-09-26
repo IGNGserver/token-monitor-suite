@@ -11,6 +11,8 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -38,6 +40,20 @@ class HubRepositoryTest {
     assertTrue(result is HubResult.Success)
     assertEquals("gpt-5", (result as HubResult.Success).value.pricing.single().model)
     assertEquals("Bearer shared-secret", server.takeRequest().getHeader("Authorization"))
+  }
+
+  @Test fun apiReusesConnectionsUntilTargetOrSecretChanges() = runBlocking {
+    val factory = HubApiFactory.forTesting(json)
+    val first = store.read()
+    val firstApi = factory.create(first)
+    assertSame(firstApi, factory.create(first))
+
+    val changed = first.copy(secret = "new-secret")
+    val changedApi = factory.create(changed)
+    assertNotSame(firstApi, changedApi)
+    server.enqueue(MockResponse().setResponseCode(200).setBody("""{"periods":{}}"""))
+    changedApi.stats()
+    assertEquals("Bearer new-secret", server.takeRequest().getHeader("Authorization"))
   }
 
   @Test fun testConnectionVerifiesHealthAndAuthenticatedStats() = runBlocking {

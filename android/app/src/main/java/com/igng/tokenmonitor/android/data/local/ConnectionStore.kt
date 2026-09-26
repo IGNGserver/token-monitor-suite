@@ -24,16 +24,21 @@ interface ConnectionStorage {
 
 @Singleton
 class ConnectionStore @Inject constructor(@ApplicationContext context: Context) : ConnectionStorage {
-  private val masterKey = MasterKey.Builder(context)
-    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-    .build()
-  private val preferences = EncryptedSharedPreferences.create(
-    context,
-    "token_monitor_hub",
-    masterKey,
-    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-  )
+  // Keystore setup and the encrypted preferences file can block on cold launch.
+  // Callers load the first value on Dispatchers.IO; constructing the Hilt graph must
+  // not perform this work on the Activity's first frame.
+  private val preferences by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    val masterKey = MasterKey.Builder(context)
+      .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+      .build()
+    EncryptedSharedPreferences.create(
+      context,
+      "token_monitor_hub",
+      masterKey,
+      EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+      EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+    )
+  }
 
   override fun read(): ConnectionConfig = ConnectionConfig(
     hubUrl = preferences.getString(HUB_URL, "").orEmpty(),

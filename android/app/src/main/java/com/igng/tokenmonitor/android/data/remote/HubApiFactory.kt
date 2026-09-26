@@ -22,25 +22,53 @@ class HubApiFactory private constructor(
 ) {
   @Inject constructor(json: Json) : this(json, 20_000L, false)
 
-  fun create(config: ConnectionConfig): HubApi = Retrofit.Builder()
-    .baseUrl(checkedUrl(config.hubUrl, config.allowInsecureHttp))
-    .client(client(config, eventStream = false))
-    .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
-    .build()
-    .create(HubApi::class.java)
+  private data class CachedClients(
+    val config: ConnectionConfig,
+    val api: HubApi,
+    val streamClient: OkHttpClient
+  )
+
+  @Volatile private var cached: CachedClients? = null
+
+  // Retrofit and OkHttp are designed to be reused. Building them for every endpoint
+  // discards the connection pool, so one dashboard refresh opens several fresh TLS
+  // connections to the same Hub. A changed URL or secret gets a new authenticated pair.
+  private fun clients(config: ConnectionConfig): CachedClients {
+    cached?.takeIf { it.config == config }?.let { return it }
+    return synchronized(this) {
+      cached?.takeIf { it.config == config } ?: run {
+        val baseUrl = checkedUrl(config.hubUrl, config.allowInsecureHttp)
+        val restClient = client(config)
+        val value = CachedClients(
+          config,
+          Retrofit.Builder()
+            .baseUrl(baseUrl)
+            .client(restClient)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(HubApi::class.java),
+          restClient.newBuilder().readTimeout(0, TimeUnit.MILLISECONDS)
+            .pingInterval(15_000L, TimeUnit.MILLISECONDS).build()
+        )
+        cached = value
+        value
+      }
+    }
+  }
+
+  fun create(config: ConnectionConfig): HubApi = clients(config).api
 
   fun eventSource(config: ConnectionConfig, request: Request, listener: EventSourceListener): EventSource =
-    EventSources.createFactory(client(config, eventStream = true)).newEventSource(request, listener)
+    EventSources.createFactory(clients(config).streamClient).newEventSource(request, listener)
 
   fun statsRequest(config: ConnectionConfig): Request = Request.Builder()
     .url("${checkedUrl(config.hubUrl, config.allowInsecureHttp)}api/stats/stream")
     .header("Accept", "text/event-stream")
     .build()
 
-  private fun client(config: ConnectionConfig, eventStream: Boolean): OkHttpClient = OkHttpClient.Builder()
+  private fun client(config: ConnectionConfig): OkHttpClient = OkHttpClient.Builder()
     .connectTimeout(requestTimeoutMs, TimeUnit.MILLISECONDS)
-    .readTimeout(if (eventStream) 0 else requestTimeoutMs, TimeUnit.MILLISECONDS)
-    .pingInterval(if (eventStream) 15_000L else 0L, TimeUnit.MILLISECONDS)
+    .readTimeout(requestTimeoutMs, TimeUnit.MILLISECONDS)
     .addInterceptor { chain ->
       val request = chain.request().newBuilder().apply {
         if (config.secret.isNotBlank()) header("Authorization", "Bearer ${config.secret}")

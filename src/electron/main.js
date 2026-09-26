@@ -1785,18 +1785,23 @@ function injectLocalDeviceStatus(stats) {
 // Each push cloned the record three times and serialized a ~1.3 MB
 // structured-clone IPC message,
 // and the producer runs on every collector tick (watch ticks re-arm every 1.5s).
-// Nothing here needs sub-frame latency, so keep only the newest payload and flush
-// on a short trailing timer. The history-revision comparison is computed across
-// the whole coalesced window so the dashboard is told exactly once, and only when
-// the revision really moved.
+// Nothing here needs sub-frame latency, so keep the newest stats and lightweight
+// event separately and flush on a short trailing timer. The history revision is
+// captured across the whole coalesced window.
 const PUSH_COALESCE_MS = 200;
 let pendingPush = null;
+let pendingStatsPush = null;
 let pendingPushTimer = null;
 let pendingPushHistoryRevision = null;
+let statsPushDeferred = false;
 
 function sendPush(payload) {
-  if (payload?.data?.stats) pendingPushHistoryRevision ??= statsHistoryRevision(latestStats);
-  pendingPush = payload;
+  if (payload?.data?.stats) {
+    pendingPushHistoryRevision ??= statsHistoryRevision(latestStats);
+    pendingStatsPush = payload;
+  } else {
+    pendingPush = payload;
+  }
   if (pendingPushTimer !== null) return;
   pendingPushTimer = setTimeout(flushPush, PUSH_COALESCE_MS);
   pendingPushTimer.unref?.();
@@ -1804,29 +1809,42 @@ function sendPush(payload) {
 
 function flushPush() {
   pendingPushTimer = null;
-  let payload = pendingPush;
+  const statsPayload = pendingStatsPush;
+  pendingStatsPush = null;
+  const otherPayload = pendingPush;
   pendingPush = null;
-  if (!payload) return;
+  if (!statsPayload && !otherPayload) return;
   const previousHistoryRevision = pendingPushHistoryRevision;
   pendingPushHistoryRevision = null;
-  if (payload?.data?.stats) {
-    injectLocalDeviceStatus(payload.data.stats);
-    latestStats = payload.data.stats;
-    payload = {
-      ...payload,
-      data: {
-        ...payload.data,
-        snapshot: desktopSnapshotMeta()
+  for (let payload of [statsPayload, otherPayload]) {
+    if (!payload) continue;
+    if (payload?.data?.stats) {
+      injectLocalDeviceStatus(payload.data.stats);
+      latestStats = payload.data.stats;
+      payload = {
+        ...payload,
+        data: {
+          ...payload.data,
+          snapshot: desktopSnapshotMeta()
+        }
+      };
+      if (settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
+        lastExportAt = Date.now();
+        writeExportTo(settings.exportDir, payload.data.stats.periods, { skipUnchanged: true })
+          .catch((err) => console.warn(`[export] auto-export failed: ${err.message}`));
       }
-    };
-    if (settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
-      lastExportAt = Date.now();
-      writeExportTo(settings.exportDir, payload.data.stats.periods, { skipUnchanged: true })
-        .catch((err) => console.warn(`[export] auto-export failed: ${err.message}`));
     }
-  }
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    try { mainWindow.webContents.send('stats:push', payload); } catch (_) {}
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      // Closing to the tray or minimizing hides the document, so no renderer can
+      // use these full snapshots until the window returns. Keep latestStats in the
+      // main process and replay it once, instead of cloning it over IPC per tick.
+      if (!mainWindow.isVisible() || mainWindow.isMinimized()) {
+        statsPushDeferred = true;
+      } else {
+        if (payload.event === 'stats') statsPushDeferred = false;
+        try { mainWindow.webContents.send('stats:push', payload); } catch (_) {}
+      }
+    }
   }
   // `previousHistoryRevision` is still consumed by the caller's diffing; a change
   // no longer has a second window to notify, since the trends view now renders
@@ -1841,7 +1859,25 @@ function flushPendingPush() {
     clearTimeout(pendingPushTimer);
     pendingPushTimer = null;
   }
-  if (pendingPush) flushPush();
+  if (pendingStatsPush || pendingPush) flushPush();
+}
+
+function replayDeferredStatsPush() {
+  if (!statsPushDeferred || !mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow.isVisible() || mainWindow.isMinimized()) return;
+  // A tick queued just before reveal may contain a newer snapshot than
+  // latestStats. Flushing first also avoids sending the same stats twice.
+  flushPendingPush();
+  try {
+    if (statsPushDeferred && latestStats) {
+      mainWindow.webContents.send('stats:push', {
+        event: 'stats',
+        data: { type: 'stats', stats: latestStats, at: new Date().toISOString(), snapshot: desktopSnapshotMeta() }
+      });
+    }
+    mainWindow.webContents.send('stats:push', { event: 'sync-health', data: { health: syncHealthSnapshot() } });
+    statsPushDeferred = false;
+  } catch (_) {}
 }
 
 function statsHistoryRevision(stats) {
@@ -3237,6 +3273,8 @@ function createWindow(boundsOverride, options = {}) {
   win.on('focus', () => {
     keepNativeBlurActive();
   });
+  win.on('show', replayDeferredStatsPush);
+  win.on('restore', replayDeferredStatsPush);
   win.on('blur', () => {
     keepNativeBlurActive();
   });
@@ -3952,7 +3990,14 @@ app.whenReady().then(() => {
       refreshAfterPricingChange();
     }
     if (settings.startAtLogin !== previousStartAtLogin) {
-      settings.startAtLogin = applyLoginItem(settings.startAtLogin);
+      // Trust the request over the read-back: an OS layer that cannot confirm
+      // the entry (a moved AppImage mount, a registry hiccup) must not bounce
+      // the switch back while it is still showing the requested state. The
+      // startup-time sync re-converges the stored value with reality.
+      const applied = applyLoginItem(settings.startAtLogin);
+      if (applied !== settings.startAtLogin) {
+        console.warn(`[settings] login-item read-back mismatch: requested ${settings.startAtLogin}, OS reports ${applied}`);
+      }
       saveSettings({ throwOnError: true });
     } else if (previousRuntimeSettings.startHidden !== settings.startHidden && settings.startAtLogin) {
       // The hidden-launch flag is part of what gets registered at login, so

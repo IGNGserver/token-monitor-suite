@@ -286,31 +286,20 @@ ${added}
   assert.match(notes.en[0].items[0], /…$/);
 });
 
-test('release template exposes marked English and Chinese app summaries', () => {
+test('release template carries the marked Chinese app summary', () => {
   const template = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'RELEASE_TEMPLATE.md'), 'utf8');
   const notes = extractReleaseNotes(template);
-  const categoryPairs = new Map([
-    ['Added', '新增'],
-    ['Changed', '变更'],
-    ['Improved', '改进'],
-    ['Fixed', '修复']
-  ]);
-  assert.ok(notes.en.length > 0);
-  assert.deepEqual(
-    notes.zh.map((group) => group.title),
-    notes.en.map((group) => categoryPairs.get(group.title))
-  );
-  assert.ok(notes.en.every((group) => categoryPairs.has(group.title)));
-  assert.ok(notes.en.every((group) => group.items.length > 0));
+  // One language, or a second section quietly keeps reporting the previous release.
+  assert.deepEqual(Object.keys(notes), ['zh']);
+  assert.ok(notes.zh.length > 0);
   assert.ok(notes.zh.every((group) => group.items.length > 0));
-  assert.ok(notes.en.every((group) => group.items.every((item) => !/\(#\d/.test(item))));
-  assert.ok(notes.zh.every((group) => group.items.every((item) => !/（#\d/.test(item))));
+  assert.ok(notes.zh.every((group) => group.title.trim().length > 0));
+  const zhItemText = notes.zh.flatMap((group) => group.items).join('\n');
+  assert.doesNotMatch(zhItemText, /（#\d/);
   // PR trailers are optional for project releases that do not cite GitHub PRs; when present
-  // they must use the bilingual trailer forms so extractReleaseNotes can strip them.
-  if (/\(#\d/.test(template)) assert.match(template, /\(#\d+(?:, #\d+)*\)/);
+  // they must use the Chinese trailer form so extractReleaseNotes can strip them.
   if (/（#\d/.test(template)) assert.match(template, /（#\d+(?:、#\d+)*）/);
 });
-
 test('mergeLatestReleaseMetadata preserves notes when native updater metadata omits them', () => {
   const releaseNotes = { en: [{ title: 'Fixed', items: ['An updater fix.'] }] };
   assert.deepEqual(

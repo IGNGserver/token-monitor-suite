@@ -127,7 +127,8 @@ fun TokenMonitorApp(
 
   // An incomplete connection cannot render any data page, so route to settings
   // rather than showing an empty dashboard.
-  LaunchedEffect(connectionState.hubUrl, connectionState.secret, currentRoute) {
+  LaunchedEffect(connectionState.loading, connectionState.hubUrl, connectionState.secret, currentRoute) {
+    if (connectionState.loading) return@LaunchedEffect
     val incomplete = connectionState.hubUrl.isBlank() || connectionState.secret.isBlank()
     if (incomplete && currentRoute != null && currentRoute != "settings") {
       navController.navigate("settings") { launchSingleTop = true }

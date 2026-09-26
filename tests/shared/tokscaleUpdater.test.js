@@ -2,9 +2,19 @@
 
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const { execFileSync } = require('node:child_process');
 const test = require('node:test');
 
 const { validatePackageJsonIdentity, verifyIntegrity } = require('../../src/shared/tokscaleUpdater');
+
+test('normal updater startup does not load the tar archive parser', () => {
+  const script = "require('./src/shared/tokscaleUpdater'); process.stdout.write(String(Object.keys(require.cache).some((file) => /(?:^|\\/)tar(?:\\/|$)/.test(file))))";
+  const loaded = execFileSync(process.execPath, ['-e', script], {
+    cwd: require('node:path').join(__dirname, '../..'),
+    encoding: 'utf8'
+  });
+  assert.equal(loaded, 'false');
+});
 
 test('verifyIntegrity validates npm SRI sha512 strings', () => {
   const body = Buffer.from('tokscale tarball');

@@ -80,6 +80,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import com.igng.tokenmonitor.android.ui.components.FluentProgressRing
 import androidx.compose.ui.Modifier
 import androidx.annotation.DrawableRes
 import androidx.compose.ui.platform.LocalUriHandler
@@ -876,6 +877,18 @@ fun SettingsScreen(
   hubRatesDate: String? = null,
   preferencesViewModel: PreferencesViewModel = hiltViewModel()
 ) {
+  if (state.loading) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.s)
+      ) {
+        FluentProgressRing(size = 20.dp, strokeWidth = 2.dp)
+        Text("正在读取连接设置…", style = FluentTypeRamp.body2)
+      }
+    }
+    return
+  }
   val uriHandler = LocalUriHandler.current
   val prefs by preferencesViewModel.preferences.collectAsStateWithLifecycle()
   val haptics = rememberAppHaptics()
@@ -1169,8 +1182,7 @@ fun SettingsScreen(
             label = "加密保存",
             onClick = {
               haptics.perform(HapticEvent.Success)
-              viewModel.save()
-              restartRealtime()
+              viewModel.save(onSaved = restartRealtime)
             },
             variant = FluentButtonVariant.Outline
           )
@@ -1180,7 +1192,7 @@ fun SettingsScreen(
           label = "清除本机连接",
           onClick = {
             haptics.perform(HapticEvent.Error)
-            viewModel.clear()
+            viewModel.clear(onCleared = restartRealtime)
           },
           variant = FluentButtonVariant.Quiet
         )
@@ -1329,4 +1341,3 @@ private fun SummaryChip(label: String, value: String, modifier: Modifier = Modif
     Text(value, style = FluentTypeRamp.title2, fontWeight = FontWeight.SemiBold)
   }
 }
-

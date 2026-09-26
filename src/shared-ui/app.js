@@ -26,7 +26,8 @@ import { applyI18n, resolveLocale, t } from './core/i18n.js';
 import {
   isPresetRangePeriod,
   presetRangeWindow,
-  presetRangeWindowMatches
+  presetRangeWindowMatches,
+  resolveScopePeriod
 } from './core/dateRanges.js';
 import { configureViewContext, displayFlag, VIEW_HELPER_NAMES } from './core/viewContext.js';
 import { syncHealthStateLabel } from './core/syncHealth.js';
@@ -426,8 +427,18 @@ function viewStats() {
 }
 
 function activePeriod() {
-  if (state.customPeriod) return state.customPeriod;
-  return viewStats()?.periods?.[state.prefs.period] || {
+  // A range answer belongs to the tab that asked for it — see `resolveScopePeriod()`.
+  // Reading `state.customPeriod` unconditionally would let one fetched range answer every
+  // tab, which is exactly how the desktop/Hub client showed the same figure under two
+  // different scope labels.
+  const resolved = resolveScopePeriod({
+    period: state.prefs.period,
+    customRange: state.customRange,
+    customPeriod: state.customPeriod,
+    periods: viewStats()?.periods
+  });
+  if (resolved) return resolved;
+  return {
     totalTokens: 0,
     costUsd: 0,
     clients: {},
@@ -456,6 +467,16 @@ function normalizePeriodSelection() {
   if (periodTabs().includes(period)) return;
   state.prefs.period = 'today';
   savePrefs({ period: 'today' });
+  // Demoting the selection has to demote its answer too. A fetched range is this
+  // selection's number, so leaving `customPeriod` populated would render yesterday's
+  // window under the Day tab — the same leak the scope-tab gating exists to prevent,
+  // reached here by switching to a Hub that cannot answer presets at all.
+  state.customRange = null;
+  state.customPeriod = null;
+  state.presetRangeRequest = null;
+  state.presetRangeRequestKey = '';
+  state.presetRangeFailedKey = '';
+  state.presetRangeRetryAfter = 0;
 }
 
 function formatDuration(milliseconds) {
@@ -801,12 +822,12 @@ function renderChrome() {
   els.periodTabs?.classList.toggle('hidden', !scoped);
   els.customRangeBtn?.classList.toggle('hidden', !scoped || !presetRangesEnabled());
 
-  // A fetched calendar preset keeps its own tab selected; only a hand-picked range
-  // falls back to the transient "custom" chip.
+  // Only a hand-picked range falls back to the transient "custom" chip; a preset is
+  // selected because the user selected it, so `prefs.period` is the truth either way.
+  // Reading the chip off `customRange.kind` instead would highlight whichever range was
+  // fetched last, which is the same leak `resolveScopePeriod()` closes for the figures.
   const rangeKind = state.customRange?.kind || '';
-  const selectedPeriod = rangeKind === 'custom'
-    ? 'custom'
-    : (isPresetRangePeriod(rangeKind) ? rangeKind : state.prefs.period);
+  const selectedPeriod = rangeKind === 'custom' ? 'custom' : state.prefs.period;
   const periodOptions = periodTabs().map((period) => [period, tr(`period.${period}`)]);
   if (rangeKind === 'custom') periodOptions.push(['custom', tr('period.custom')]);
   els.periodTabs.dataset.selection = 'period';
@@ -2480,7 +2501,7 @@ function presetRangeKey(rangeWindow) {
  */
 function pendingPresetRangeWindow() {
   if (!presetRangesEnabled()) return null;
-  const rangeWindow = presetRangeWindow(state.prefs.period, new Date(), state.locale);
+  const rangeWindow = presetRangeWindow(state.prefs.period, new Date());
   if (!rangeWindow) return null;
   if (presetRangeWindowMatches(rangeWindow, state.customRange)) return null;
   const key = presetRangeKey(rangeWindow);
@@ -2626,7 +2647,7 @@ function bindEvents() {
     savePrefs({ period: state.prefs.period });
     animateDataUpdate();
     render();
-    const rangeWindow = presetRangeWindow(period, new Date(), state.locale);
+    const rangeWindow = presetRangeWindow(period, new Date());
     if (rangeWindow) void loadPresetRange(rangeWindow, { notify: true }).then(() => render());
   });
 

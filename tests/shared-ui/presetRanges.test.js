@@ -12,11 +12,14 @@ const test = require('node:test');
 
 const {
   PRESET_RANGE_PERIODS,
+  SCOPE_WEEK_FIRST_DAY_INDEX,
   firstDayOfWeekIndex,
   isPresetRangePeriod,
+  isRangeScopeSelection,
   localDayKey,
   presetRangeWindow,
   presetRangeWindowMatches,
+  resolveScopePeriod,
   weekStart
 } = require('../../src/shared-ui/core/dateRanges.js');
 const { MESSAGE_KEYS, SUPPORTED_LOCALES } = require('../../src/shared-ui/core/i18n.js');
@@ -33,7 +36,7 @@ function clockOf(date) {
 }
 
 test('yesterday is the single day before today, whatever the clock reads', () => {
-  const range = presetRangeWindow('yesterday', at(2026, 9, 26, 23), 'en');
+  const range = presetRangeWindow('yesterday', at(2026, 9, 26, 23));
   assert.equal(range.startDate, '2026-09-25');
   assert.equal(range.endDate, '2026-09-25');
   assert.equal(localDayKey(range.from), '2026-09-25');
@@ -46,27 +49,31 @@ test('a preset window ends at the last millisecond of the day', () => {
   // midnight-to-midnight would add the following day's first hour to the total.
   // The Hub rounds to calendar days either way, so both hosts agree on this bound.
   for (const period of PRESET_RANGE_PERIODS) {
-    const range = presetRangeWindow(period, at(2026, 9, 26), 'zh-CN');
+    const range = presetRangeWindow(period, at(2026, 9, 26));
     assert.equal(clockOf(range.to), '23:59:59.999', `${period} upper bound`);
   }
 });
 
 test('yesterday crosses month and year boundaries', () => {
-  assert.equal(presetRangeWindow('yesterday', at(2026, 3, 1), 'en').startDate, '2026-02-28');
-  assert.equal(presetRangeWindow('yesterday', at(2026, 1, 1), 'en').startDate, '2025-12-31');
+  assert.equal(presetRangeWindow('yesterday', at(2026, 3, 1)).startDate, '2026-02-28');
+  assert.equal(presetRangeWindow('yesterday', at(2026, 1, 1)).startDate, '2025-12-31');
 });
 
-test('this week runs from the locale week start through today', () => {
-  for (const locale of ['', 'en', 'zh-CN', 'de', 'not a locale tag!!']) {
-    const firstDay = firstDayOfWeekIndex(locale);
+test('this week runs from ISO Monday through today, in every locale', () => {
+  // The window is a measurement, so no locale may move it: a host whose CLDR data says
+  // Sunday (Android under a US locale) would otherwise answer a different span for the
+  // same 本周 label, and the two figures would never be comparable.
+  for (const locale of ['', 'en', 'en-US', 'zh-CN', 'de', 'not a locale tag!!']) {
     for (const day of [at(2026, 9, 21), at(2026, 9, 23), at(2026, 10, 1), at(2026, 1, 1)]) {
-      const range = presetRangeWindow('week', day, locale);
+      const range = presetRangeWindow('week', day);
       assert.equal(range.endDate, localDayKey(day), `${locale}: a week never reaches the future`);
-      assert.equal(range.from.getDay(), firstDay, `${locale}: starts on the locale week start`);
+      assert.equal(range.from.getDay(), SCOPE_WEEK_FIRST_DAY_INDEX, `${locale}: starts on ISO Monday`);
       assert.ok(range.from <= day && day.getTime() - range.from.getTime() < 7 * 86_400_000,
         `${locale}: stays inside seven days`);
     }
   }
+  // Sunday is the *last* day of the Monday-start week, not the first of a new one.
+  assert.equal(presetRangeWindow('week', at(2026, 9, 27)).startDate, '2026-09-21');
 });
 
 test('weekStart walks back to the requested weekday', () => {
@@ -78,17 +85,54 @@ test('weekStart walks back to the requested weekday', () => {
   assert.equal(localDayKey(weekStart(at(2026, 9, 21), 1)), '2026-09-21');
 });
 
-test('a malformed locale falls back to the ISO week start', () => {
-  assert.equal(firstDayOfWeekIndex('not a locale tag!!'), 1);
-  assert.equal(firstDayOfWeekIndex(undefined), firstDayOfWeekIndex('en'));
+test('the scope week start ignores the locale entirely', () => {
+  // Guard for the note above: `Intl.Locale#weekInfo` must not be able to move a window.
+  assert.equal(firstDayOfWeekIndex(), SCOPE_WEEK_FIRST_DAY_INDEX);
+  assert.equal(firstDayOfWeekIndex('en'), SCOPE_WEEK_FIRST_DAY_INDEX);
+  assert.equal(firstDayOfWeekIndex('not a locale tag!!'), SCOPE_WEEK_FIRST_DAY_INDEX);
+  assert.equal(firstDayOfWeekIndex(undefined), firstDayOfWeekIndex('zh-CN'));
 });
 
 test('only the calendar presets resolve through the range API', () => {
   for (const period of ['today', 'month', 'allTime', '', 'nope']) {
-    assert.equal(presetRangeWindow(period, at(2026, 9, 26), 'en'), null, period);
+    assert.equal(presetRangeWindow(period, at(2026, 9, 26)), null, period);
     assert.equal(isPresetRangePeriod(period), false, period);
   }
   assert.deepEqual([...PRESET_RANGE_PERIODS], ['yesterday', 'week']);
+});
+
+test('a fetched range answers only the tab that asked for it', () => {
+  // This is the rule that kept the two surfaces honest. One cached range answer used to
+  // be preferred for *every* scope tab, so 今日/昨日 printed the same figure and
+  // 本周/本月/全部 printed another, while the analytics page showed its own snapshot
+  // numbers for the same selection.
+  const periods = {
+    today: { totalTokens: 100 },
+    month: { totalTokens: 2000 },
+    allTime: { totalTokens: 9000 }
+  };
+  const yesterday = presetRangeWindow('yesterday', at(2026, 9, 26));
+  const fetched = { kind: 'yesterday', startDate: yesterday.startDate, endDate: yesterday.endDate };
+  const customPeriod = { totalTokens: 500 };
+
+  assert.equal(resolveScopePeriod({ period: 'yesterday', customRange: fetched, customPeriod, periods }), customPeriod,
+    'the preset that asked gets its own answer');
+  for (const period of ['today', 'month', 'allTime']) {
+    assert.equal(resolveScopePeriod({ period, customRange: fetched, customPeriod, periods }), periods[period],
+      `${period} reads the snapshot, never the cached range`);
+  }
+  // A different preset, or none at all, gets no substitution.
+  assert.equal(resolveScopePeriod({ period: 'week', customRange: fetched, customPeriod, periods }), null);
+  assert.equal(resolveScopePeriod({ period: 'yesterday', customRange: null, customPeriod: null, periods }), null,
+    'a loading or failed preset renders no figure rather than someone else\'s');
+  // A hand-picked range lives on the transient "custom" chip, whatever `prefs.period` was.
+  assert.ok(isRangeScopeSelection({ period: 'today', customRange: { kind: 'custom' } }));
+  assert.equal(resolveScopePeriod({ period: 'today', customRange: { kind: 'custom' }, customPeriod, periods }), customPeriod);
+  assert.equal(isRangeScopeSelection({ period: 'today', customRange: null }), false);
+  assert.equal(isRangeScopeSelection({ period: 'week', customRange: { kind: 'yesterday' } }), false);
+  // Unknown kinds are not a scope answer either.
+  assert.equal(isRangeScopeSelection({ period: 'today', customRange: { kind: '' } }), false);
+  assert.equal(isRangeScopeSelection({}), false);
 });
 
 test('a fetched window stops matching once the day rolls over', () => {

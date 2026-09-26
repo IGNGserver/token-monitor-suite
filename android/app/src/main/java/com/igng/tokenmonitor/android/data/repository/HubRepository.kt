@@ -24,9 +24,12 @@ import com.igng.tokenmonitor.android.data.remote.HubApiFactory
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import okhttp3.Response
@@ -114,7 +117,7 @@ class HubRepository @Inject constructor(
     withConnection { apiFactory.create(it).deleteDevice(id) }
 
   fun statsEvents(): Flow<SseStatsDto> = callbackFlow {
-    val config = connection()
+    val config = withContext(Dispatchers.IO) { connection() }
     if (!config.isComplete) {
       close(IllegalStateException("Hub connection is not configured"))
       return@callbackFlow
@@ -132,7 +135,13 @@ class HubRepository @Inject constructor(
   }
 
   private suspend fun <T> withConnection(call: suspend (ConnectionConfig) -> T): HubResult<T> {
-    val config = connection()
+    val config = try {
+      withContext(Dispatchers.IO) { connection() }
+    } catch (error: CancellationException) {
+      throw error
+    } catch (_: Exception) {
+      return HubResult.Failure(HubError("无法读取本机连接设置，请重新保存连接信息。", HubError.Kind.Api))
+    }
     return if (!config.isComplete) HubResult.Failure(HubError("请先在设置中保存 Hub 地址和共享密钥。", HubError.Kind.NotConfigured))
     else safeCall { call(config) }
   }

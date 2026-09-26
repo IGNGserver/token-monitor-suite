@@ -21,14 +21,27 @@ import com.igng.tokenmonitor.android.data.repository.HubRepository
 import com.igng.tokenmonitor.android.data.repository.HubResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class RealtimeStatus { Live, Reconnecting, Disconnected }
+
+/**
+ * How long a failed range window stays quiet before a snapshot frame may ask again.
+ *
+ * The retry has to exist (a preset that failed once must recover on its own after
+ * midnight), but it must not turn into a poll: in the desktop's local mode a range
+ * request runs a full tokscale scan, and the same window will keep failing for the same
+ * reason.  The shared UI backs off for the same interval (`PRESET_RANGE_RETRY_MS`).
+ */
+private const val RANGE_RETRY_MS = 30_000L
 
 /**
  * Scope tabs in the analytics screen.
@@ -62,6 +75,7 @@ data class HubUiState(
   val authorization: HubAuthorizationDto? = null,
   val pricing: List<PricingDto> = emptyList(),
   val isLoading: Boolean = false,
+  val isRefreshing: Boolean = false,
   val error: String? = null,
   val realtime: RealtimeStatus = RealtimeStatus.Disconnected,
   val batchResult: BatchPricingResponseDto? = null,
@@ -107,6 +121,18 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
   val state = _state.asStateFlow()
   private var sseJob: Job? = null
   private var rangeJob: Job? = null
+  private var refreshJob: Job? = null
+  private var hasObservedForeground = false
+  private var statsFrameVersion = 0L
+
+  /**
+   * Only the newest range reply may land.  A cancelled job already cannot resume, but
+   * the sequence also protects the state write from a response that was already being
+   * decoded when the user moved to another scope tab.
+   */
+  private var rangeSequence = 0
+  private var rangeFailedKey = ""
+  private var rangeRetryAfterMs = 0L
   private val requestJobs = mutableSetOf<Job>()
   private var connectionGeneration = 0L
 
@@ -129,32 +155,45 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
 
   init {
     val generation = connectionGeneration
+    // Show the dashboard as soon as its snapshot arrives. Capabilities are useful
+    // for optional sections, but a slow capabilities endpoint must not hold up stats.
+    refreshAll()
+    startRealtime(generation)
     viewModelScope.launch {
       when (val result = repository.capabilities()) {
         is HubResult.Success -> if (isCurrent(generation)) {
           _state.value = _state.value.copy(authorization = result.value)
+          if (result.value.capabilities.pricing) refreshPricing()
+          if (result.value.capabilities.hubAccounts != false) refreshAccounts()
         }
         is HubResult.Failure -> if (isCurrent(generation)) {
           _state.value = _state.value.copy(error = result.error.message)
         }
       }
-      if (!isCurrent(generation)) return@launch
-      refreshAll()
-      startRealtime(generation)
     }
   }
 
   fun refreshAll() {
-    refreshStats()
-    refreshHistory()
-    refreshDevices()
-    if (_state.value.authorization?.capabilities?.pricing == true) refreshPricing()
-    refreshRates()
-    if (_state.value.authorization?.capabilities?.hubAccounts != false) refreshAccounts()
+    if (refreshJob?.isActive == true) return
+    val generation = connectionGeneration
+    _state.value = _state.value.copy(isLoading = _state.value.stats == null, isRefreshing = true)
+    val jobs = mutableListOf(refreshStats(), refreshHistory(), refreshRates())
+    // /api/stats already carries the same device list. An extra /api/devices call
+    // duplicates Hub aggregation and competes with the first useful response.
+    if (_state.value.authorization?.capabilities?.pricing == true) jobs += refreshPricing()
+    if (_state.value.authorization?.capabilities?.hubAccounts != false && _state.value.authorization != null) jobs += refreshAccounts()
+    refreshJob = viewModelScope.launch {
+      jobs.forEach { it.join() }
+      if (isCurrent(generation)) _state.value = _state.value.copy(isRefreshing = false)
+    }
     val current = _state.value
     if (current.analyticsPeriod == AnalyticsPeriodKind.Custom && current.customRange != null) {
       val range = current.customRange
       loadCustomRange(range.startDate, range.endDate, range.startHour, range.endHour, range.label)
+    } else {
+      // A preset is a window, not a stored period: coming back to the app after midnight
+      // must re-resolve it, or 昨日/本周 keep answering a span they no longer name.
+      refreshPendingRangeWindow()
     }
   }
 
@@ -175,13 +214,25 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
 
   fun refreshStats() = launchRequest { generation ->
     if (!isCurrent(generation)) return@launchRequest
+    val frameVersion = statsFrameVersion
     _state.value = _state.value.copy(isLoading = true, error = null)
     when (val result = repository.stats()) {
       is HubResult.Success -> if (isCurrent(generation)) {
-        _state.value = _state.value.copy(stats = result.value, isLoading = false)
+        if (frameVersion == statsFrameVersion) {
+          _state.value = _state.value.copy(
+            stats = result.value,
+            devices = result.value.devices,
+            isLoading = false
+          )
+        } else {
+          _state.value = _state.value.copy(isLoading = false)
+        }
       }
       is HubResult.Failure -> if (isCurrent(generation)) {
-        _state.value = _state.value.copy(isLoading = false, error = result.error.message, realtime = RealtimeStatus.Disconnected)
+        _state.value = _state.value.copy(
+          isLoading = false,
+          error = if (frameVersion == statsFrameVersion) result.error.message else _state.value.error
+        )
       }
     }
   }
@@ -247,18 +298,28 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
     val generation = connectionGeneration
     rangeJob?.cancel()
     rangeJob = null
+    // A different deployment can answer the same window, so a backoff recorded against
+    // the previous Hub must not silence the retry on this one.
+    rangeSequence += 1
+    rangeFailedKey = ""
+    rangeRetryAfterMs = 0L
     sseJob?.cancel()
     sseJob = null
+    refreshJob?.cancel()
+    refreshJob = null
     cancelRequests()
-    _state.value = HubUiState(realtime = RealtimeStatus.Reconnecting)
+    _state.value = HubUiState(isLoading = true, realtime = RealtimeStatus.Reconnecting)
+    refreshAll()
+    startRealtime(generation)
     viewModelScope.launch {
       when (val result = repository.capabilities()) {
-        is HubResult.Success -> if (isCurrent(generation)) _state.value = _state.value.copy(authorization = result.value)
+        is HubResult.Success -> if (isCurrent(generation)) {
+          _state.value = _state.value.copy(authorization = result.value)
+          if (result.value.capabilities.pricing) refreshPricing()
+          if (result.value.capabilities.hubAccounts != false) refreshAccounts()
+        }
         is HubResult.Failure -> if (isCurrent(generation)) _state.value = _state.value.copy(error = result.error.message)
       }
-      if (!isCurrent(generation)) return@launch
-      refreshAll()
-      startRealtime(generation)
     }
   }
 
@@ -271,17 +332,16 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
         _state.value = _state.value.copy(error = "当前 Hub 不支持日历预设范围。")
         return
       }
-      val window = com.igng.tokenmonitor.android.ui.core.DateRanges.presetRangeWindow(kind.name.lowercase())
-        ?: return
-      loadCustomRange(
-        startDate = window.startDate.toString(),
-        endDate = window.endDate.toString(),
-        startHour = window.startHour,
-        endHour = window.endHour,
-        label = window.label(),
-        period = kind,
-        presetWindow = window
-      )
+      // Re-selecting a preset that already answers this exact window must not spend a
+      // second range request; the window is the identity, not the tab.
+      if (ScopePeriod.rangeAnswerIsCurrent(_state.value.copy(analyticsPeriod = kind))) {
+        _state.value = _state.value.copy(analyticsPeriod = kind, customRangeLoading = false)
+        return
+      }
+      // Select first, then ask: `retryScopeRange()` derives the window from the kind, so
+      // the tab the user chose and the span that answers it cannot drift apart.
+      _state.value = _state.value.copy(analyticsPeriod = kind)
+      retryScopeRange()
       return
     }
     if (kind == AnalyticsPeriodKind.Custom) {
@@ -292,20 +352,86 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
       // Clear any previous range result: the tab renders customRangeResult
       // whenever the period is Custom, so keeping it would show the old range's
       // numbers under the new selection.
+      rangeJob?.cancel()
       _state.value = _state.value.copy(
         analyticsPeriod = AnalyticsPeriodKind.Custom,
+        customRange = null,
         customRangeResult = null,
-        customRangeLoading = false
+        customRangeLoading = false,
+        activePresetWindow = null
       )
       return
     }
     rangeJob?.cancel()
+    // A snapshot period is *never* answered by a range payload.  Dropping the cached
+    // answer here is what stops 今日/本月/全部 from keeping the number of whatever
+    // preset was selected last — the overview used to prefer the cache for every tab,
+    // so one fetched range silently replaced the whole scope bar.
     _state.value = _state.value.copy(
       analyticsPeriod = kind,
+      customRange = null,
+      customRangeResult = null,
       customRangeLoading = false,
       activePresetWindow = null
     )
   }
+
+  /**
+   * Ask the current scope tab's window again, after a failure or a manual retry.
+   *
+   * Both surfaces need the same rule, and it has to be the rule that *selected* the
+   * window in the first place: a preset re-derives its calendar span (so a retry after
+   * midnight asks for today's week), while a picked range re-sends the days the user
+   * chose.  Reusing [setAnalyticsPeriod] would not work for `Custom`, which clears the
+   * selection and waits for the picker.
+   */
+  fun retryScopeRange() {
+    val current = _state.value
+    val kind = current.analyticsPeriod
+    if (!kind.needsRange) return
+    if (kind == AnalyticsPeriodKind.Custom) {
+      val range = current.customRange ?: return
+      loadCustomRange(range.startDate, range.endDate, range.startHour, range.endHour, range.label)
+      return
+    }
+    val window = com.igng.tokenmonitor.android.ui.core.DateRanges.presetRangeWindow(kind.presetPeriodName())
+      ?: return
+    // Tapping the tab that is already being fetched must not spend a second request: the
+    // in-flight call already describes this exact window.
+    if (_state.value.customRangeLoading && window.stillMatches(_state.value.activePresetWindow)) return
+    loadCustomRange(
+      startDate = window.startDate.toString(),
+      endDate = window.endDate.toString(),
+      startHour = window.startHour,
+      endHour = window.endHour,
+      label = window.label(),
+      period = kind,
+      presetWindow = window
+    )
+  }
+
+  /**
+   * Re-resolve a preset whose calendar window has moved, and retry one that failed.
+   *
+   * `Yesterday` and `Week` are windows, not stored periods: after local midnight the
+   * cached answer describes a different span, and keeping it would show last week's
+   * total under 本周.  [ScopePeriod.pendingRangeWindow] only turns non-null when the
+   * window genuinely stopped matching, so calling this on every stream frame costs a
+   * date comparison rather than a request — the same rule the shared UI uses
+   * (`pendingPresetRangeWindow()` in `src/shared-ui/app.js`), and the reason a preset
+   * never re-scans tokscale per tick in local mode.
+   */
+  private fun refreshPendingRangeWindow(today: java.time.LocalDate = java.time.LocalDate.now()) {
+    if (_state.value.authorization?.capabilities?.usageRange != true) return
+    if (_state.value.customRangeLoading) return
+    val window = ScopePeriod.pendingRangeWindow(_state.value, today) ?: return
+    val key = rangeKey(window.startDate.toString(), window.endDate.toString(), window.startHour, window.endHour)
+    if (key == rangeFailedKey && System.currentTimeMillis() < rangeRetryAfterMs) return
+    retryScopeRange()
+  }
+
+  private fun rangeKey(startDate: String, endDate: String, startHour: Int, endHour: Int): String =
+    "$startDate:$endDate:$startHour:$endHour"
 
   fun loadCustomRange(
     startDate: String,
@@ -322,66 +448,46 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
     }
     val rangeLabel = label ?: formatRangeLabel(startDate, endDate, startHour, endHour)
     val selection = CustomRangeSelection(startDate, endDate, startHour, endHour, rangeLabel)
+    val key = rangeKey(startDate, endDate, startHour, endHour)
+    val sequence = ++rangeSequence
     rangeJob?.cancel()
     val generation = connectionGeneration
+    // Drop the previous window's answer *before* the request: while this is in flight the
+    // tab must render a loading state, not the numbers of the scope the user just left.
+    _state.value = _state.value.copy(
+      analyticsPeriod = period,
+      customRange = selection,
+      customRangeResult = null,
+      customRangeLoading = true,
+      activePresetWindow = presetWindow,
+      error = null
+    )
     rangeJob = viewModelScope.launch {
-      _state.value = _state.value.copy(
-        analyticsPeriod = period,
-        customRange = selection,
-        customRangeLoading = true,
-        activePresetWindow = presetWindow,
-        error = null
-      )
       if (!isCurrent(generation)) return@launch
       when (val result = repository.usageRange(startDate, endDate, startHour, endHour)) {
-        is HubResult.Success -> if (isCurrent(generation)) _state.value = _state.value.copy(
-          customRangeResult = result.value,
-          customRangeLoading = false
-        )
-        is HubResult.Failure -> if (isCurrent(generation)) _state.value = _state.value.copy(
-          customRangeResult = null,
-          customRangeLoading = false,
-          error = result.error.message
-        )
+        is HubResult.Success -> if (isCurrent(generation) && sequence == rangeSequence) {
+          _state.value = _state.value.copy(
+            customRangeResult = result.value,
+            customRangeLoading = false
+          )
+          rangeFailedKey = ""
+        }
+        is HubResult.Failure -> if (isCurrent(generation) && sequence == rangeSequence) {
+          // Keep the failure honest: no result, so the tab shows a retry affordance
+          // instead of a number it never obtained.
+          _state.value = _state.value.copy(
+            customRangeResult = null,
+            customRangeLoading = false,
+            error = result.error.message
+          )
+          rangeFailedKey = key
+          rangeRetryAfterMs = System.currentTimeMillis() + RANGE_RETRY_MS
+        }
       }
     }
   }
 
-  fun currentSharePeriod(): PeriodDto? {
-    val state = _state.value
-    return when (state.analyticsPeriod) {
-      AnalyticsPeriodKind.Today -> state.stats?.periods?.today
-      AnalyticsPeriodKind.Month -> state.stats?.periods?.month
-      AnalyticsPeriodKind.AllTime -> state.stats?.periods?.allTime
-      AnalyticsPeriodKind.Custom,
-      AnalyticsPeriodKind.Yesterday,
-      AnalyticsPeriodKind.Week -> state.customRangeResult?.toPeriodDto()
-    }
-  }
-
-  fun clientModelsFor(clientId: String): Map<String, Long> {
-    val state = _state.value
-    return when (state.analyticsPeriod) {
-      AnalyticsPeriodKind.Custom -> state.customRangeResult?.clientModels?.get(clientId).orEmpty()
-      else -> currentSharePeriod()?.clientModels?.get(clientId).orEmpty()
-    }
-  }
-
-  fun clientModelCostsFor(clientId: String): Map<String, Double> {
-    val state = _state.value
-    return when (state.analyticsPeriod) {
-      AnalyticsPeriodKind.Custom -> state.customRangeResult?.clientModelCosts?.get(clientId).orEmpty()
-      else -> currentSharePeriod()?.clientModelCosts?.get(clientId).orEmpty()
-    }
-  }
-
-  /**
-   * Superseded: the model→client split now resolves in `AnalyticsScreen` against the
-   * same `clientModels` map the client→model split uses, because this helper covered
-   * only the custom-range case and the screen had a second, different rule for the
-   * preset periods.
-   */
-
+  /** Restart the live stream, e.g. after the secret or the Hub target changed. */
   fun restartRealtime() { sseJob?.cancel(); sseJob = null; startRealtime() }
 
   /** Start or stop the live stream as the app moves between foreground and background.
@@ -393,7 +499,8 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
    */
   fun setForeground(foreground: Boolean) {
     if (foreground) {
-      if (sseJob?.isActive != true) refreshAll()
+      if (hasObservedForeground && sseJob?.isActive != true) refreshAll()
+      hasObservedForeground = true
       startRealtime()
     } else {
       sseJob?.cancel()
@@ -403,9 +510,25 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
   }
 
   private fun startRealtime(generation: Long = connectionGeneration) {
-    if (!repository.connection().isComplete) return
     if (!isCurrent(generation) || sseJob?.isActive == true) return
     sseJob = viewModelScope.launch {
+      val configured = try {
+        withContext(Dispatchers.IO) { repository.connection().isComplete }
+      } catch (error: CancellationException) {
+        throw error
+      } catch (_: Exception) {
+        if (isCurrent(generation)) {
+          _state.value = _state.value.copy(
+            realtime = RealtimeStatus.Disconnected,
+            error = "无法读取本机连接设置，请重新保存连接信息。"
+          )
+        }
+        return@launch
+      }
+      if (!configured) {
+        _state.value = _state.value.copy(realtime = RealtimeStatus.Disconnected)
+        return@launch
+      }
       var backoffMs = 1_000L
       while (isActive && isCurrent(generation)) {
         _state.value = _state.value.copy(realtime = RealtimeStatus.Reconnecting)
@@ -413,20 +536,22 @@ class HubViewModel @Inject constructor(private val repository: HubRepository) : 
           repository.statsEvents().collect { event ->
             if (isCurrent(generation)) {
               event.stats?.let { stats ->
-              // One source for the fleet list.  `refreshDevices()` fills it on first
-              // load, but `/api/devices` is never re-polled on a stream frame while
-              // `stats.devices` carries the same DeviceDto list *and* the fresher
-              // `stale` flags — so the overview and device pages were showing a
-              // snapshot from the last manual refresh while the status page, which
-              // reads `stats.devices`, moved ahead.  Prefer the frame, keep the
-              // REST list only until the first frame that carries one.
+              // Keep the device list in step with the stream's latest stale flags.
+              // A frame without a device list retains the last REST snapshot.
               val devices = stats.devices.ifEmpty { _state.value.devices }
+              statsFrameVersion += 1
               _state.value = _state.value.copy(
                 stats = stats,
                 devices = devices,
+                isLoading = false,
                 realtime = RealtimeStatus.Live,
                 error = null
               )
+              // A snapshot frame is also the clock check for a preset scope tab: past
+              // local midnight the cached window no longer names 昨日/本周, so it is
+              // re-resolved here.  The predicate is a date comparison unless the window
+              // actually moved, so this never turns into a request per frame.
+              refreshPendingRangeWindow()
             }
             }
             backoffMs = 1_000L
@@ -679,4 +804,3 @@ fun formatRangeLabel(startDate: String, endDate: String, startHour: Int, endHour
   val end = "$endDate ${pad(endHour)}:00"
   return "$start → $end"
 }
-

@@ -37,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -50,8 +51,9 @@ import com.igng.tokenmonitor.android.ui.AnalyticsPeriodKind
 import com.igng.tokenmonitor.android.ui.HubUiState
 import com.igng.tokenmonitor.android.ui.HubViewModel
 import com.igng.tokenmonitor.android.ui.PreferencesViewModel
-import com.igng.tokenmonitor.android.ui.toPeriodDto
+import com.igng.tokenmonitor.android.ui.ScopePeriod
 import com.igng.tokenmonitor.android.ui.components.DateTimeRangePickerDialog
+import com.igng.tokenmonitor.android.ui.components.ScopeRangeNotice
 import com.igng.tokenmonitor.android.ui.components.UrgentLimitAlertBar
 import com.igng.tokenmonitor.android.ui.components.findUrgentLimit
 import com.igng.tokenmonitor.android.ui.components.AppCard
@@ -107,14 +109,15 @@ fun OverviewScreen(
   val refreshState = rememberPullToRefreshState()
 
   val periods = state.stats?.periods
-  val today = periods?.today
-  val resolvedPeriod = state.customRangeResult?.toPeriodDto() ?: when (state.analyticsPeriod) {
-    AnalyticsPeriodKind.Today -> periods?.today
-    AnalyticsPeriodKind.Month -> periods?.month
-    AnalyticsPeriodKind.AllTime -> periods?.allTime
-    else -> periods?.today
-  }
-  val activePeriod = resolvedPeriod ?: today
+  // One resolver for both surfaces.  The overview used to prefer `customRangeResult` for
+  // every tab, so one fetched range silently replaced 今日/本月/全部 as well and two
+  // groups of tabs printed the identical figure while the analytics page — which gated on
+  // `needsRange` — showed different numbers for the same selection.
+  val activePeriod = ScopePeriod.resolve(state)
+  val scopeIsRange = state.analyticsPeriod.needsRange
+  val scopeIsLoading = scopeIsRange && state.customRangeLoading
+  val scopeIsUnavailable = scopeIsRange && !state.customRangeLoading && activePeriod == null
+  val scopeSourceLabel = if (scopeIsRange) ScopePeriod.rangeSourceLabel(state.customRangeResult?.source) else null
   val customSupported = state.authorization?.capabilities?.usageRange == true
   val periodOptions = if (customSupported) {
     listOf("今日", "昨日", "本周", "本月", "全部", "自定义")
@@ -177,7 +180,7 @@ fun OverviewScreen(
     Modifier
       .fillMaxSize()
       .pullToRefresh(
-        isRefreshing = state.isLoading,
+        isRefreshing = state.isRefreshing,
         state = refreshState,
         onRefresh = {
           haptics.perform(HapticEvent.Refresh)
@@ -190,11 +193,21 @@ fun OverviewScreen(
     // Material affordance and its shape/colour cannot be retokenised.
     FluentRefreshIndicator(
       state = refreshState,
-      refreshing = state.isLoading,
-      modifier = Modifier.align(Alignment.TopCenter)
+      refreshing = state.isRefreshing,
+      modifier = Modifier.align(Alignment.TopCenter).zIndex(1f)
     )
     when {
-      state.isLoading && state.stats == null -> OverviewSkeleton()
+      state.isLoading && state.stats == null -> Column {
+        Row(
+          Modifier.padding(horizontal = FluentSpacingDefaults.l, vertical = FluentSpacingDefaults.s),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.s)
+        ) {
+          FluentProgressRing(size = 18.dp, strokeWidth = 2.dp)
+          Text("正在获取 Hub 数据…", style = FluentTypeRamp.body2, color = colors.neutralForeground2)
+        }
+        OverviewSkeleton()
+      }
       state.stats == null && !state.isLoading -> {
         EmptyState(
           title = "暂无数据",
@@ -216,6 +229,19 @@ fun OverviewScreen(
               subtitle = "多设备 Token 汇总与健康度",
               trailing = { RealtimeStatusChip(state.realtime) }
             )
+          }
+
+          if (state.isRefreshing) {
+            item {
+              Row(
+                Modifier.padding(horizontal = FluentSpacingDefaults.l),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.s)
+              ) {
+                FluentProgressRing(size = 16.dp, strokeWidth = 2.dp)
+                Text("正在同步最新数据…", style = FluentTypeRamp.caption1, color = colors.neutralForeground2)
+              }
+            }
           }
 
           if (urgentLimit != null) {
@@ -273,24 +299,35 @@ fun OverviewScreen(
               else -> null
             }
             FluentStaggeredIn(index = 1) {
-              MetricHeroCard(
-                title = periodTitle,
-                subtitle = periodSubtitle,
-                period = activePeriod,
-                modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l),
-                trailing = if (clientShares.isNotEmpty()) {
-                  {
-                    DonutChart(
-                      entries = clientShares,
-                      chartSize = 140.dp,
-                      strokeWidth = 16.dp,
-                      showLegend = false,
-                      centerPrimary = null,
-                      centerSecondary = null
-                    )
-                  }
-                } else null
-              )
+              Column(Modifier.padding(horizontal = FluentSpacingDefaults.l)) {
+                MetricHeroCard(
+                  title = periodTitle,
+                  subtitle = periodSubtitle,
+                  period = activePeriod,
+                  trailing = if (clientShares.isNotEmpty()) {
+                    {
+                      DonutChart(
+                        entries = clientShares,
+                        chartSize = 140.dp,
+                        strokeWidth = 16.dp,
+                        showLegend = false,
+                        centerPrimary = null,
+                        centerSecondary = null
+                      )
+                    }
+                  } else null
+                )
+                // The window label already sits in the hero's own subtitle, so this only
+                // carries what the card cannot say: which source answered, and the fact
+                // that a range tab has no answer yet instead of a bare zero.
+                ScopeRangeNotice(
+                  windowLabel = null,
+                  sourceLabel = scopeSourceLabel,
+                  loading = scopeIsLoading,
+                  unavailable = scopeIsUnavailable,
+                  onRetry = { hubViewModel.retryScopeRange() }
+                )
+              }
             }
           }
 

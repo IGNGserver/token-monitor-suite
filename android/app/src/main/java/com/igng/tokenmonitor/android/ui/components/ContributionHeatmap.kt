@@ -132,9 +132,11 @@ fun ContributionHeatmap(
   val labelStyle = FluentTypeRamp.caption2
   val labelColor = colors.neutralForeground3
 
-  // The week starts where the user's calendar says it does — the same
-  // `DateRanges.firstDayOfWeek` the 本周 preset and the date picker's grid use, so one
-  // week means one thing across the client.  `% 7` converts Mon=1…Sun=7 to Sun=0…Sat=6.
+  // The week starts where the user's calendar says it does.  This is a *grid*, so it
+  // follows CLDR via `DateRanges.firstDayOfWeek` — the 本周 scope window deliberately
+  // does not (it is ISO Monday on every surface, see `SCOPE_WEEK_FIRST_DAY`), because a
+  // row label is presentation while a window total is a reported figure.  `% 7` converts
+  // Mon=1…Sun=7 to Sun=0…Sat=6.
   val weekFirst = com.igng.tokenmonitor.android.ui.core.DateRanges.firstDayOfWeek()
   val startDow = remember(days, weekFirst) {
     days.firstOrNull()?.date?.let { raw ->

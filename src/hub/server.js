@@ -1065,25 +1065,17 @@ function createHub({
       mergedRecord.limits = normalizeLimitsSummary({});
       await store.saveDevice(mergedRecord, connection);
 
-      // 4. The source keeps its identity but loses its recorded usage; the
-      // baseline pins the pre-transfer snapshot and flags the device, so its
-      // next upload books only the delta — in the ledger and in the display
-      // aggregate.
-      const clearedSource = {
-        ...sourceNormalized,
-        updatedAt: now,
-        receivedAt: now,
-        periods: {},
-        history: null
-      };
-      clearedSource.limits = normalizeLimitsSummary({});
-      await store.saveDevice(clearedSource, connection);
+      // 4. The source device is removed by the Hub. Its ledger rows already
+      // moved, its display snapshot is folded into the target, and its ingest
+      // baseline must go with it: a fresh upload under the same ID then starts
+      // from a clean baseline (the operator re-identifies the source device in
+      // its own settings). deleteDevice keeps the devices row as a soft-delete
+      // tombstone, which is what stops re-ingest from double-counting.
+      await store.deleteDevice(sourceId, connection);
       if (typeof store.saveIngestBaseline === 'function') {
-        // Pin the baseline to the pre-transfer snapshot: exactly what the source
-        // device will re-report next tick, producing a zero delta.
         await store.saveIngestBaseline(sourceId, sourceNormalized, { transferred: true }, connection);
       }
-      return { source: sourceNormalized, target: targetNormalized, merged: mergedRecord };
+      return { source: sourceNormalized, target: targetNormalized, merged: mergedRecord, removedSource: true };
     })));
   }
 

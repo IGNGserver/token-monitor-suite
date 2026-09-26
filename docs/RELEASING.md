@@ -25,14 +25,16 @@ Android 正式包必须使用长期保存的签名密钥。不要把 keystore �
 
 ## 发布新版本
 
-1. 在根项目和锁文件中同步版本号，例如 `0.47.0`，然后运行：
+1. 把本次更新写进 `.github/RELEASE_TEMPLATE.md` 里 `<!-- app-update-notes:zh:start -->` 与 `<!-- app-update-notes:zh:end -->` 之间。发布正文只有中文；快捷下载列表、版本号与 Hub 镜像段都由 `scripts/generate-release-notes.js` 注入，不要手写 `releases/download/` 链接。结构约定见 `.github/RELEASE_NOTES_FORMAT.md`。
+
+2. 在根项目和锁文件中同步版本号，例如 `0.47.0`，然后运行：
 
    ```bash
    npm run verify:release-version
    ```
 
-2. 提交并推送代码。
-3. 创建并推送同名版本 tag，例如：
+3. 提交并推送代码。
+4. 创建并推送同名版本 tag，例如：
 
    ```bash
    git tag v0.47.0
@@ -40,8 +42,8 @@ Android 正式包必须使用长期保存的签名密钥。不要把 keystore �
    ```
 
    推送 tag 会自动创建 prerelease。
-4. 如果要创建正式版，进入 GitHub Actions 手动运行 `Release`，填写同一个版本号，并将 `release_type` 选择为 `release`。只有这个明确操作会创建正式版 Release。
-5. GitHub Actions 会构建 Windows 安装包、Linux AppImage、Debian `.deb` 包、Android release APK 和 Hub 镜像。Release 资产文件名中的 `<version>` 会保留完整版本号，例如：
+5. 如果要创建正式版，进入 GitHub Actions 手动运行 `Release`，填写同一个版本号，并将 `release_type` 选择为 `release`。只有这个明确操作会创建正式版 Release。
+6. GitHub Actions 会构建 Windows 安装包、Linux AppImage、Debian `.deb` 包、Android release APK 和 Hub 镜像。Release 资产文件名中的 `<version>` 会保留完整版本号，例如：
 
    - `Token-Monitor-Setup-0.47.0.exe`
    - `Token-Monitor-0.47.0.AppImage`

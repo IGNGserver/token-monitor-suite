@@ -604,36 +604,21 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "tag=v${version}" >> "$GITHUB_OUTPUT"
           echo "release_type=${release_type}" >> "$GITHUB_OUTPUT"
-      - name: Render release notes from commits
+      - name: Render release body from the Chinese template
+        env:
+          RELEASE_VERSION: ${{ steps.ver.outputs.version }}
+          RELEASE_TYPE: ${{ steps.ver.outputs.release_type }}
+          GITHUB_REPOSITORY_SLUG: ${{ github.repository }}
+          GITHUB_REPOSITORY_OWNER_NAME: ${{ github.repository_owner }}
         run: |
-          version="${{ steps.ver.outputs.version }}"
-          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
-          image="ghcr.io/${owner}/token-monitor-hub"
+          set -euo pipefail
           node scripts/generate-release-notes.js \
-            --version "${version}" \
+            --version "${RELEASE_VERSION}" \
             --template .github/RELEASE_TEMPLATE.md \
-            --output release-body.md
-          {
-            echo
-            echo "---"
-            echo
-            echo "## Hub Docker image"
-            echo
-            echo '```bash'
-            echo "docker pull ${image}:${version}"
-            if [ "${{ steps.ver.outputs.release_type }}" = "release" ]; then
-              echo "docker pull ${image}:latest"
-            fi
-            echo '```'
-            echo
-            if [ "${{ steps.ver.outputs.release_type }}" = "release" ]; then
-              echo "Compose: set \`TOKEN_MONITOR_VERSION=${version}\` (or \`latest\`) then \`docker compose pull && docker compose up -d\`."
-            else
-              echo "Compose: set \`TOKEN_MONITOR_VERSION=${version}\` then \`docker compose pull && docker compose up -d\`; this prerelease does not move the \`latest\` tag."
-            fi
-            echo "Or download \`Token-Monitor-Hub-Compose-${version}.zip\` from Assets for a minimal deploy bundle."
-            echo "The no-GUI collector is available as \`Token-Monitor-Headless-${version}.tar.gz\`; install it with \`npm ci --omit=dev\`."
-          } >> release-body.md
+            --output release-body.md \
+            --repository "${GITHUB_REPOSITORY_SLUG}" \
+            --owner "${GITHUB_REPOSITORY_OWNER_NAME}" \
+            --release-type "${RELEASE_TYPE}"
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}

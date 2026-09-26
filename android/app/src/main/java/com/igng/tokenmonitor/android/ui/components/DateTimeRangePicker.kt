@@ -336,8 +336,10 @@ private fun RangeCalendar(
   // CLDR fact about the user's calendar, and the previous code hardcoded Monday,
   // which put Sunday-start users a day off on every row.
   //
-  // Same source of truth as the 本周 preset (`DateRanges.firstDayOfWeek`), so the
-  // calendar grid and the week window cannot disagree.
+  // The grid follows `DateRanges.firstDayOfWeek` (CLDR), which is the display rule.  The
+  // 本周 *scope window* is a separate, pinned ISO-Monday measurement — a picked range
+  // here is answered by explicit days the user chose, so the two cannot disagree about a
+  // reported total.
   val labelLocale = Locale.CHINA
   val weekFirstDay = com.igng.tokenmonitor.android.ui.core.DateRanges.firstDayOfWeek()
   val weekdayOrder = remember(weekFirstDay) {

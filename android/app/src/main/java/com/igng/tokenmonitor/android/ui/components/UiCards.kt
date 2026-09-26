@@ -418,3 +418,86 @@ internal fun rememberFluentHover(interaction: androidx.compose.foundation.intera
   // so this reads false on phones by construction and lights up under a pointer.
   return interaction.collectIsHoveredAsState().value
 }
+
+/**
+ * What a scope tab that resolves through the range endpoint is actually showing.
+ *
+ * Three things the number alone cannot say: which calendar days the window covers
+ * ("本周" is Monday-through-today, not "the last 7 days"), which source answered it
+ * (a day-rounded daily history and an hour-precision event ledger are different
+ * measurements, and only some of them carry credits or the `~` estimate flag at all),
+ * and whether there is an answer yet at all.  A range tab with no answer renders this
+ * notice instead of a figure — the previous behaviour showed the *previous* tab's
+ * number, or today's snapshot, under the new label.
+ */
+@Composable
+fun ScopeRangeNotice(
+  windowLabel: String?,
+  sourceLabel: String?,
+  loading: Boolean,
+  unavailable: Boolean,
+  onRetry: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  if (windowLabel == null && sourceLabel == null && !loading && !unavailable) return
+  val colors = LocalFluentColors.current
+  val interaction = remember { MutableInteractionSource() }
+  Column(
+    modifier
+      .fillMaxWidth()
+      .padding(top = FluentSpacingDefaults.s),
+    verticalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.xxs)
+  ) {
+    Row(
+      Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.s)
+    ) {
+      if (windowLabel != null) {
+        Text(
+          windowLabel,
+          style = FluentTypeRamp.caption1,
+          color = colors.neutralForeground2,
+          modifier = Modifier.weight(1f, fill = false)
+        )
+      }
+      if (loading) {
+        FluentProgressRing(
+          size = 14.dp,
+          strokeWidth = 2.dp,
+          color = colors.brandForeground1
+        )
+        Text(
+          "正在读取该窗口…",
+          style = FluentTypeRamp.caption1,
+          color = colors.neutralForeground3
+        )
+      }
+      if (unavailable) {
+        Text(
+          "该窗口暂无可用数据",
+          style = FluentTypeRamp.caption1,
+          color = colors.neutralForeground3,
+          modifier = Modifier.weight(1f, fill = false)
+        )
+        Text(
+          "重试",
+          style = FluentTypeRamp.caption1,
+          fontWeight = FontWeight.SemiBold,
+          color = colors.brandForeground1,
+          modifier = Modifier
+            .clip(FluentShapeDefaults.controlCorner)
+            .clickable(interactionSource = interaction, indication = null, onClick = onRetry)
+            .padding(horizontal = FluentSpacingDefaults.xs, vertical = FluentSpacingDefaults.xxs)
+        )
+      }
+    }
+    if (sourceLabel != null) {
+      Text(
+        sourceLabel,
+        style = FluentTypeRamp.caption2,
+        color = colors.neutralForeground3
+      )
+    }
+  }
+}

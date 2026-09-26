@@ -27,29 +27,38 @@ object DateRanges {
   /** Presets resolved through the range endpoint rather than the snapshot. */
   val PRESET_RANGE_PERIODS = listOf("yesterday", "week")
 
-  private val ISO_WEEK_FIRST_DAY = DayOfWeek.MONDAY
+  /**
+   * The 本周 window always starts on ISO 8601 Monday, on every device and in every
+   * locale.
+   *
+   * This is a *measurement* rule, not a display preference: the web scope bar computes
+   * the same Monday (`Intl.Locale#weekInfo` is absent in the Chromium builds both hosts
+   * run on, and the port pins it deliberately now), so one "本周" label cannot answer two
+   * different totals depending on which client asked.  A CLDR-following port was exactly
+   * the second measurement the note above warns about — under a US locale its window
+   * started a day earlier and the same tab showed a bigger number than the browser.
+   *
+   * [firstDayOfWeek] stays locale-driven on purpose: the heatmap grid and the date
+   * picker's calendar are presentation, and neither one produces a reported figure.
+   */
+  val SCOPE_WEEK_FIRST_DAY = DayOfWeek.MONDAY
 
   /**
-   * The day a week starts on, from CLDR via [Locale] rather than assumed.
+   * The day a *grid* starts on, from CLDR via [Locale].
    *
-   * The web fallback is Monday (ISO 8601) because `Intl.Locale#weekInfo` is absent in
-   * the Chromium builds both hosts run on; Java's `Locale` *does* carry the data
-   * through week-of-year parameters, so the client can be more correct than the
-   * browser here.  Where CLDR says Sunday (US and a few others) the client follows the
-   * locale, and where the lookup tells us nothing it falls back to Monday, which is
-   * the same default the web scope bar uses.
+   * Display only — see [SCOPE_WEEK_FIRST_DAY] for why the 本周 window ignores this.
    */
   fun firstDayOfWeek(locale: Locale = Locale.getDefault()): DayOfWeek {
     // `WeekFields` is the CLDR-backed accessor; an unsupported locale still yields
     // the ISO minimum, which is the documented fallback rather than a surprise.
     return runCatching {
       java.time.temporal.WeekFields.of(locale).firstDayOfWeek
-    }.getOrDefault(ISO_WEEK_FIRST_DAY)
+    }.getOrDefault(SCOPE_WEEK_FIRST_DAY)
   }
 
-  fun weekStart(date: LocalDate = LocalDate.now(), locale: Locale = Locale.getDefault()): LocalDate {
-    val first = firstDayOfWeek(locale)
-    val back = (date.dayOfWeek.value - first.value + 7) % 7
+  /** The ISO Monday that starts [date]'s week. */
+  fun scopeWeekStart(date: LocalDate = LocalDate.now()): LocalDate {
+    val back = (date.dayOfWeek.value - SCOPE_WEEK_FIRST_DAY.value + 7) % 7
     return date.minusDays(back.toLong())
   }
 
@@ -59,8 +68,7 @@ object DateRanges {
    */
   fun presetRangeWindow(
     period: String?,
-    today: LocalDate = LocalDate.now(),
-    locale: Locale = Locale.getDefault()
+    today: LocalDate = LocalDate.now()
   ): PresetRangeWindow? {
     return when (period?.lowercase()) {
       // Yesterday is a closed window; the current week always runs up to today.
@@ -71,7 +79,7 @@ object DateRanges {
       )
       "week" -> PresetRangeWindow(
         period = "week",
-        startDate = weekStart(today, locale),
+        startDate = scopeWeekStart(today),
         endDate = today
       )
       else -> null

@@ -651,22 +651,26 @@ fun FluentProgressRing(
   trackColor: Color = LocalFluentColors.current.neutralStroke3
 ) {
   val motion = fluentMotionEnabled()
-  val transition = rememberInfiniteTransition(label = "progressRing")
-  val sweep by transition.animateFloat(
-    initialValue = 0f,
-    targetValue = 360f,
-    animationSpec = infiniteRepeatable(
-      animation = tween(FluentMotion.slower, easing = LinearEasing),
-      repeatMode = RepeatMode.Restart
-    ),
-    label = "progressSweep"
-  )
+  val sweep = if (motion) {
+    val transition = rememberInfiniteTransition(label = "progressRing")
+    transition.animateFloat(
+      initialValue = 0f,
+      targetValue = 360f,
+      animationSpec = infiniteRepeatable(
+        animation = tween(FluentMotion.slower, easing = LinearEasing),
+        repeatMode = RepeatMode.Restart
+      ),
+      label = "progressSweep"
+    ).value
+  } else {
+    270f
+  }
   Canvas(modifier = modifier.size(size)) {
     val style = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
     drawArc(color = trackColor, startAngle = 0f, sweepAngle = 360f, useCenter = false, style = style)
     drawArc(
       color = color,
-      startAngle = if (motion) sweep else 270f,
+      startAngle = sweep,
       sweepAngle = if (motion) 110f else 270f,
       useCenter = false,
       style = style

@@ -290,8 +290,8 @@ every change, so a client never polls to stay live.
   `GET /api/stats`.
 - Later frames are `event: stats` with
   `{ type: "stats", reason, stats, at }`. `reason` is one of `ingest`,
-  `account-update`, `subscriptions`, `delete`, `rename`, or the generic
-  `update`.
+  `account-update`, `subscriptions`, `delete`, `rename`, `transfer`, or the
+  generic `update`.
 - A `: hb` comment line is written on a fixed 30-second cadence purely to keep
   the connection alive; it never queries MySQL.
 - Streams are bounded. At capacity the Hub answers `503` with
@@ -451,6 +451,14 @@ Requires admin scope. Removes the device from visible stats. The Node/MySQL Hub 
 Requires admin scope. Body: `{"deviceId":"new-id"}`. Atomically moves the current record and measurement identity to the new ID; the Node/MySQL Hub also moves its baseline, ledger, and session rows. Returns `409 target_exists` rather than merging two identities.
 
 For the Docker Compose Hub, credential bindings are deployment configuration rather than database rows. Use this order: stop the old client's uploads; provision a distinct token bound to the new ID and reload the Hub configuration; call the rename endpoint; change the client's Device ID and token together; resume it and verify one successful upload; then remove the old binding. Uploading the new ID before the rename creates a conflicting target, while resuming the old binding afterwards recreates the old identity.
+
+## `POST /api/devices/:id/transfer`
+
+Requires admin scope. Body: `{"targetDeviceId":"existing-id"}`. Moves the source device's entire recorded history onto the target device, which must already exist (`404 target_not_found` otherwise). Inside one transaction the Node/MySQL Hub moves the source's `usage_events` rows wholesale, additively merges its `sessions` rows into the target's per (client, session) totals, and additively merges the target's period snapshots (today / month / allTime) and history document with the source's.
+
+The source device keeps its identity and keeps recording normally. Its display snapshot is cleared and its ingest baseline is pinned to the pre-transfer cumulative counters with a `transferred` marker, so its next upload books only genuinely new usage — both in the event ledger and in the display aggregate. Repeated cumulative reports that contain no new usage change nothing.
+
+Returns `400 same_device` when the source and target match. The transfer is the one operation where the ingest baseline intentionally diverges from the display snapshot; a regular ingest keeps them identical.
 
 ## `GET /api/usage/range`
 

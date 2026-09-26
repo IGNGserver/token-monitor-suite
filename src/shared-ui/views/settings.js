@@ -1,27 +1,16 @@
-// Settings view: the shell that hosts the shared and desktop-only groups.
+// Settings view: web preferences plus, on the desktop host, the device groups.
 //
-// Extracted from app.js. The device-local controls live in settingsDesktop.js;
-// this module owns the surrounding page and the connection/capability summary.
+// Extracted from app.js. The web side configures the browser only; the desktop
+// side additionally renders the device-owned groups from settingsDesktop.js.
+// Device data redistribution lives in the transfer page, not here.
 
 import { isCapable } from '../transport/index.js';
-import { tr, escapeHtml, appState, settingsOptionList, viewHelper } from '../core/viewContext.js';
+import { tr, escapeHtml, appState, settingsOptionList } from '../core/viewContext.js';
 import { clampHomeLimitAccountCount } from '../core/data.js';
 import { renderDesktopSettings } from './settingsDesktop.js';
 
-const pwaStatusText = (...args) => viewHelper('pwaStatusText')(...args);
-
 export function renderSettingsPage() {
   const desktopHost = isCapable('desktopSettings');
-  const scopes = appState().authorization?.scopes || [];
-  const capabilities = appState().authorization?.capabilities || appState().health?.capabilities || {};
-  const capabilityEntries = Object.entries(capabilities).filter(([, value]) => value !== undefined);
-  const capabilityHtml = capabilityEntries.length
-    ? `<div class="settings-capability-list">${capabilityEntries.map(([key, value]) => `<span class="badge ${value === false ? 'stale' : 'ok'}">${escapeHtml(key)} · ${value === false ? 'off' : 'on'}</span>`).join('')}</div>`
-    : `<span class="muted tiny">—</span>`;
-  const origin = window.location.origin && window.location.origin !== 'null'
-    ? window.location.origin
-    : window.location.host || 'current page';
-  const streamLabel = tr(`status.${appState().stream === 'live' ? 'live' : appState().stream === 'connecting' || appState().stream === 'retrying' ? 'connecting' : appState().stream === 'unauthorized' ? 'unauthorized' : 'offline'}`);
   const settingsLabel = desktopHost ? tr('settings.desktopTitle') : tr('settings.webOnly');
   const settingsDescription = desktopHost ? tr('settings.desktopDescription') : tr('settings.pageDescription');
   return `<section class="page-intro settings-page-intro"><div><div class="eyebrow">${escapeHtml(settingsLabel)}</div><h2>${escapeHtml(desktopHost ? tr('settings.desktopTitle') : tr('settings.pageTitle'))}</h2><p>${escapeHtml(settingsDescription)}</p></div></section>
@@ -39,12 +28,8 @@ export function renderSettingsPage() {
         <p class="muted tiny settings-form-hint">${escapeHtml(desktopHost ? tr('settings.desktopLocalHint') : tr('settings.authHint'))}</p>
         <div class="drawer-actions settings-actions"><fluent-button appearance="primary" type="submit" class="primary-btn" data-settings-submit disabled>${escapeHtml(tr('settings.savePage'))}</fluent-button>${desktopHost ? '' : `<fluent-button appearance="transparent" type="button" class="ghost-btn" data-web-signout>${escapeHtml(tr('settings.signOut'))}</fluent-button>`}</div>
       </form>
-      <div class="settings-side-stack">
-        <section class="panel settings-info-panel"><div class="panel-head"><h2 class="panel-title">${escapeHtml(tr('settings.connection'))}</h2></div><p class="muted tiny">${escapeHtml(tr(desktopHost ? 'settings.desktopConnectionHint' : 'settings.connectionHint'))}</p><dl class="settings-definition-list"><div><dt>${escapeHtml(tr('settings.currentOrigin'))}</dt><dd>${escapeHtml(origin)}</dd></div><div><dt>${escapeHtml(tr('settings.role'))}</dt><dd>${escapeHtml(scopes.length ? scopes.join(' · ') : '—')}</dd></div><div><dt>${escapeHtml(tr('settings.stream'))}</dt><dd>${escapeHtml(streamLabel)}</dd></div></dl><div class="settings-capabilities"><span class="summary-label">${escapeHtml(tr('settings.capabilities'))}</span>${capabilityHtml}</div></section>
-        ${isCapable('pwa') ? `<section class="panel settings-info-panel"><div class="panel-head"><h2 class="panel-title">${escapeHtml(tr('settings.pwa'))}</h2></div><p class="muted tiny">${escapeHtml(pwaStatusText())}</p>${appState().deferredInstall ? `<fluent-button appearance="transparent" type="button" class="ghost-btn" data-pwa-install>${escapeHtml(tr('pwa.install'))}</fluent-button>` : ''}</section>` : ''}
-        ${isCapable('desktopSettings')
-          ? `<div class="settings-desktop-stack" data-desktop-settings>${renderDesktopSettings(appState().desktopSettings || {}, appState().desktopCatalog || {}, appState().desktopInfo || {})}</div>`
-          : `<section class="panel settings-boundary-panel"><div class="panel-head"><h2 class="panel-title">${escapeHtml(tr('settings.desktopOnly'))}</h2></div><p class="muted tiny">${escapeHtml(tr('settings.desktopOnlyHint'))}</p></section>`}
-      </div>
+      ${desktopHost
+        ? `<div class="settings-desktop-stack" data-desktop-settings>${renderDesktopSettings(appState().desktopSettings || {}, appState().desktopCatalog || {}, appState().desktopInfo || {})}</div>`
+        : ''}
     </div>`;
 }

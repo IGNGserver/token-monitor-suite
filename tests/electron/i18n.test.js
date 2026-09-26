@@ -58,7 +58,9 @@ test('every native menu and tray string is translated in every bundled locale', 
 
 test('every desktop settings label is translated in every bundled locale', () => {
   const keys = keysReferencedFrom(['src/shared-ui/views/settingsDesktop.js'], ['desktop.settings', 'settings.appearance']);
-  assert.ok(keys.length >= 50, `expected the desktop settings view to reference its labels, saw ${keys.length}`);
+  // The redesigned surface keeps three groups (显示/行为/连接); the collector and
+  // preference keys it dropped are still valid settings.json keys, just not labels.
+  assert.ok(keys.length >= 30, `expected the desktop settings view to reference its labels, saw ${keys.length}`);
   assert.deepEqual(untranslated(keys), []);
 });
 

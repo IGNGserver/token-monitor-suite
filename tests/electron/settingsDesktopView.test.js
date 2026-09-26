@@ -1,9 +1,10 @@
 'use strict';
 
-// The desktop settings surface is where the rewrite's compatibility promise is
-// kept: every key a user could configure in the old widget must still be
-// reachable here. These tests pin the mapping from form field to settings key,
-// because a renamed `name` attribute would silently stop persisting a choice.
+// The desktop settings surface is deliberately small: 显示 / 行为 / 连接.
+// These tests pin the mapping from form field to settings key, because a
+// renamed `name` attribute would silently stop persisting a choice. They also
+// pin the window-material folding: the single dropdown stores the legacy
+// (systemGlass, windowsBackdrop) pair the window code reads.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -26,87 +27,107 @@ function loadView(state = {}) {
       const settingsOptionList = (options, selected) => options
         .map(([value, label]) => \`<option value="\${value}"\${String(value) === String(selected) ? ' selected' : ''}>\${label}</option>\`)
         .join('');
-      // The update and collector panels render only what the main process pushed,
+      // The update panel renders only what the main process pushed,
       // so the stub reports whatever the test provides.
       const appState = () => (${JSON.stringify({
-    desktopAppUpdate: null, desktopTokscale: null, desktopTokscaleCheck: null, ...state
+    desktopAppUpdate: null, ...state
   })});
     `);
   const factory = new Function(`${source.replace(/^export /gm, '')}
-    return { renderDesktopSettings, readDesktopSettingsPatch, desktopSettingsFieldError };`);
+    return { renderDesktopSettings, readDesktopSettingsPatch, desktopSettingsFieldError, surfaceValueFromSettings, settingsPatchForSurface };`);
   return factory();
 }
+
+test('the three groups render and no legacy group remains', () => {
+  const { renderDesktopSettings } = loadView();
+  const html = renderDesktopSettings({ hubMode: 'client' }, {}, { platform: 'win32', loginItemSupported: true });
+  for (const id of ['display', 'behaviour', 'connection']) {
+    assert.ok(html.includes(`data-desktop-group="${id}"`), `the ${id} group exists`);
+  }
+  for (const legacy of ['collection', 'engine', 'export', 'appearance', 'limitsDisplay', 'general', 'device', 'preferences', 'advanced']) {
+    assert.ok(!html.includes(`data-desktop-group="${legacy}"`), `the ${legacy} group is gone`);
+  }
+});
 
 test('every retained settings key has a form control', () => {
   const { renderDesktopSettings } = loadView();
   const html = renderDesktopSettings({
-    clients: 'claude', collectionMode: 'live', collectionIntervalMs: 300000,
-    historyIntervalMs: 900000, exportIntervalMs: 60000, zoomFactor: 1,
-    syncUploadIntervalMs: 600000, deviceId: 'box', allTimeSince: '2024-01-01',
-    hubUrl: '', hubMode: 'local'
-  }, { clients: ['claude', 'codex'], collectionIntervals: [] }, { platform: 'linux', loginItemSupported: true });
+    hubUrl: '', hubMode: 'client', deviceId: 'box'
+  }, {}, { platform: 'win32', loginItemSupported: true });
 
-  // The settings keys the plan retains as device-local must each appear.
   const required = [
-    'collectionMode', 'collectionIntervalMs', 'projectsEnabled',
-    'historyEnabled', 'historyIntervalMs', 'sessionUsageArchiveEnabled',
-    'allTimeSince', 'exportAutoEnabled', 'exportIntervalMs', 'systemGlass',
-    'reduceMotion', 'showToolIcons', 'showLiveDot', 'showCompactTotalTokens',
-    'zoomFactor', 'startAtLogin', 'automaticAppUpdates', 'discordRpcEnabled',
-    'deviceId', 'hubMode', 'hubUrl', 'syncUploadIntervalMs', 'allowInsecureHubHttp'
+    'language', 'windowSurface', 'reduceMotion',
+    'startAtLogin', 'startHidden', 'closeToTray',
+    'hubMode', 'hubUrl', 'allowInsecureHubHttp', 'deviceId'
   ];
   const missing = required.filter((key) => !html.includes(`name="${key}"`));
   assert.deepEqual(missing, [], `settings with no control: ${missing.join(', ')}`);
-  // The tracked-client checklist is a set of ids rather than one named field.
-  assert.ok(html.includes('data-token-list="clients"'), 'tracked tools need a checklist control');
+  assert.ok(html.includes('data-desktop-action="check-updates"'), 'a check-for-updates button exists');
+  assert.ok(html.includes('data-desktop-action="download-install-update"'), 'an install button exists');
 });
 
-test('WSL scanning is offered only on Windows', () => {
+test('hub-owned fields are offered only in hub mode', () => {
   const { renderDesktopSettings } = loadView();
-  const win = renderDesktopSettings({}, { clients: [] }, { platform: 'win32' });
-  const linux = renderDesktopSettings({}, { clients: [] }, { platform: 'linux' });
-  assert.ok(win.includes('name="wslScanEnabled"'), 'Windows needs the WSL toggle');
-  assert.ok(!linux.includes('name="wslScanEnabled"'), 'WSL scanning is meaningless off Windows');
-});
-
-test('the title-strip switch is offered only where a title strip is drawn', () => {
-  const { renderDesktopSettings } = loadView();
-  assert.ok(renderDesktopSettings({}, { clients: [] }, { platform: 'win32' }).includes('name="titleIconOnly"'),
-    'the web content owns the Windows title strip');
-  for (const platform of ['darwin', 'linux']) {
-    assert.ok(!renderDesktopSettings({}, { clients: [] }, { platform }).includes('name="titleIconOnly"'),
-      `${platform} has no product-drawn title text to collapse`);
+  const client = renderDesktopSettings({ hubMode: 'client' }, {}, { platform: 'linux', loginItemSupported: true });
+  for (const key of ['hubUrl', 'allowInsecureHubHttp', 'deviceId']) {
+    assert.ok(client.includes(`name="${key}"`), `${key} appears in hub mode`);
   }
+  const local = renderDesktopSettings({ hubMode: 'local' }, {}, { platform: 'linux', loginItemSupported: true });
+  for (const key of ['hubUrl', 'allowInsecureHubHttp', 'deviceId']) {
+    assert.ok(!local.includes(`name="${key}"`), `${key} is hidden in local mode`);
+  }
+  assert.ok(local.includes('name="hubMode"'), 'the mode toggle itself always shows');
 });
 
-test('the macOS glass selector is macOS-only', () => {
+test('the window material folds into the legacy (systemGlass, windowsBackdrop) pair', () => {
+  const { settingsPatchForSurface, surfaceValueFromSettings } = loadView();
+  assert.deepEqual(settingsPatchForSurface('regular'), { systemGlass: false });
+  assert.deepEqual(settingsPatchForSurface('transparent'), { systemGlass: true });
+  assert.deepEqual(settingsPatchForSurface('acrylic'), { systemGlass: true, windowsBackdrop: 'acrylic' });
+  assert.deepEqual(settingsPatchForSurface('mica'), { systemGlass: true, windowsBackdrop: 'mica' });
+
+  assert.equal(surfaceValueFromSettings({ systemGlass: false }, { platform: 'win32' }), 'regular');
+  assert.equal(surfaceValueFromSettings({ systemGlass: true, windowsBackdrop: 'mica' }, { platform: 'win32' }), 'mica');
+  assert.equal(surfaceValueFromSettings({ systemGlass: true, windowsBackdrop: 'acrylic' }, { platform: 'win32' }), 'acrylic');
+  assert.equal(surfaceValueFromSettings({ systemGlass: true, windowsBackdrop: 'mica' }, { platform: 'darwin' }), 'transparent',
+    'a material another platform cannot apply reads as plain transparency');
+});
+
+test('acrylic and mica are offered only on Windows', () => {
   const { renderDesktopSettings } = loadView();
-  assert.ok(renderDesktopSettings({}, { clients: [] }, { platform: 'darwin' }).includes('macosGlassStyle'));
-  assert.ok(!renderDesktopSettings({}, { clients: [] }, { platform: 'win32' }).includes('macosGlassStyle'));
+  const win = renderDesktopSettings({}, {}, { platform: 'win32' });
+  assert.ok(win.includes('value="acrylic"'), 'Windows offers acrylic');
+  assert.ok(win.includes('value="mica"'), 'Windows offers mica');
+  for (const platform of ['darwin', 'linux']) {
+    const html = renderDesktopSettings({}, {}, { platform });
+    assert.ok(!html.includes('value="acrylic"'), `${platform} does not offer acrylic`);
+    assert.ok(!html.includes('value="mica"'), `${platform} does not offer mica`);
+  }
 });
 
 test('start at login is hidden when the platform has no login item', () => {
   const { renderDesktopSettings } = loadView();
-  const unsupported = renderDesktopSettings({}, { clients: [] }, { platform: 'linux', loginItemSupported: false });
+  const unsupported = renderDesktopSettings({}, {}, { platform: 'linux', loginItemSupported: false });
   assert.ok(!unsupported.includes('name="startAtLogin"'), 'a control that cannot work must not be offered');
+  assert.ok(!unsupported.includes('name="startHidden"'), 'silent start presupposes a login item');
 });
 
 test('reading the form back produces the right value types', () => {
   const { renderDesktopSettings, readDesktopSettingsPatch } = loadView();
-  // The DOM shim does not parse HTML, so stand in a form whose query methods
-  // return the fields the reader looks for.
-  const html = renderDesktopSettings({ clients: 'claude', deviceId: 'box' }, { clients: ['claude', 'codex'] }, { platform: 'linux' });
+  const html = renderDesktopSettings({ hubMode: 'client', deviceId: 'box' }, {}, { platform: 'linux', loginItemSupported: true });
   assert.ok(html.length > 0);
 
   const fields = [
-    ['projectsEnabled', 'checkbox', true], ['historyEnabled', 'checkbox', false],
-    ['collectionIntervalMs', 'number', '600000'], ['zoomFactor', 'number', '1.25'],
-    ['deviceId', 'text', ' renamed '], ['collectionMode', 'select', 'smart'],
-    ['hubUrl', 'text', ' http://hub:17321 ']
+    ['startAtLogin', 'checkbox', true], ['closeToTray', 'checkbox', false],
+    ['deviceId', 'text', ' renamed '], ['hubUrl', 'text', ' http://hub:17321 ']
   ];
   const nodes = fields.map(([name, type, value]) => ({ name, type, value: String(value), checked: value === true }));
   const form = {
     querySelector(selector) {
+      if (selector === '[name="windowSurface"]') return { value: 'regular' };
+      if (selector === '[name="language"]') return { value: 'zh-CN' };
+      if (selector === '[name="reduceMotion"]') return { value: 'on' };
+      if (selector === 'fluent-radio-group[name="hubMode"]') return { value: 'client' };
       const m = /^\[name="([^"]+)"\]$/.exec(selector);
       if (m) return nodes.find((n) => n.name === m[1]) || null;
       return null;
@@ -115,111 +136,45 @@ test('reading the form back produces the right value types', () => {
   };
 
   const patch = readDesktopSettingsPatch(form);
-  assert.equal(patch.projectsEnabled, true, 'checkboxes read as booleans');
-  assert.equal(patch.historyEnabled, false);
-  assert.equal(patch.collectionIntervalMs, 600000, 'numeric fields must not persist as strings');
-  assert.equal(patch.zoomFactor, 1.25);
+  assert.equal(patch.startAtLogin, true, 'checkboxes read as booleans');
+  assert.equal(patch.closeToTray, false);
   assert.equal(patch.deviceId, 'renamed', 'text fields are trimmed');
   assert.equal(patch.hubUrl, 'http://hub:17321');
-  assert.equal(patch.collectionMode, 'smart');
+  assert.equal(patch.hubMode, 'client');
+  assert.equal(patch.language, 'zh-CN');
+  assert.equal(patch.reduceMotion, 'on');
+  assert.equal(patch.systemGlass, false, 'the surface control unfolds to the legacy pair');
+  assert.equal(patch.windowsBackdrop, undefined, 'regular carries no material');
 });
 
-test('the glass control round-trips as a boolean', () => {
-  // The dropdown's option values are 'system' and 'off'; the window-material code
-  // only ever reads `systemGlass === false`, so persisting the string made the
-  // control unable to turn the glass off.
+test('the surface control round-trips through the dropdown', () => {
   const { readDesktopSettingsPatch } = loadView();
   const formFor = (value) => ({
-    querySelector: (selector) => (selector === '[name="systemGlass"]' ? { value } : null),
+    querySelector: (selector) => (selector === '[name="windowSurface"]' ? { value } : null),
     querySelectorAll: () => []
   });
-  assert.equal(readDesktopSettingsPatch(formFor('off')).systemGlass, false);
-  assert.equal(readDesktopSettingsPatch(formFor('system')).systemGlass, true);
+  assert.equal(readDesktopSettingsPatch(formFor('mica')).windowsBackdrop, 'mica');
+  assert.equal(readDesktopSettingsPatch(formFor('mica')).systemGlass, true);
+  assert.equal(readDesktopSettingsPatch(formFor('regular')).systemGlass, false);
 });
 
-test('the file-watch controls are offered next to the tick cadence', () => {
-  const { renderDesktopSettings } = loadView();
-  const html = renderDesktopSettings({}, { clients: [] }, { platform: 'linux' });
-  assert.ok(html.includes('name="watchEnabled"'), 'watching tool files is the 3-5 second promise; it needs a switch');
-  assert.ok(html.includes('name="watchDebounceMs"'), 'the debounce needs a value, not only an env var');
-});
-
-test('the Windows material picker is Windows-only', () => {
-  const { renderDesktopSettings } = loadView();
-  assert.ok(renderDesktopSettings({}, { clients: [] }, { platform: 'win32' }).includes('name="windowsBackdrop"'));
-  for (const platform of ['darwin', 'linux']) {
-    assert.ok(!renderDesktopSettings({}, { clients: [] }, { platform }).includes('name="windowsBackdrop"'),
-      `no background material exists on ${platform}`);
-  }
-});
-
-test('a malformed field is reported instead of silently dropped', () => {
-  const { desktopSettingsFieldError } = loadView();
-  const formFor = (value) => ({ querySelector: () => ({ value }) });
-  const check = (name, value) => desktopSettingsFieldError(formFor(value), name);
-  assert.ok(check('themeColors', '{oops}'), 'bad JSON must not save as a no-op');
-  assert.ok(check('allTimeSince', 'next Tuesday'), 'a bad anchor date must not fall back silently');
-  assert.equal(check('themeColors', '{"surface":"#123456"}'), '');
-  assert.equal(check('themeColors', ''), '', 'an empty map means defaults');
-  assert.equal(check('allTimeSince', '2024-01-01'), '');
-  assert.equal(check('deviceId', 'anything'), '', 'free-text ids are not validated here');
-});
-
-test('the update panel offers the action the pushed state actually allows', () => {
+test('the update controls are always reachable; the reason text explains a blocked install', () => {
   const { renderDesktopSettings } = loadView({
     desktopAppUpdate: {
       currentVersion: '1.0.0', latest: { version: '1.1.0' }, hasUpdate: true,
       downloaded: false, installSupported: true
     }
   });
-  const html = renderDesktopSettings({}, { clients: [] }, { platform: 'win32' });
-  assert.match(html, /data-desktop-action="download-update"/);
-  assert.doesNotMatch(html, /data-desktop-action="install-update"/, 'nothing is downloaded yet');
-
-  const installed = loadView({
-    desktopAppUpdate: {
-      currentVersion: '1.0.0', latest: { version: '1.1.0' }, hasUpdate: true,
-      downloaded: true, installSupported: true
-    }
-  }).renderDesktopSettings({}, { clients: [] }, { platform: 'win32' });
-  assert.match(installed, /data-desktop-action="install-update"/);
+  const html = renderDesktopSettings({}, {}, { platform: 'win32' });
+  assert.match(html, /data-desktop-action="check-updates"/);
+  assert.match(html, /data-desktop-action="download-install-update"/);
 
   const unsupported = loadView({
     desktopAppUpdate: {
       currentVersion: '1.0.0', latest: { version: '1.1.0' }, hasUpdate: true,
       downloaded: true, installSupported: false, installSupportReason: 'portable build'
     }
-  }).renderDesktopSettings({}, { clients: [] }, { platform: 'linux' });
-  assert.doesNotMatch(unsupported, /data-desktop-action="install-update"/, 'a portable build cannot self-install');
+  }).renderDesktopSettings({}, {}, { platform: 'linux' });
+  assert.match(unsupported, /data-desktop-action="download-install-update"/, 'the install button stays reachable');
   assert.match(unsupported, /portable build/, 'the reason is shown rather than the button hidden silently');
-});
-
-test('the collector engine panel follows the pushed resolver state', () => {
-  const bundled = loadView({
-    desktopTokscale: { supported: true, current: { source: 'bundled', version: '4.14.0' } },
-    desktopTokscaleCheck: { supported: true, newer: true, npm: { version: '4.15.0' } }
-  }).renderDesktopSettings({}, { clients: [] }, { platform: 'darwin' });
-  assert.match(bundled, /data-desktop-action="tokscale-check"/);
-  assert.match(bundled, /data-desktop-action="tokscale-download"/);
-  assert.doesNotMatch(bundled, /data-desktop-action="tokscale-reset"/, 'nothing to reset from');
-
-  const downloaded = loadView({
-    desktopTokscale: { supported: true, current: { source: 'downloaded', version: '4.15.0' } }
-  }).renderDesktopSettings({}, { clients: [] }, { platform: 'darwin' });
-  assert.match(downloaded, /data-desktop-action="tokscale-reset"/);
-
-  const unsupported = loadView({ desktopTokscale: { supported: false } })
-    .renderDesktopSettings({}, { clients: [] }, { platform: 'darwin' });
-  assert.doesNotMatch(unsupported, /desktop-settings-group" data-desktop-group="engine"/, 'no panel where the updater cannot run');
-});
-
-test('the tracked-client checklist round-trips as a csv', () => {
-  const { renderDesktopSettings, readDesktopSettingsPatch } = loadView();
-  const html = renderDesktopSettings({ clients: 'claude,codex' }, { clients: ['claude', 'codex', 'cursor'] }, { platform: 'linux' });
-  // All three tools are offered, with the configured two pre-checked.
-  assert.equal((html.match(/data-token-list="clients"/g) || []).length, 3);
-  assert.equal((html.match(/data-token-list="clients"[^>]*checked/g) || []).length, 2);
-
-  const form = { querySelector: () => ({}), querySelectorAll: () => [{ value: 'claude' }, { value: 'cursor' }] };
-  assert.equal(readDesktopSettingsPatch(form).clients, 'claude,cursor');
 });

@@ -132,11 +132,11 @@ test('credentials keep their existing shape', () => {
   assert.match(main, /stripCredentialSettings|credentialSettingsForRenderer/, 'settings.json must still be written without credentials');
 });
 
-test('every retained setting that the old widget exposed has a control', () => {
-  // Preserving a key is not enough: the user's requirement was that anything
-  // configurable before is still configurable. This asserts the form field exists
-  // for the keys the plan retains as user-facing, so a key cannot quietly become
-  // JSON-only during a future refactor.
+test('every user-facing setting of the redesigned surface has a control', () => {
+  // The redesigned desktop settings keep three groups (显示/行为/连接); the keys
+  // that left the GUI stay valid settings.json keys configurable through env and
+  // the settings document — this test only requires a control for the keys the
+  // surface still presents.
   const view = fs.readFileSync(path.join(root, 'src', 'shared-ui', 'views', 'settingsDesktop.js'), 'utf8');
   const uiSource = [
     fs.readFileSync(path.join(root, 'src', 'shared-ui', 'app.js'), 'utf8'),
@@ -147,36 +147,26 @@ test('every retained setting that the old widget exposed has a control', () => {
 
   // Fields the desktop settings form renders.
   const controllable = [
-    'clients', 'collectionMode', 'collectionIntervalMs', 'projectsEnabled',
-    'historyEnabled', 'historyIntervalMs', 'sessionUsageArchiveEnabled',
-    'allTimeSince', 'exportAutoEnabled', 'exportIntervalMs',
-    'systemGlass', 'macosGlassStyle', 'reduceMotion', 'showToolIcons',
-    'showLiveDot', 'showCompactTotalTokens', 'titleIconOnly', 'zoomFactor',
-    'showLimitSource', 'maskLimitAccountEmails', 'showLimitUsed',
-    'startAtLogin', 'automaticAppUpdates', 'discordRpcEnabled',
-    'deviceId', 'hubMode', 'hubUrl', 'syncUploadIntervalMs', 'allowInsecureHubHttp'
+    'language', 'windowSurface', 'reduceMotion',
+    'startAtLogin', 'startHidden', 'closeToTray',
+    'deviceId', 'hubMode', 'hubUrl', 'allowInsecureHubHttp'
   ];
-  // Fields are produced by checkbox()/selectField()/textField()/numberField(),
-  // so a key appears as the first argument of one of those helpers (or as a
-  // token-list attribute) rather than as a literal name="..." in the source.
+  // Fields are produced by checkbox()/dropdownField()/textField(), so a key
+  // appears as the first argument of one of those helpers (the surface control
+  // is the one folded key, handled through settingsPatchForSurface).
   const missing = controllable.filter((key) => (
-    !new RegExp(`(?:checkbox|selectField|textField|numberField)\\('${key}'`).test(view)
-    && !view.includes(`data-token-list="${key}"`)
-    // hubMode is a bespoke pair of radios written as raw markup, so it is the one
-    // key that appears literally as name="hubMode" rather than via a helper.
+    !new RegExp(`(?:checkbox|dropdownField|textField|numberField)\\('${key}'`).test(view)
     && !view.includes(`name="${key}"`)
-    && !view.includes(`'${key}'`)
   ));
   assert.deepEqual(missing, [], `retained settings with no control: ${missing.join(', ')}`);
+  assert.match(view, /settingsPatchForSurface/, 'the window-material folding must be present');
 
-  // Preferences the shared UI persists through its prefs bridge (view/period
-  // choices, ordering, hidden sets). These are edited by the views themselves.
+  // Preferences the shared UI persists through its prefs bridge. The ordering /
+  // hidden-set keys and the JSON colour/rate maps left the GUI with the redesign
+  // — they remain valid settings.json keys, but no view reads them, so listing
+  // them here would fail. Only what some view still touches belongs in this list.
   const prefsBacked = [
-    'viewDisplayOrder', 'hiddenViews', 'homeModuleOrder', 'hiddenHomeModules',
-    'heatmapMetric', 'homeActiveDaysWindow', 'clientDisplayOrder', 'hiddenClients',
-    'pinnedClients', 'homeLimitProviderOrder', 'hiddenHomeLimitProviders',
-    'homeLimitAccountCount', 'showHomeLimitBars', 'showHomeLimitProviderNames',
-    'themeColors', 'vendorColors', 'currency', 'currencyRates', 'language'
+    'heatmapMetric'
   ];
   const orphaned = prefsBacked.filter((key) => !uiSource.includes(key));
   assert.deepEqual(

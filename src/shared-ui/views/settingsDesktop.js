@@ -1,10 +1,15 @@
 // Desktop-only settings.
 //
 // The Hub dashboard offers browser preferences; a desktop install additionally
-// owns the collector, the window and the update channel. Those controls live
-// here rather than in the Hub's settings view, and the whole module is inert
-// unless the host reports `capabilities.desktopSettings` — so the same shared
-// settings page renders correctly in both hosts.
+// owns the window and the update channel. Those controls live here rather than
+// in the Hub's settings view, and the whole module is inert unless the host
+// reports `capabilities.desktopSettings` — so the same shared settings page
+// renders correctly in both hosts.
+//
+// Three groups only: 显示 (display), 行为 (behaviour), 连接 (connection).
+// Collector, export, view-preference and JSON-mapping keys stay configurable
+// through env vars and settings.json — they remain part of the settings
+// document and its normalizers, they just have no GUI anymore.
 //
 // Every key written here is an existing settings.json key. Renaming one would
 // silently drop a user's configuration on upgrade, so the field `name`
@@ -12,7 +17,16 @@
 
 import { tr, escapeHtml, appState, settingsOptionList } from '../core/viewContext.js';
 
-const SOFTWARE_GLASS = [['system', 'settings.appearance.glassEffectSystem'], ['off', 'settings.appearance.glassEffectTransparent']];
+// One dropdown for the whole window-material decision. The settings document
+// stores it as the two legacy keys (systemGlass boolean + windowsBackdrop
+// material), so the UI folds and unfolds them here rather than inventing a new
+// storage shape.
+const SURFACE_OPTIONS = [
+  ['regular', 'settings.surface.regular'],
+  ['transparent', 'settings.surface.transparent'],
+  ['acrylic', 'settings.surface.acrylic'],
+  ['mica', 'settings.surface.mica']
+];
 const REDUCE_MOTION = [
   ['system', 'desktop.settings.motionSystem'],
   ['on', 'desktop.settings.motionOn'],
@@ -21,6 +35,25 @@ const REDUCE_MOTION = [
 
 function optionLabels(pairs) {
   return pairs.map(([value, key]) => [value, tr(key)]);
+}
+
+// Fold the stored keys into the single dropdown value. Non-Windows hosts cannot
+// apply a background material, so acrylic/mica collapse onto transparent there.
+export function surfaceValueFromSettings(settings = {}, info = {}) {
+  const isWindows = info.platform === 'win32';
+  if (settings.systemGlass === false) return 'regular';
+  if (isWindows && settings.windowsBackdrop === 'acrylic') return 'acrylic';
+  if (isWindows && settings.windowsBackdrop === 'mica') return 'mica';
+  return 'transparent';
+}
+
+// Unfold the dropdown value into the settings patch the main process already
+// normalizes. Acrylic/mica are offered only on Windows; selecting them
+// elsewhere stores the plain glass surface.
+export function settingsPatchForSurface(surface) {
+  const value = String(surface || 'transparent');
+  if (value === 'regular') return { systemGlass: false };
+  return { systemGlass: true, ...(value === 'acrylic' || value === 'mica' ? { windowsBackdrop: value } : {}) };
 }
 
 function checkbox(name, labelKey, checked, { description = '', id = '' } = {}) {
@@ -36,13 +69,6 @@ function checkbox(name, labelKey, checked, { description = '', id = '' } = {}) {
   </div>`;
 }
 
-function numberField(name, labelKey, value, { min = 0, max = 100000, step = 1, id = '' } = {}) {
-  const idAttr = id ? ` id="${id}"` : '';
-  return `<label class="field"><span>${escapeHtml(tr(labelKey))}</span>
-    <input type="number" name="${name}"${idAttr} value="${escapeHtml(String(value))}" min="${min}" max="${max}" step="${step}" />
-  </label>`;
-}
-
 function dropdownField(name, labelKey, options, value, { id = '' } = {}) {
   const idAttr = id ? ` id="${id}"` : '';
   return `<label class="field"><span>${escapeHtml(tr(labelKey))}</span>
@@ -50,290 +76,95 @@ function dropdownField(name, labelKey, options, value, { id = '' } = {}) {
   </label>`;
 }
 
-function textField(name, labelKey, value, { id = '', placeholder = '' } = {}) {
+function textField(name, labelKey, value, { id = '', placeholder = '', type = 'text' } = {}) {
   const idAttr = id ? ` id="${id}"` : '';
-  return `<fluent-text-input class="field" type="text" name="${name}"${idAttr} value="${escapeHtml(String(value ?? ''))}" spellcheck="false"${placeholder ? ` placeholder="${escapeHtml(placeholder)}"` : ''}>${escapeHtml(tr(labelKey))}</fluent-text-input>`;
-}
-
-function tokenListField(name, ids, selected, labelKey) {
-  const selectedSet = new Set(String(selected || '').split(',').map((v) => v.trim()).filter(Boolean));
-  const rows = ids.map((id) => `<label class="check-row">
-      <input type="checkbox" data-token-list="${name}" value="${escapeHtml(id)}"${selectedSet.has(id) ? ' checked' : ''} />
-      <span class="row-name">${escapeHtml(id)}</span>
-    </label>`).join('');
-  return `<div class="desktop-setting-block">
-    <span class="summary-label">${escapeHtml(tr(labelKey))}</span>
-    <div class="desktop-token-list">${rows}</div>
-  </div>`;
-}
-
-function actionRow(labelHtml, buttonsHtml) {
-  return `<div class="desktop-setting-row"><span class="row-sub">${labelHtml}</span><span class="drawer-actions">${buttonsHtml}</span></div>`;
+  return `<fluent-text-input class="field" type="${type}" name="${name}"${idAttr} value="${escapeHtml(String(value ?? ''))}" spellcheck="false"${placeholder ? ` placeholder="${escapeHtml(placeholder)}"` : ''}>${escapeHtml(tr(labelKey))}</fluent-text-input>`;
 }
 
 function actionButton(action, labelKey, appearance = 'transparent') {
   return `<fluent-button appearance="${appearance}" type="button" class="ghost-btn" data-desktop-action="${escapeHtml(action)}">${escapeHtml(tr(labelKey))}</fluent-button>`;
 }
 
-// The updater and the collector resolver already report every phase over IPC; these
-// panels only render what they say, so a menu-bar check and a main-process push
-// agree on what the user can do next.
-function updateRows() {
-  const update = appState()?.desktopAppUpdate;
-  if (!update?.currentVersion) return [];
-  const rows = [actionRow(
-    escapeHtml(`v${update.currentVersion}${update.latest?.version ? ` → ${update.latest.version}` : ''} · ${update.hasUpdate ? tr('desktop.settings.updateAvailable') : tr('desktop.settings.upToDate')}`),
-    `${update.hasUpdate && !update.downloaded && update.installSupported ? actionButton('download-update', 'desktop.settings.downloadUpdate') : ''}${update.downloaded && update.installSupported ? actionButton('install-update', 'desktop.settings.installUpdate', 'primary') : ''}${update.hasUpdate ? actionButton('dismiss-update', 'desktop.settings.dismissUpdate') : ''}`
-  )];
-  if (update.installPhase === 'downloading') {
-    rows.push(`<p class="row-sub">${escapeHtml(tr('desktop.settings.updateProgress', { pct: Math.round(Number(update.installProgress) || 0) }))}</p>`);
-  }
-  if (!update.installSupported && update.installSupportReason) {
-    rows.push(`<p class="row-sub">${escapeHtml(update.installSupportReason)}</p>`);
-  }
-  return rows;
-}
-
-function tokscaleRows() {
-  const status = appState()?.desktopTokscale;
-  if (!status || status.supported === false) return [];
-  const current = status.current || status.bundled || {};
-  const rows = [actionRow(
-    escapeHtml(tr('desktop.settings.tokscaleStatus', { source: current.source || 'bundled', version: current.version || '—' })),
-    actionButton('tokscale-check', 'desktop.settings.tokscaleCheck')
-  )];
-  const check = appState()?.desktopTokscaleCheck;
-  if (check?.supported && check.newer && check.npm?.version) {
-    rows.push(actionRow(escapeHtml(`v${check.npm.version}`), actionButton('tokscale-download', 'desktop.settings.tokscaleDownload')));
-  }
-  if (current.source && current.source !== 'bundled') {
-    rows.push(`<div class="drawer-actions">${actionButton('tokscale-reset', 'desktop.settings.tokscaleReset')}</div>`);
-  }
-  return rows;
-}
-
 /**
  * @param {object} settings  Current settings (redacted) from the main process.
- * @param {object} catalog   Lists owned by the shared modules.
+ * @param {object} catalog   Lists owned by the shared modules (unused, kept for
+ *                           call-site compatibility).
  * @param {object} info      Platform facts, e.g. whether a login item exists.
  */
-export function renderDesktopSettings(settings = {}, catalog = {}, info = {}) {
+export function renderDesktopSettings(settings = {}, _catalog = {}, info = {}) {
   const isWindows = info.platform === 'win32';
-  const isMac = info.platform === 'darwin';
-  const clients = catalog.clients || [];
 
   const groups = [];
 
-  // --- Collection ---------------------------------------------------------
-  const collectionRows = [];
-  // First row of the group, because "why is nothing updating?" is the question this
-  // answers; the tray checkbox and the hero badge mirror it.
-  collectionRows.push(checkbox('collectionPaused', 'desktop.settings.collectionPaused', settings.collectionPaused === true));
-  collectionRows.push(tokenListField('clients', clients, settings.clients, 'desktop.settings.trackedClients'));
-  collectionRows.push(dropdownField('collectionMode', 'desktop.settings.collectionMode',
-    [['live', tr('desktop.settings.modeLive')], ['smart', tr('desktop.settings.modeSmart')], ['interval', tr('desktop.settings.modeInterval')]],
-    settings.collectionMode || 'live', { id: 'collectionModeInput' }));
-  // Offer the collector's sanctioned cadence, plus any value already stored, so
-  // saving the form never silently rewrites an interval the list has moved past.
-  const intervalOptions = [...new Set([
-    ...(catalog.collectionModeIntervals || []),
-    Number(settings.collectionIntervalMs) || 5 * 60 * 1000
-  ])].sort((a, b) => a - b);
-  collectionRows.push(dropdownField('collectionIntervalMs', 'desktop.settings.collectionInterval',
-    intervalOptions.map((ms) => [String(ms), `${Math.round(ms / 60000)} min`]),
-    String(settings.collectionIntervalMs ?? 300000), { id: 'collectionIntervalInput' }));
-  collectionRows.push(checkbox('projectsEnabled', 'desktop.settings.projectsEnabled', settings.projectsEnabled === true));
-  collectionRows.push(checkbox('historyEnabled', 'desktop.settings.historyEnabled', settings.historyEnabled !== false));
-  collectionRows.push(dropdownField('historyIntervalMs', 'desktop.settings.historyInterval',
-    (catalog.historyIntervals || []).map((ms) => [String(ms), `${Math.round(ms / 60000)} min`]),
-    String(settings.historyIntervalMs ?? 900000)));
-  collectionRows.push(checkbox('sessionUsageArchiveEnabled', 'desktop.settings.sessionArchive', settings.sessionUsageArchiveEnabled !== false));
-  // Watching the tools' own files is what produces the 3-5 second refresh promise,
-  // so the toggle and its debounce belong next to the tick interval, not hidden.
-  collectionRows.push(checkbox('watchEnabled', 'desktop.settings.watchEnabled', settings.watchEnabled !== false));
-  collectionRows.push(dropdownField('watchDebounceMs', 'desktop.settings.watchDebounce',
-    [500, 1000, 1500, 3000, 5000].map((ms) => [String(ms), `${ms / 1000}s`]),
-    String(settings.watchDebounceMs ?? 1500)));
-  if (isWindows) {
-    collectionRows.push(checkbox('wslScanEnabled', 'desktop.settings.wslScan', settings.wslScanEnabled !== false));
-  }
-  collectionRows.push(textField('allTimeSince', 'desktop.settings.allTimeSince', settings.allTimeSince || '2024-01-01', { placeholder: '2024-01-01' }));
-  groups.push(group('collection', 'desktop.settings.groupCollection', collectionRows.join('')));
+  // --- Display -------------------------------------------------------------
+  const surfaceOptions = SURFACE_OPTIONS
+    .filter(([value]) => isWindows || (value !== 'acrylic' && value !== 'mica'));
+  const displayRows = [];
+  displayRows.push(dropdownField('language', 'settings.language',
+    [['auto', 'Auto'], ['en', 'English'], ['zh-CN', '简体中文'], ['zh-TW', '繁體中文'], ['ja', '日本語'], ['ko', '한국어']],
+    settings.language || 'auto', { id: 'desktopLanguageInput' }));
+  displayRows.push(dropdownField('windowSurface', 'desktop.settings.windowSurface',
+    optionLabels(surfaceOptions), surfaceValueFromSettings(settings, info), { id: 'windowSurfaceInput' }));
+  displayRows.push(dropdownField('reduceMotion', 'desktop.settings.reduceMotion',
+    optionLabels(REDUCE_MOTION), settings.reduceMotion || 'system'));
+  groups.push(group('display', 'desktop.settings.groupDisplay', displayRows.join('')));
 
-  // The collector binary is a separate artifact from the app, and a broken or
-  // stale one silences every number on screen, so its state is inspectable here.
-  const engineRows = tokscaleRows();
-  if (engineRows.length) {
-    groups.push(group('engine', 'desktop.settings.tokscale', engineRows.join('')));
-  }
-
-  // --- Data export --------------------------------------------------------
-  groups.push(group('export', 'desktop.settings.groupExport', [
-    checkbox('exportAutoEnabled', 'desktop.settings.exportAuto', settings.exportAutoEnabled === true),
-    `<div class="desktop-setting-row">
-      <span class="row-sub" data-export-dir>${escapeHtml(settings.exportDir || tr('desktop.settings.exportDirNone'))}</span>
-      <fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="pick-export-dir">${escapeHtml(tr('desktop.settings.chooseFolder'))}</fluent-button>
-    </div>`,
-    dropdownField('exportIntervalMs', 'desktop.settings.exportInterval',
-      (catalog.exportIntervals || []).map((ms) => [String(ms), `${Math.round(ms / 60000)} min`]),
-      String(settings.exportIntervalMs ?? 60000)),
-    `<div class="drawer-actions"><fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="export-now">${escapeHtml(tr('desktop.settings.exportNow'))}</fluent-button></div>`
-  ].join('')));
-
-  // --- Window & appearance ------------------------------------------------
-  const appearanceRows = [];
-  appearanceRows.push(dropdownField('systemGlass', 'desktop.settings.systemGlass', optionLabels(SOFTWARE_GLASS), settings.systemGlass === false ? 'off' : 'system'));
-  if (isWindows) {
-    // Which material fills the window when the backdrop is on. Offered only where
-    // Electron can actually apply a background material.
-    appearanceRows.push(dropdownField('windowsBackdrop', 'desktop.settings.windowsBackdrop',
-      [['acrylic', tr('desktop.settings.backdropAcrylic')], ['mica', tr('desktop.settings.backdropMica')]],
-      settings.windowsBackdrop || 'acrylic'));
-  }
-  if (isMac) {
-    appearanceRows.push(dropdownField('macosGlassStyle', 'desktop.settings.macosGlassStyle',
-      [['vibrancy', tr('desktop.settings.glassVibrancy')], ['liquid-glass', tr('desktop.settings.glassLiquid')]],
-      settings.macosGlassStyle || 'vibrancy'));
-  }
-  appearanceRows.push(dropdownField('reduceMotion', 'desktop.settings.reduceMotion', optionLabels(REDUCE_MOTION), settings.reduceMotion || 'system'));
-  appearanceRows.push(checkbox('showToolIcons', 'desktop.settings.showToolIcons', settings.showToolIcons !== false));
-  appearanceRows.push(checkbox('showLiveDot', 'desktop.settings.showLiveDot', settings.showLiveDot !== false));
-  appearanceRows.push(checkbox('showCompactTotalTokens', 'desktop.settings.showCompactTotalTokens', settings.showCompactTotalTokens === true));
-  // The web content owns the title strip only on Windows (Electron's
-  // titleBarOverlay); macOS and Linux have no product-drawn title text to collapse,
-  // so the switch is offered only where it has an effect.
-  if (isWindows) {
-    appearanceRows.push(checkbox('titleIconOnly', 'desktop.settings.titleIconOnly', settings.titleIconOnly === true));
-  }
-  appearanceRows.push(numberField('zoomFactor', 'desktop.settings.zoom', settings.zoomFactor ?? 1, { min: 0.7, max: 1.6, step: 0.05 }));
-  groups.push(group('appearance', 'desktop.settings.groupAppearance', appearanceRows.join('')));
-
-  // --- How received quotas are displayed ----------------------------------
-  // These describe presentation only; the accounts and their refresh schedule are
-  // Hub-owned, so the group is a display preference rather than a provider setup.
-  groups.push(group('limitsDisplay', 'desktop.settings.groupLimitsDisplay', [
-    checkbox('showLimitSource', 'desktop.settings.showLimitSource', settings.showLimitSource === true),
-    checkbox('maskLimitAccountEmails', 'desktop.settings.maskLimitAccountEmails', settings.maskLimitAccountEmails === true),
-    dropdownField('showLimitUsed', 'desktop.settings.limitBarsShow',
-      [['remaining', tr('desktop.settings.barsRemaining')], ['used', tr('desktop.settings.barsUsed')]],
-      settings.showLimitUsed === true ? 'used' : 'remaining')
-  ].join('')));
-
-  // --- Startup, updates, integrations -------------------------------------
-  const generalRows = [];
+  // --- Behaviour -----------------------------------------------------------
+  const behaviourRows = [];
   if (info.loginItemSupported) {
-    generalRows.push(checkbox('startAtLogin', 'desktop.settings.startAtLogin', settings.startAtLogin === true, {
+    behaviourRows.push(checkbox('startAtLogin', 'desktop.settings.startAtLogin', settings.startAtLogin === true, {
       // Linux autostart points at the AppImage's current path, so moving or
       // renaming the file silently breaks it. Saying so up front is cheaper than
       // debugging "it stopped starting" later.
       description: info.platform === 'linux' ? tr('desktop.settings.startAtLoginNote') : ''
     }));
+    behaviourRows.push(checkbox('startHidden', 'desktop.settings.startHidden', settings.startHidden !== false));
   } else {
-    generalRows.push(`<p class="row-sub">${escapeHtml(tr('desktop.settings.startAtLoginUnavailable'))}</p>`);
+    behaviourRows.push(`<p class="row-sub">${escapeHtml(tr('desktop.settings.startAtLoginUnavailable'))}</p>`);
   }
-  generalRows.push(checkbox('automaticAppUpdates', 'desktop.settings.automaticAppUpdates', settings.automaticAppUpdates === true));
   // Closing the window is not quitting the app by default; the collector keeps
   // running and the tray is the way back.
-  generalRows.push(checkbox('closeToTray', 'desktop.settings.closeToTray', settings.closeToTray !== false));
-  if (info.loginItemSupported) {
-    generalRows.push(checkbox('startHidden', 'desktop.settings.startHidden', settings.startHidden !== false));
+  behaviourRows.push(checkbox('closeToTray', 'desktop.settings.closeToTray', settings.closeToTray !== false));
+  // Update controls are always reachable: checking is safe at any time, and the
+  // install row only becomes actionable once the pushed updater state offers one.
+  const update = appState()?.desktopAppUpdate;
+  behaviourRows.push(`<div class="desktop-setting-row">
+      <span class="row-sub">${update?.currentVersion ? escapeHtml(`v${update.currentVersion}${update.latest?.version ? ` → ${update.latest.version}` : ''} · ${update.hasUpdate ? tr('desktop.settings.updateAvailable') : tr('desktop.settings.upToDate')}`) : ''}</span>
+      <span class="drawer-actions">${actionButton('check-updates', 'desktop.settings.checkUpdates')}${actionButton('download-install-update', 'desktop.settings.installUpdate', 'primary')}</span>
+    </div>`);
+  if (update?.installPhase === 'downloading') {
+    behaviourRows.push(`<p class="row-sub">${escapeHtml(tr('desktop.settings.updateProgress', { pct: Math.round(Number(update.installProgress) || 0) }))}</p>`);
   }
-  generalRows.push(checkbox('discordRpcEnabled', 'desktop.settings.discordRpc', settings.discordRpcEnabled === true));
-  generalRows.push(`<div class="desktop-setting-row">
-      <span class="row-sub">${escapeHtml(tr('desktop.settings.appVersion'))}: <strong data-app-version>—</strong></span>
-      <fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="check-updates">${escapeHtml(tr('desktop.settings.checkUpdates'))}</fluent-button>
-    </div>`);
-  generalRows.push(...updateRows());
-  generalRows.push(`<div class="desktop-setting-row">
-      <span class="row-sub">${escapeHtml(tr('desktop.settings.openConfigHint'))}</span>
-      <span class="drawer-actions">
-        <fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="export-diagnostics">${escapeHtml(tr('desktop.settings.exportDiagnostics'))}</fluent-button>
-        <fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="open-user-data">${escapeHtml(tr('desktop.settings.openConfig'))}</fluent-button>
-      </span>
-    </div>`);
-  groups.push(group('general', 'desktop.settings.groupGeneral', generalRows.join('')));
+  if (update && !update.installSupported && update.installSupportReason) {
+    behaviourRows.push(`<p class="row-sub">${escapeHtml(update.installSupportReason)}</p>`);
+  }
+  groups.push(group('behaviour', 'desktop.settings.groupBehaviour', behaviourRows.join('')));
 
-  // --- Device identity ----------------------------------------------------
-  groups.push(group('device', 'desktop.settings.groupDevice', [
-    textField('deviceId', 'desktop.settings.deviceId', settings.deviceId || '', { placeholder: tr('desktop.settings.deviceIdHint') })
-  ].join('')));
-
-  // --- View & list preferences --------------------------------------------
-  // Ordering and visibility were per-list drag/eye controls in the old widget.
-  // They are CSV preference strings on the wire, so a checkbox list is the
-  // faithful equivalent: it preserves the choice without inventing a new format.
-  const prefRows = [];
-  prefRows.push(tokenListField('viewDisplayOrder', catalog.views || [], settings.viewDisplayOrder, 'desktop.settings.viewOrder'));
-  prefRows.push(tokenListField('hiddenViews', catalog.views || [], settings.hiddenViews, 'desktop.settings.hiddenViews'));
-  prefRows.push(tokenListField('clientDisplayOrder', catalog.clients || [], settings.clientDisplayOrder, 'desktop.settings.clientOrder'));
-  prefRows.push(tokenListField('hiddenClients', catalog.clients || [], settings.hiddenClients, 'desktop.settings.hiddenClients'));
-  prefRows.push(tokenListField('pinnedClients', catalog.clients || [], settings.pinnedClients, 'desktop.settings.pinnedClients'));
-  prefRows.push(tokenListField('homeModuleOrder', catalog.homeModules || [], settings.homeModuleOrder, 'desktop.settings.homeModules'));
-  prefRows.push(tokenListField('hiddenHomeModules', catalog.homeModules || [], settings.hiddenHomeModules, 'desktop.settings.hiddenHomeModules'));
-  prefRows.push(tokenListField('homeLimitProviderOrder', catalog.limitProviders || [], settings.homeLimitProviderOrder, 'desktop.settings.homeLimitOrder'));
-  prefRows.push(tokenListField('hiddenHomeLimitProviders', catalog.limitProviders || [], settings.hiddenHomeLimitProviders, 'desktop.settings.hiddenHomeLimits'));
-  prefRows.push(checkbox('showHomeLimitBars', 'desktop.settings.showHomeLimitBars', settings.showHomeLimitBars === true));
-  prefRows.push(checkbox('showHomeLimitProviderNames', 'desktop.settings.showHomeLimitProviderNames', settings.showHomeLimitProviderNames === true));
-  prefRows.push(numberField('homeLimitAccountCount', 'desktop.settings.homeLimitAccountCount', settings.homeLimitAccountCount ?? 3, { min: 1, max: 12 }));
-  prefRows.push(dropdownField('heatmapMetric', 'desktop.settings.heatmapMetric',
-    [['tokens', tr('stats.tokens')], ['cost', tr('stats.cost')]],
-    settings.heatmapMetric || 'cost'));
-  prefRows.push(dropdownField('homeActiveDaysWindow', 'desktop.settings.activeDaysWindow',
-    [['all', tr('desktop.settings.activeDaysAll')], ['year', tr('desktop.settings.activeDaysYear')]],
-    settings.homeActiveDaysWindow || 'all'));
-  groups.push(group('preferences', 'desktop.settings.groupPreferences', prefRows.join('')));
-
-  // --- Currency rates & colours -------------------------------------------
-  // Both are JSON maps, so they are edited as JSON. That is a deliberate limit:
-  // a bespoke editor for each would be a larger surface than the old widget's,
-  // and the theme editor lives in the appearance group where it belongs.
-  const advancedRows = [];
-  advancedRows.push(`<div class="desktop-setting-block">
-    <span class="summary-label">${escapeHtml(tr('desktop.settings.currencyRates'))}</span>
-    <span class="row-sub">${escapeHtml(tr('desktop.settings.jsonMapHint'))}</span>
-    <textarea name="currencyRates" rows="3" spellcheck="false">${escapeHtml(JSON.stringify(settings.currencyRates || {}))}</textarea>
-  </div>`);
-  advancedRows.push(`<div class="desktop-setting-block">
-    <span class="summary-label">${escapeHtml(tr('desktop.settings.themeColors'))}</span>
-    <span class="row-sub">${escapeHtml(tr('desktop.settings.jsonMapHint'))}</span>
-    <textarea name="themeColors" rows="3" spellcheck="false">${escapeHtml(JSON.stringify(settings.themeColors || {}))}</textarea>
-  </div>`);
-  advancedRows.push(`<div class="desktop-setting-block">
-    <span class="summary-label">${escapeHtml(tr('desktop.settings.vendorColors'))}</span>
-    <span class="row-sub">${escapeHtml(tr('desktop.settings.jsonMapHint'))}</span>
-    <textarea name="vendorColors" rows="3" spellcheck="false">${escapeHtml(JSON.stringify(settings.vendorColors || {}))}</textarea>
-  </div>`);
-  advancedRows.push(`<div class="desktop-setting-block">
-    <span class="summary-label">${escapeHtml(tr('desktop.settings.customModelPricing'))}</span>
-    <span class="row-sub">${escapeHtml(tr('desktop.settings.jsonListHint'))}</span>
-    <textarea name="customModelPricing" rows="3" spellcheck="false">${escapeHtml(JSON.stringify(settings.customModelPricing || []))}</textarea>
-  </div>`);
-  groups.push(group('advanced', 'desktop.settings.groupAdvanced', advancedRows.join('')));
-
-  // --- Hub connection -----------------------------------------------------
-  const hubRows = [];
+  // --- Connection ----------------------------------------------------------
   const hubMode = settings.hubMode === 'client' ? 'client' : 'local';
-  hubRows.push(`<fluent-radio-group class="mode-toggle-group" name="hubMode" value="${hubMode}" orientation="horizontal" aria-label="${escapeHtml(tr('desktop.settings.groupSync'))}">
+  const hubOnly = (rows) => (hubMode === 'client' ? rows.join('') : '');
+  const connectionRows = [];
+  connectionRows.push(`<fluent-radio-group class="mode-toggle-group" name="hubMode" value="${hubMode}" orientation="horizontal" aria-label="${escapeHtml(tr('desktop.settings.groupSync'))}">
       <label class="mode-toggle" for="hub-mode-local"><fluent-radio id="hub-mode-local" value="local" aria-labelledby="hub-mode-local-label"${hubMode === 'local' ? ' checked' : ''}></fluent-radio><span id="hub-mode-local-label">${escapeHtml(tr('desktop.settings.hubLocal'))}</span></label>
       <label class="mode-toggle" for="hub-mode-client"><fluent-radio id="hub-mode-client" value="client" aria-labelledby="hub-mode-client-label"${hubMode === 'client' ? ' checked' : ''}></fluent-radio><span id="hub-mode-client-label">${escapeHtml(tr('desktop.settings.hubClient'))}</span></label>
     </fluent-radio-group>`);
-  hubRows.push(textField('hubUrl', 'desktop.settings.hubUrl', settings.hubUrl || '', { placeholder: 'http://hub-host:17321' }));
-  hubRows.push(`<div class="desktop-setting-block desktop-hub-secret" data-hub-secret>
-    <fluent-text-input class="field" type="password" data-hub-secret-input autocomplete="new-password" spellcheck="false" placeholder="${escapeHtml(settings.hubAdminConfigured ? tr('desktop.settings.hubSecretConfigured') : tr('desktop.settings.hubSecretMissing'))}">${escapeHtml(tr('settings.secret'))}</fluent-text-input>
-    <div class="desktop-setting-row">
-      <span class="row-sub">${escapeHtml(tr('desktop.settings.hubSecretHint'))}</span>
-      <span class="drawer-actions">
-        <fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="save-hub-secret">${escapeHtml(tr('desktop.settings.saveHubSecret'))}</fluent-button>
-        ${settings.hubAdminConfigured ? `<fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="clear-hub-secret">${escapeHtml(tr('desktop.settings.clearHubSecret'))}</fluent-button>` : ''}
-      </span>
-    </div>
-  </div>`);
-  hubRows.push(dropdownField('syncUploadIntervalMs', 'desktop.settings.syncUploadInterval',
-    (catalog.syncUploadIntervals || []).map((ms) => [String(ms), ms === 0 ? tr('desktop.settings.syncLive') : `${Math.round(ms / 60000)} min`]),
-    String(settings.syncUploadIntervalMs ?? 600000)));
-  hubRows.push(checkbox('allowInsecureHubHttp', 'desktop.settings.allowInsecureHttp', settings.allowInsecureHubHttp === true,
-    { description: tr('desktop.settings.allowInsecureHttpDesc') }));
-  groups.push(group('sync', 'desktop.settings.groupSync', hubRows.join('')));
+  connectionRows.push(hubOnly([
+    textField('hubUrl', 'desktop.settings.hubUrl', settings.hubUrl || '', { placeholder: 'http://hub-host:17321' }),
+    `<div class="desktop-setting-block desktop-hub-secret" data-hub-secret>
+      <fluent-text-input class="field" type="password" data-hub-secret-input autocomplete="new-password" spellcheck="false" placeholder="${escapeHtml(settings.hubAdminConfigured ? tr('desktop.settings.hubSecretConfigured') : tr('desktop.settings.hubSecretMissing'))}">${escapeHtml(tr('settings.secret'))}</fluent-text-input>
+      <div class="desktop-setting-row">
+        <span class="row-sub">${escapeHtml(tr('desktop.settings.hubSecretHint'))}</span>
+        <span class="drawer-actions">
+          <fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="save-hub-secret">${escapeHtml(tr('desktop.settings.saveHubSecret'))}</fluent-button>
+          ${settings.hubAdminConfigured ? `<fluent-button appearance="transparent" type="button" class="ghost-btn" data-desktop-action="clear-hub-secret">${escapeHtml(tr('desktop.settings.clearHubSecret'))}</fluent-button>` : ''}
+        </span>
+      </div>
+    </div>`,
+    checkbox('allowInsecureHubHttp', 'desktop.settings.allowInsecureHttp', settings.allowInsecureHubHttp === true,
+      { description: tr('desktop.settings.allowInsecureHttpDesc') }),
+    textField('deviceId', 'desktop.settings.deviceId', settings.deviceId || '', { placeholder: tr('desktop.settings.deviceIdHint') })
+  ]));
+  groups.push(group('connection', 'desktop.settings.groupSync', connectionRows.join('')));
 
   return groups.join('');
 }
@@ -345,50 +176,19 @@ function group(id, titleKey, body) {
   </section>`;
 }
 
-// Which settings are numeric, so a form read does not store "300000" as a
-// string and confuse the collector's normalizers.
-// Preference strings stored as CSV on the wire.
-const CSV_FIELDS = Object.freeze([
-  'clients', 'viewDisplayOrder', 'hiddenViews', 'clientDisplayOrder', 'hiddenClients',
-  'pinnedClients', 'homeModuleOrder', 'hiddenHomeModules', 'homeLimitProviderOrder',
-  'hiddenHomeLimitProviders'
-]);
-
-// Settings whose value is a JSON object or array.
-const JSON_FIELDS = Object.freeze(['currencyRates', 'themeColors', 'vendorColors', 'customModelPricing']);
-
-const NUMERIC_FIELDS = new Set(['collectionIntervalMs', 'historyIntervalMs', 'exportIntervalMs', 'syncUploadIntervalMs', 'zoomFactor', 'homeLimitAccountCount', 'watchDebounceMs']);
+const NUMERIC_FIELDS = new Set([]);
 const CHECKBOX_FIELDS = new Set([
-  'projectsEnabled', 'historyEnabled', 'sessionUsageArchiveEnabled', 'wslScanEnabled',
-  'collectionPaused', 'closeToTray', 'startHidden',
-  'watchEnabled',
-  'exportAutoEnabled', 'showToolIcons', 'showLiveDot', 'showCompactTotalTokens',
-  'titleIconOnly', 'startAtLogin', 'automaticAppUpdates', 'discordRpcEnabled',
-  'allowInsecureHubHttp', 'showLimitSource', 'maskLimitAccountEmails',
-  'showHomeLimitBars', 'showHomeLimitProviderNames'
+  'startAtLogin', 'startHidden', 'closeToTray', 'allowInsecureHubHttp'
 ]);
 
 /**
- * A field-level problem the main process would otherwise only *silently* correct
- * (an unparseable JSON map is dropped, a bad date falls back to the default).
+ * A field-level problem the main process would otherwise only *silently* correct.
  * Returning the message lets the form refuse the write and say why.
  */
 export function desktopSettingsFieldError(form, name) {
   if (!form || !name) return '';
   const input = form.querySelector(`[name="${name}"]`);
   if (!input) return '';
-  const value = String(input.value ?? '').trim();
-  if (JSON_FIELDS.includes(name)) {
-    try {
-      JSON.parse(value || (name === 'customModelPricing' ? '[]' : '{}'));
-    } catch {
-      return tr('desktop.settings.jsonInvalid');
-    }
-    return '';
-  }
-  if (name === 'allTimeSince' && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return tr('desktop.settings.allTimeSinceInvalid');
-  }
   return '';
 }
 
@@ -407,44 +207,20 @@ export function readDesktopSettingsPatch(form) {
     const value = Number(input.value);
     if (Number.isFinite(value)) patch[name] = value;
   }
-  for (const name of ['allTimeSince', 'deviceId', 'hubUrl']) {
+  for (const name of ['deviceId', 'hubUrl']) {
     const input = form.querySelector(`[name="${name}"]`);
     if (input) patch[name] = String(input.value || '').trim();
   }
-  for (const name of ['collectionMode', 'macosGlassStyle', 'windowsBackdrop', 'reduceMotion', 'heatmapMetric', 'homeActiveDaysWindow']) {
-    const input = form.querySelector(`[name="${name}"]`);
-    if (input) patch[name] = String(input.value || '');
-  }
-  // The glass dropdown offers "system" and "transparent"; the settings document
-  // stores a boolean because that is what the window-material code reads.
-  const systemGlass = form.querySelector('[name="systemGlass"]');
-  if (systemGlass) patch.systemGlass = String(systemGlass.value || '') !== 'off';
-  const barsShow = form.querySelector('[name="showLimitUsed"]');
-  if (barsShow) patch.showLimitUsed = String(barsShow.value || '') === 'used';
+  // The window-material dropdown offers one surface choice; the settings
+  // document stores the legacy pair the window code reads.
+  const surface = form.querySelector('[name="windowSurface"]');
+  if (surface) Object.assign(patch, settingsPatchForSurface(String(surface.value || '')));
+  const language = form.querySelector('[name="language"]');
+  if (language) patch.language = String(language.value || 'auto');
+  const reduceMotion = form.querySelector('[name="reduceMotion"]');
+  if (reduceMotion) patch.reduceMotion = String(reduceMotion.value || 'system');
   const hubMode = form.querySelector('fluent-radio-group[name="hubMode"]');
   if (hubMode) patch.hubMode = String(hubMode.value || '');
-
-  // Every token list round-trips as the CSV the settings document stores. The
-  // selected order is the document order, which is what the drag controls used to
-  // produce.
-  for (const name of CSV_FIELDS) {
-    const inputs = [...form.querySelectorAll(`[data-token-list="${name}"]:checked`)];
-    if (inputs.length || form.querySelector(`[data-token-list="${name}"]`)) {
-      patch[name] = inputs.map((input) => input.value).join(',');
-    }
-  }
-
-  // JSON-valued settings are edited as JSON text; a malformed value is left
-  // untouched rather than written as a broken string.
-  for (const name of JSON_FIELDS) {
-    const input = form.querySelector(`[name="${name}"]`);
-    if (!input) continue;
-    try {
-      patch[name] = JSON.parse(String(input.value || ''));
-    } catch {
-      /* keep the stored value when the textarea does not parse */
-    }
-  }
 
   return patch;
 }

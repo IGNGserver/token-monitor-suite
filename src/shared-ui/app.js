@@ -37,6 +37,7 @@ import { renderDevices } from './views/devices.js';
 import { renderAccountsPage } from './views/accounts.js';
 import { readDesktopSettingsPatch, desktopSettingsFieldError } from './views/settingsDesktop.js';
 import { renderSettingsPage } from './views/settings.js';
+import { renderTransfer, submitTransfer } from './views/transfer.js';
 import { usageMetricCard } from './views/rows.js';
 import {
   renderTrends,
@@ -108,6 +109,7 @@ const VIEWS = [
   { id: 'trends', icon: 'trends' },
   { id: 'accounts', icon: 'accounts' },
   { id: 'management', icon: 'management' },
+  { id: 'transfer', icon: 'transfer' },
   { id: 'settings', icon: 'settings' }
 ];
 
@@ -140,6 +142,7 @@ const VIEW_PATHS = Object.freeze({
   accounts: '/accounts',
   trends: '/trends',
   management: '/management',
+  transfer: '/transfer',
   settings: '/settings'
 });
 
@@ -746,12 +749,14 @@ function viewUsesUsageScope(view = state.prefs.view) {
 
 function viewKicker(view = state.prefs.view) {
   if (view === 'settings') return tr(isCapable('desktopSettings') ? 'settings.desktopTitle' : 'settings.webOnly');
+  if (view === 'transfer') return tr('transfer.title');
   if (view === 'limits') return tr('limits.health');
   return tr('page.overview.kicker');
 }
 
 function viewDescription(view = state.prefs.view) {
   if (view === 'settings' && isCapable('desktopSettings')) return tr('settings.desktopDescription');
+  if (view === 'transfer') return tr('transfer.description');
   return tr(`page.${view}.description`);
 }
 
@@ -1600,6 +1605,9 @@ function render() {
         break;
       case 'management':
         html = renderManagement();
+        break;
+      case 'transfer':
+        html = renderTransfer();
         break;
       case 'settings':
         html = renderSettingsPage();
@@ -3085,6 +3093,16 @@ function bindEvents() {
       });
       return;
     }
+    const transferForm = event.target.closest('[data-transfer-form]');
+    if (transferForm) {
+      event.preventDefault();
+      void submitTransfer(transferForm).then((error) => {
+        if (error) showToast(error);
+      }).catch((error) => {
+        showToast(error?.message || tr('error.generic'));
+      });
+      return;
+    }
     const accountForm = event.target.closest('[data-account-form]');
     if (accountForm) {
       event.preventDefault();
@@ -3361,25 +3379,23 @@ async function runDesktopAction(action, element) {
         const update = await desktop.checkAppUpdateNow();
         showToast(update?.latest ? tr('desktop.settings.updateAvailable') : tr('desktop.settings.upToDate'));
         element?.removeAttribute('disabled');
+        state.desktopAppUpdate = await desktop.getAppUpdateState();
+        render();
         break;
       }
-      case 'download-update':
+      case 'download-install-update': {
+        // One click, one intent: fetch the update and quit into the installer.
+        // The confirm gate is the quit, not the download; without a pending
+        // update the install side is a no-op.
+        const confirmed = await confirmAction(tr('desktop.settings.installUpdate'), { danger: true });
+        if (!confirmed) return;
+        element?.setAttribute('disabled', 'disabled');
         await desktop.downloadAppUpdate();
         state.desktopAppUpdate = await desktop.getAppUpdateState();
         render();
-        break;
-      case 'install-update': {
-        // This quits the app, so it never runs on a stray click.
-        const confirmed = await confirmAction(tr('desktop.settings.installUpdate'), { danger: true });
-        if (!confirmed) return;
         await desktop.installAppUpdate();
         break;
       }
-      case 'dismiss-update':
-        await desktop.dismissAppUpdate(state.desktopAppUpdate?.latest?.version);
-        state.desktopAppUpdate = await desktop.getAppUpdateState();
-        render();
-        break;
       case 'tokscale-check':
         state.desktopTokscaleCheck = await desktop.checkTokscaleNpm();
         render();
@@ -3451,7 +3467,6 @@ async function init() {
     rowHtml,
     loadingHtml,
     managementError,
-    pwaStatusText,
     renderCompletenessNotice,
     renderHistoryScopeNotice,
     renderTokenMix,

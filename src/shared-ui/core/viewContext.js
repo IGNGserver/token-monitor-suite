@@ -24,7 +24,6 @@ export const VIEW_HELPER_NAMES = Object.freeze([
   'loadingHtml',
   'managementError',
   'panel',
-  'pwaStatusText',
   'renderCompletenessNotice',
   'renderHistoryScopeNotice',
   'renderTokenMix',

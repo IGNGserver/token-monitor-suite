@@ -171,7 +171,7 @@ function configureTabs(root) {
 function settingsNavigation(root) {
   const layout = root.querySelector('.settings-layout');
   if (!layout || layout.querySelector('.settings-section-nav')) return;
-  const sections = [...layout.querySelectorAll('.settings-form, .settings-info-panel, .settings-boundary-panel, .desktop-settings-group')];
+  const sections = [...layout.querySelectorAll('.settings-form, .desktop-settings-group')];
   const nav = document.createElement('nav');
   nav.className = 'settings-section-nav';
   nav.setAttribute('aria-label', document.getElementById('pageTitle').textContent);

@@ -14,6 +14,17 @@ const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 // Code, legacy OpenClaw bot dirs) so a home holding only an alternate-root client
 // is still discovered. The `.vscode-server` entries cover Cline / Kilo Code
 // running through the VS Code WSL remote.
+//
+// Both Qoder sites (`qoder`, `qodercn`) are deliberately absent even though their
+// Linux roots (`~/.config/QoderCN`, `~/.qoder-cn`) could appear in a WSL home. A
+// marker on its own would be worse than none: attribution is marker-based, so a
+// Qoder-only home would be reported as an active client while contributing zero
+// tokens, because tokscale has no Qoder entry and the usage comes from this
+// project's own SQLite/transcript adapter. Doing it properly needs a Proma-style
+// local-adapter branch here, and reading SQLite (plus its `-wal`/`-shm`
+// sidecars) over a `\\wsl$\…` UNC path is unverified. On a Linux host the
+// ordinary collector already reads the real home, so this only affects a Windows
+// host reaching into a distro that runs Qoder's Linux build.
 const WSL_DATA_MARKERS = [
   '.claude/projects',
   '.claude/transcripts',

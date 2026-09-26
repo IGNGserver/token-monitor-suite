@@ -21,7 +21,8 @@ const NUMERIC_FIELDS = [
   'cacheWriteTokens',
   'reasoningTokens',
   'messageCount',
-  'payloadCostUsd'
+  'payloadCostUsd',
+  'credits'
 ];
 
 function number(value) {
@@ -55,7 +56,8 @@ function components(source, fraction = 1) {
     cacheWriteTokens,
     reasoningTokens: nonNegativeInteger(number(source.reasoningTokens) * fraction),
     messageCount: nonNegativeInteger(number(source.messageCount) * fraction),
-    payloadCostUsd: Math.max(0, number(source.costUsd) * fraction)
+    payloadCostUsd: Math.max(0, number(source.costUsd) * fraction),
+    credits: Math.max(0, number(source.credits) * fraction)
   };
 }
 
@@ -81,6 +83,12 @@ function sessionCandidates(period, updatedAt) {
       tokenComponents.totalTokens = modelTokens;
       tokenComponents.payloadCostUsd = Math.max(0, number(
         session.modelCosts?.[model] ?? (number(session.costUsd) * fraction)
+      ));
+      // Same precedence as cost: the session already attributes this model's
+      // credits exactly, so use that and never re-derive it by ratio. The ratio
+      // fallback only applies to a session that reports a total but no split.
+      tokenComponents.credits = Math.max(0, number(
+        session.modelCredits?.[model] ?? (number(session.credits) * fraction)
       ));
       candidates.push({
         client,
@@ -123,6 +131,12 @@ function snapshotCandidates(period, updatedAt) {
         period.clientModelCosts?.[client]?.[model]
           ?? (number(period.modelCosts?.[model]) * fraction)
       ));
+      // Read from the client×model map only. There is no model-level credit
+      // total to apportion a share of — credits are metered per provider, so a
+      // ratio here would invent a split the provider never reported. A client
+      // that publishes no credits contributes none, which is the correct answer
+      // rather than a gap.
+      tokenComponents.credits = Math.max(0, number(period.clientModelCredits?.[client]?.[model]));
       candidates.push({
         client,
         sessionId: `snapshot:${client}:${model}`,
@@ -157,7 +171,10 @@ function snapshotCandidates(period, updatedAt) {
         outputTokens: period.clientOutputs?.[client],
         cacheReadTokens: period.clientCacheReads?.[client],
         cacheWriteTokens: period.clientCacheWrites?.[client],
-        costUsd: period.clientCosts?.[client]
+        costUsd: period.clientCosts?.[client],
+        // Exact, not apportioned: this row is the client's whole bucket, so the
+        // client-level credit total belongs to it in full.
+        credits: period.clientCredits?.[client]
       })
     });
   }

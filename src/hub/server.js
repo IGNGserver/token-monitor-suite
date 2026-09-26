@@ -152,6 +152,7 @@ function emptyUsageRangePayload() {
     costUsd: 0,
     clients: {},
     clientCosts: {},
+    clientCredits: {},
     models: {},
     modelCosts: {},
     clientModels: {},
@@ -576,6 +577,12 @@ function createHub({
       costUsd: number(period?.costUsd),
       clients: { ...(period?.clients || {}) },
       clientCosts: { ...(period?.clientCosts || {}) },
+      // Only the live-period branch can answer this: `usage_events` and the
+      // daily history have no credit column until migration 006 lands, so a
+      // range served from those sources reports no credits rather than a
+      // partial total. Dropping a field the period actually carries would be a
+      // silent data loss one level lower down.
+      clientCredits: { ...(period?.clientCredits || {}) },
       models: { ...(period?.models || {}) },
       modelCosts: { ...(period?.modelCosts || {}) },
       clientModels: period?.clientModels && typeof period.clientModels === 'object' ? period.clientModels : {},
@@ -691,6 +698,11 @@ function createHub({
               const merged = { ...emptyUsageRangePayload(), ...payload };
               merged.totalTokens = number(payload.totalTokens) + number(head.totalTokens);
               merged.costUsd = number(payload.costUsd) + number(head.costUsd);
+              // `head.clientCredits` is deliberately not merged. Only the
+              // ledger-covered head has credits — the daily-history graph has no
+              // credit concept — so publishing the head's share as the range's
+              // total would repeat exactly the partial-as-whole error this block
+              // exists to fix. The answer keeps reporting no credits at all.
               for (const mapName of ['clients', 'clientCosts', 'models', 'modelCosts']) {
                 merged[mapName] = { ...(payload[mapName] || {}) };
                 for (const [key, value] of Object.entries(head[mapName] || {})) {
@@ -730,6 +742,7 @@ function createHub({
         costUsd: number(eventsAgg.costUsd),
         clients: eventsAgg.clients || {},
         clientCosts: eventsAgg.clientCosts || {},
+        clientCredits: eventsAgg.clientCredits || {},
         models: eventsAgg.models || {},
         modelCosts: eventsAgg.modelCosts || {},
         clientModels: eventsAgg.clientModels || {},
@@ -755,6 +768,7 @@ function createHub({
         costUsd: live.costUsd,
         clients: live.clients,
         clientCosts: live.clientCosts,
+        clientCredits: live.clientCredits,
         models: live.models,
         modelCosts: live.modelCosts,
         clientModels: live.clientModels,

@@ -10,11 +10,15 @@ function number(value) {
 }
 
 function emptyUsageRange() {
+  // Kept field-for-field with repository.js's emptyUsageRange(): this fake is what
+  // the range tests actually exercise, so a period field the real query sums has
+  // to appear here too or a test can pass against a shape the Hub never returns.
   return {
     totalTokens: 0,
     costUsd: 0,
     clients: {},
     clientCosts: {},
+    clientCredits: {},
     models: {},
     modelCosts: {},
     clientModels: {},
@@ -240,6 +244,10 @@ class MemoryRepository {
       if (!result.clientModelCosts[client]) result.clientModelCosts[client] = {};
       result.clientModels[client][model] = (result.clientModels[client][model] || 0) + tokens;
       result.clientModelCosts[client][model] = (result.clientModelCosts[client][model] || 0) + cost;
+      // Sparse, mirroring the real query: a client with no credit meter is absent
+      // from the map rather than reported as a zero.
+      const credits = number(event.credits);
+      if (credits > 0) result.clientCredits[client] = (result.clientCredits[client] || 0) + credits;
     }
     return result;
   }

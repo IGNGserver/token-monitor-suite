@@ -63,6 +63,27 @@ export function formatCost(value, currency = 'USD') {
   return `${entry.symbol}${amount.toFixed(digits)}`;
 }
 
+// Qoder meters its account in credits: no currency symbol, and no published
+// exchange rate into USD or tokens, so this deliberately stays out of
+// `formatCost`. An empty string means "this tool does not report credits", which
+// callers render as nothing rather than as a zero a reader would take for a
+// measurement. Below 100 the value keeps decimals because a single rounded
+// integer would show `0` for a real, billed request.
+export function formatCredits(value) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount) || amount <= 0) return '';
+  if (Math.abs(amount) >= 100) return formatNumber(Math.round(amount));
+  return amount.toFixed(2);
+}
+
+// The estimate marker. `~` reads the same in all five locales, needs no
+// translation, and travels with the number it qualifies — which is what lets one
+// client's guessed tokens sit beside another client's exact ones in the same
+// list. The explanation belongs to the row's accessible name, not the glyph.
+export function estimatedValue(text, estimated) {
+  return estimated ? `~${text}` : text;
+}
+
 // ICU formatter construction is expensive in per-row renders. Bound the cache
 // even when a caller supplies locales outside the UI's finite language list.
 const relativeFormatters = new Map();

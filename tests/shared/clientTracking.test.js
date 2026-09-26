@@ -47,19 +47,31 @@ test('micode is intentionally NOT default-tracked (mimocode.db double-counts Cla
     'micode must stay opt-in until tokscale dedups claude-import sessions');
 });
 
-test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in micode', () => {
+test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes every opt-in client', () => {
   // Display-preference normalization (hide/pin/reorder) keys off the KNOWN list, not
-  // the default-tracked list — so an opt-in client like micode must stay here or its
-  // prefs get silently dropped on save/read.
+  // the default-tracked list — so an opt-in client must stay here or its prefs get
+  // silently dropped on save/read. Both Qoder sites are opt-in for the same reason
+  // micode is: a local adapter whose totals are estimates, not provider billing.
   const known = KNOWN_CLIENTS.split(',');
-  assert.ok(known.includes('micode'), 'micode must remain a known client');
+  for (const client of ['micode', 'qoder', 'qodercn']) {
+    assert.ok(known.includes(client), `${client} must remain a known client`);
+    assert.ok(!DEFAULT_CLIENTS.split(',').includes(client), `${client} must stay opt-in`);
+  }
   for (const client of DEFAULT_CLIENTS.split(',')) {
     assert.ok(known.includes(client), `${client} (default-tracked) must also be known`);
   }
 });
 
+test('the two Qoder sites sit adjacent in KNOWN_CLIENTS', () => {
+  // Cosmetic but load-bearing for the settings list: the tracked-tools UI renders
+  // in KNOWN_CLIENTS order, so the two editions of one product belong next to each
+  // other rather than scattered by insertion history.
+  const known = KNOWN_CLIENTS.split(',');
+  assert.equal(known.indexOf('qoder'), known.indexOf('qodercn') - 1);
+});
+
 test('default tracked clients are accepted by bundled tokscale', () => {
-  const locallyParsedClients = new Set(['proma', 'claude-desktop', 'qodercn']);
+  const locallyParsedClients = new Set(['proma', 'claude-desktop', 'qoder', 'qodercn']);
   // Ids our settings persist but tokscale spells differently. The collector
   // renames them before building `--client`, so the upstream spelling is what
   // has to exist in the enum. A wrong id is a hard usage error (exit 2), not a
@@ -76,6 +88,14 @@ test('default tracked clients are accepted by bundled tokscale', () => {
     return !supported.has(tokscaleSpellings[client] || client);
   });
   assert.deepEqual(unsupported, []);
+  // Neither Qoder site is in the enum at all, so passing one through would fail
+  // the whole scan for every other client in the same call. That is the reason
+  // LOCAL_PARSED_CLIENTS in collector.js has to filter both ids out of the CSV,
+  // and this assertion is what fails if tokscale ever grows a Qoder entry (at
+  // which point the local adapter becomes redundant and should be revisited).
+  for (const client of ['qoder', 'qodercn']) {
+    assert.ok(!supported.has(client), `tokscale unexpectedly accepts ${client}`);
+  }
 });
 
 test('clientsCsvForSetting preserves explicit empty tracked-tool selection', () => {

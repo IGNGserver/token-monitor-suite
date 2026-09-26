@@ -7,10 +7,11 @@
 // client — one click to enable in Settings → tools — until tokscale dedups upstream.
 const DEFAULT_CLIENTS = 'claude,claude-desktop,codex,gemini,hermes,opencode,openclaw,cursor,antigravity,cline,kimi,qwen,grok,copilot,pi,zed,kilocode,roocode,commandcode,zcode,kiro,codebuddy,workbuddy,proma,deepseek-harness,reasonix,amp,droid,mux,kilo,crush,goose,codebuff,freebuff,trae,warp,gjc,jcode,junie,opencodereview,devin-cli,devin-desktop,senpi,augment,kimchi,prime-agent,cherrystudio,mcode,fx,lmstudio,unsloth,hindsight';
 
-// Every wired client id, including opt-in ones kept out of DEFAULT_CLIENTS (micode).
-// Display-preference normalization (hide/pin/reorder) keys off this list, so an opt-in
-// client's prefs survive a round-trip instead of being silently dropped. Mirror the
-// renderer's KNOWN_CLIENTS; add any future opt-in ids here too.
+// Every wired client id, including opt-in ones kept out of DEFAULT_CLIENTS (micode
+// and the two Qoder sites). Display-preference normalization (hide/pin/reorder)
+// keys off this list, so an opt-in client's prefs survive a round-trip instead of
+// being silently dropped. This is the only list: the desktop settings surface and
+// the Hub dashboard both read it through main.js / the shared UI.
 function insertClientBefore(clientsCsv, clientId, beforeClientId) {
   const clients = clientsCsv.split(',');
   const index = clients.indexOf(beforeClientId);
@@ -18,12 +19,20 @@ function insertClientBefore(clientsCsv, clientId, beforeClientId) {
   return clients.join(',');
 }
 
-// qodercn is an opt-in local SQLite adapter. Keep it in the known set so saved
-// display preferences survive a round-trip without making it part of defaults.
+// The two Qoder sites are opt-in local adapters: they read the apps' own files,
+// two of the three sources need a SQLite backend, and the token totals they
+// publish are estimates rather than provider billing. Keep them in the known set
+// so saved display preferences survive a round-trip and the GUI can enable them,
+// without making either part of defaults. Inserted adjacent so the two Qoder
+// entries stay together in the tracked-tools list.
 const KNOWN_CLIENTS = insertClientBefore(
-  insertClientBefore(DEFAULT_CLIENTS, 'micode', 'zcode'),
-  'qodercn',
-  'reasonix'
+  insertClientBefore(
+    insertClientBefore(DEFAULT_CLIENTS, 'micode', 'zcode'),
+    'qodercn',
+    'reasonix'
+  ),
+  'qoder',
+  'qodercn'
 );
 
 // Default-tracked clients introduced after installs may already have an explicit

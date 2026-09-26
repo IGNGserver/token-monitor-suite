@@ -88,3 +88,23 @@ test('the usage_events range index migration is restart-safe and leading-columne
   assert.match(sql, /ADD INDEX `idx_usage_events_recorded_client_model` \(`recorded_at`, `client`, `model`\)/i);
   assert.match(sql, /DEALLOCATE PREPARE/i);
 });
+
+test('the usage_events credit migration is restart-safe ADD COLUMN DDL', () => {
+  // Migration 006 adds the ledger's credit column. MySQL has no
+  // ADD COLUMN IF NOT EXISTS, so — like 003's soft-delete column — the guard has
+  // to go through information_schema and a prepared statement, or re-running the
+  // migration on an existing database fails the whole startup.
+  const sql = fs.readFileSync(
+    path.join(__dirname, '../../migrations/006_usage_events_credits.sql'),
+    'utf8'
+  );
+  assert.doesNotMatch(sql, /ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS/i);
+  assert.match(sql, /information_schema\.COLUMNS/i);
+  assert.match(sql, /TABLE_NAME = 'usage_events'/i);
+  assert.match(sql, /COLUMN_NAME = 'credits'/i);
+  assert.match(sql, /ALTER TABLE `usage_events` ADD COLUMN `credits` DECIMAL\(24,10\) NOT NULL DEFAULT 0/i);
+  assert.match(sql, /PREPARE token_monitor_usage_events_credits/i);
+  assert.match(sql, /DEALLOCATE PREPARE/i);
+  // Same precision as cost_usd: a per-request credit has ~1e-9 granularity.
+  assert.match(sql, /DECIMAL\(24,10\)/);
+});

@@ -2562,15 +2562,19 @@ test('smart collection uses native watching and skips idle intervals after start
   }
 });
 
-test('Qoder CN db-shm events are ignored without suppressing real database changes', () => {
-  const { isQoderCnSelfWatchEvent } = freshCollector();
-  const root = path.join(os.tmpdir(), 'QoderCN', 'db');
-  const roots = { qodercn: [root] };
+test('Qoder db-shm events are ignored without suppressing real database changes', () => {
+  const { isQoderSelfWatchEvent } = freshCollector();
+  const cnRoot = path.join(os.tmpdir(), 'QoderCN', 'db');
+  const globalRoot = path.join(os.tmpdir(), 'Qoder', 'db');
+  const roots = { qodercn: [cnRoot], qoder: [globalRoot] };
 
-  assert.equal(isQoderCnSelfWatchEvent(path.join(root, 'local.db-shm'), roots), true);
-  assert.equal(isQoderCnSelfWatchEvent(path.join(root, 'main.sqlite-shm'), roots), true);
-  assert.equal(isQoderCnSelfWatchEvent(path.join(root, 'local.db-wal'), roots), false);
-  assert.equal(isQoderCnSelfWatchEvent(path.join(os.tmpdir(), 'Other', 'local.db-shm'), roots), false);
+  assert.equal(isQoderSelfWatchEvent(path.join(cnRoot, 'local.db-shm'), roots), true);
+  assert.equal(isQoderSelfWatchEvent(path.join(cnRoot, 'main.sqlite-shm'), roots), true);
+  // The guard spans the family, so the international site's own -shm writes are
+  // ignored by the same rule instead of needing a second matcher.
+  assert.equal(isQoderSelfWatchEvent(path.join(globalRoot, 'local.db-shm'), roots), true);
+  assert.equal(isQoderSelfWatchEvent(path.join(cnRoot, 'local.db-wal'), roots), false);
+  assert.equal(isQoderSelfWatchEvent(path.join(os.tmpdir(), 'Other', 'local.db-shm'), roots), false);
 });
 
 test('Qoder CN source descriptor context reaches checks and watcher roots', () => {
@@ -2750,7 +2754,13 @@ test('Qoder CN transcript create and append events trigger a targeted refresh', 
 test('collector preserves Qoder CN while publishing other clients after a bounded SQLite read fails', async () => {
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  const originalHomedir = os.homedir;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+  // The legacy and transcript readers are stubbed, but `collectQoderCnMainRows`
+  // is not. Point it at the fixture home: on a machine that really runs Qoder CN
+  // this case would otherwise read the developer's `main.sqlite` and price every
+  // model in it, which is both non-hermetic and slower than the wait budget.
+  os.homedir = () => tmp;
 
   const qoderCnUsagePath = require.resolve('../../src/shared/qoderCnUsage');
   const qoderCnUsage = require(qoderCnUsagePath);
@@ -2803,7 +2813,7 @@ test('collector preserves Qoder CN while publishing other clients after a bounde
     await waitForCondition(() => updates.length === 1);
     const anchorPath = path.join(tmp, 'collector-anchor.json');
     const firstAnchor = JSON.parse(fs.readFileSync(anchorPath, 'utf8'));
-    assert.equal(firstAnchor.qoderCnPeriods.today.clients.qodercn, 7);
+    assert.equal(firstAnchor.qoderPeriods.qodercn.today.clients.qodercn, 7);
     const initialPreviewCount = previews.length;
     failReads = true;
     claudeTokens = 5;
@@ -2829,6 +2839,7 @@ test('collector preserves Qoder CN while publishing other clients after a bounde
     assert.equal(updates.at(-1).today.clients.qodercn, 7, 'a persisted anchor keeps Qoder CN data after restart');
   } finally {
     if (handle) handle.stop();
+    os.homedir = originalHomedir;
     qoderCnUsage.collectQoderCnRows = originalRows;
     qoderCnUsage.buildQoderCnPeriods = originalPeriods;
     qoderCnUsage.collectQoderCnTranscriptRows = originalTranscriptRows;
@@ -2842,7 +2853,12 @@ test('collector preserves Qoder CN while publishing other clients after a bounde
 test('collector keeps Qoder CN period alive via transcripts when legacy DB fails', async () => {
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  const originalHomedir = os.homedir;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+  // Same reason as the case above: `collectQoderCnMainRows` is not stubbed, and
+  // a real Qoder CN install would make this measure the developer's profile
+  // instead of the transcript fallback it is written to assert.
+  os.homedir = () => tmp;
 
   const qoderCnUsagePath = require.resolve('../../src/shared/qoderCnUsage');
   const qoderCnUsage = require(qoderCnUsagePath);
@@ -2906,9 +2922,10 @@ test('collector keeps Qoder CN period alive via transcripts when legacy DB fails
     );
     const anchorPath = path.join(tmp, 'collector-anchor.json');
     const anchor = JSON.parse(fs.readFileSync(anchorPath, 'utf8'));
-    assert.equal(anchor.qoderCnPeriods.today.clients.qodercn, 7, 'the anchored fallback is not used when transcripts succeed');
+    assert.equal(anchor.qoderPeriods.qodercn.today.clients.qodercn, 7, 'the anchored fallback is not used when transcripts succeed');
   } finally {
     if (handle) handle.stop();
+    os.homedir = originalHomedir;
     qoderCnUsage.collectQoderCnRows = originalRows;
     qoderCnUsage.buildQoderCnPeriods = originalPeriods;
     qoderCnUsage.collectQoderCnTranscriptRows = originalTranscriptRows;
@@ -2923,10 +2940,15 @@ test('collector does not reuse persisted Qoder CN periods after the DB path chan
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   const originalQoderCnDbPath = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+  const originalHomedir = os.homedir;
   const oldDbPath = path.join(tmp, 'old', 'local.db');
   const newDbPath = path.join(tmp, 'new', 'local.db');
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
   process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = newDbPath;
+  // Stub the home like every other case in this file. Without it the qodercn
+  // transcript root resolves to the developer's real ~/.qoder-cn, and this
+  // assertion only held on a machine that has never run Qoder CN.
+  os.homedir = () => tmp;
 
   const initialCollector = freshCollector();
   const oldQoderCnPeriod = emptyPeriod();
@@ -2937,7 +2959,11 @@ test('collector does not reuse persisted Qoder CN periods after the DB path chan
     today: emptyPeriod(),
     month: emptyPeriod(),
     allTime: emptyPeriod(),
-    qoderCnPeriods: { today: oldQoderCnPeriod, month: oldQoderCnPeriod, allTime: oldQoderCnPeriod },
+    // Written under the current per-client key on purpose: the only reason this
+    // anchor must be discarded is the fingerprint change, so the case stays
+    // honest about what it gates. The legacy `qoderCnPeriods` spelling has its
+    // own migration test below.
+    qoderPeriods: { qodercn: { today: oldQoderCnPeriod, month: oldQoderCnPeriod, allTime: oldQoderCnPeriod } },
     configFingerprint: initialCollector.configFingerprint('claude,qodercn', '2024-01-01', true, oldDbPath),
     fullScanAt: new Date(Date.now() - 5 * 60 * 1000).toISOString()
   }));
@@ -2974,6 +3000,7 @@ test('collector does not reuse persisted Qoder CN periods after the DB path chan
   } finally {
     if (handle) handle.stop();
     qoderCnUsage.collectQoderCnRows = originalRows;
+    os.homedir = originalHomedir;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     if (originalQoderCnDbPath === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
@@ -2983,10 +3010,222 @@ test('collector does not reuse persisted Qoder CN periods after the DB path chan
   }
 });
 
+test('a persisted anchor written under the legacy qoderCnPeriods key still backs a failed CN read', async () => {
+  const tmp = withTmpHome([]);
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  const originalQoderCnDbPath = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+  const originalHomedir = os.homedir;
+  const dbPath = path.join(tmp, 'current', 'local.db');
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+  process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = dbPath;
+  os.homedir = () => tmp;
+
+  const initialCollector = freshCollector();
+  // The shape the previous release persisted: one CN snapshot, no per-client map.
+  const legacyPeriod = emptyPeriod();
+  legacyPeriod.totalTokens = 9;
+  legacyPeriod.clients = { qodercn: 9 };
+  fs.writeFileSync(path.join(tmp, 'collector-anchor.json'), JSON.stringify({
+    dateKey: initialCollector.localTodayKey(),
+    today: emptyPeriod(),
+    month: emptyPeriod(),
+    allTime: emptyPeriod(),
+    qoderCnPeriods: { today: legacyPeriod, month: legacyPeriod, allTime: legacyPeriod },
+    // Matching on purpose: the only thing under test is the key migration, so a
+    // discard here would have to come from the fingerprint and not from the key.
+    // Built through the same helper the collector uses, because the source key
+    // is a structured per-site fingerprint rather than a bare database path.
+    configFingerprint: initialCollector.configFingerprint(
+      'claude,qodercn',
+      '2024-01-01',
+      true,
+      initialCollector.qoderSourceFingerprintForClients('claude,qodercn', {})
+    ),
+    fullScanAt: new Date(Date.now() - 5 * 60 * 1000).toISOString()
+  }));
+
+  const qoderCnUsagePath = require.resolve('../../src/shared/qoderCnUsage');
+  const qoderCnUsage = require(qoderCnUsagePath);
+  const originalRows = qoderCnUsage.collectQoderCnRows;
+  qoderCnUsage.collectQoderCnRows = async () => {
+    const error = new Error('Qoder CN database is temporarily unavailable');
+    error.code = 'QODER_CN_DB_READ_FAILED';
+    throw error;
+  };
+  delete require.cache[collectorPath];
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude,qodercn',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: false,
+      limitsEnabled: false,
+      historyEnabled: false,
+      runTokscale: async () => ({ entries: [{ client: 'claude', model: 'm', input: 3 }] }),
+      onUpdate: (summary) => updates.push(summary)
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.equal(updates.at(-1).today.clients.claude, 3);
+    assert.equal(updates.at(-1).today.clients.qodercn, 9, 'the legacy snapshot still stands in for a failed CN read');
+    assert.equal(updates.at(-1).qoderDiagnostics.qodercn.failureCode, 'QODER_CN_DB_READ_FAILED');
+    // The trusted anchor makes the startup tick today-only, and an anchored tick
+    // never rewrites the file. A full tick does, and must migrate the key.
+    await handle.tick('manual');
+    const anchor = JSON.parse(fs.readFileSync(path.join(tmp, 'collector-anchor.json'), 'utf8'));
+    assert.equal(anchor.qoderPeriods.qodercn.today.clients.qodercn, 9);
+    assert.equal('qoderCnPeriods' in anchor, false, 'the rewritten anchor carries only the per-client map');
+  } finally {
+    if (handle) handle.stop();
+    qoderCnUsage.collectQoderCnRows = originalRows;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    if (originalQoderCnDbPath === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+    else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = originalQoderCnDbPath;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('two tracked Qoder sites are read, anchored and diagnosed independently', async () => {
+  const tmp = withTmpHome([]);
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  const originalHomedir = os.homedir;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+  os.homedir = () => tmp;
+
+  const qoderCnUsagePath = require.resolve('../../src/shared/qoderCnUsage');
+  const qoderCnUsage = require(qoderCnUsagePath);
+  const original = {
+    rows: qoderCnUsage.collectQoderCnRows,
+    mainRows: qoderCnUsage.collectQoderCnMainRows,
+    transcriptRows: qoderCnUsage.collectQoderCnTranscriptRows,
+    periods: qoderCnUsage.buildQoderCnPeriods,
+    pricing: qoderCnUsage.resolveQoderCnPricing
+  };
+  const readClientIds = [];
+  let failGlobal = false;
+  // Every adapter entry point is handed the tracked client id. Recording it is
+  // the point: a site read through the other's id would attribute usage to an
+  // installer that was never opened, and nothing downstream could detect it.
+  qoderCnUsage.collectQoderCnRows = async (options) => {
+    readClientIds.push(options.clientId);
+    if (options.clientId === 'qoder' && failGlobal) {
+      const error = new Error('qoder sqlite read budget exceeded (rows limit 100000)');
+      error.code = 'QODER_CN_READ_BUDGET_EXCEEDED';
+      throw error;
+    }
+    return [];
+  };
+  qoderCnUsage.collectQoderCnMainRows = async (options) => {
+    readClientIds.push(`main:${options.clientId}`);
+    return [];
+  };
+  qoderCnUsage.collectQoderCnTranscriptRows = (options) => {
+    readClientIds.push(`transcript:${options.clientId}`);
+    return [];
+  };
+  qoderCnUsage.resolveQoderCnPricing = async () => ({});
+  qoderCnUsage.buildQoderCnPeriods = (options) => {
+    const client = options.clientId;
+    const tokens = client === 'qoder' ? 11 : 7;
+    const period = { entries: [{ client, model: 'qmodel', input: tokens }] };
+    return { today: period, month: period, allTime: period };
+  };
+  delete require.cache[collectorPath];
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    const collectorOptions = {
+      clients: 'qodercn,qoder',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: false,
+      limitsEnabled: false,
+      historyEnabled: false,
+      runTokscale: async () => ({ entries: [] }),
+      onUpdate: (summary) => updates.push(summary)
+    };
+    handle = startCollector(collectorOptions);
+
+    await waitForCondition(() => updates.length === 1);
+    assert.deepEqual(
+      [...new Set(readClientIds)].sort(),
+      ['main:qoder', 'main:qodercn', 'qoder', 'qodercn', 'transcript:qoder', 'transcript:qodercn'],
+      'both sites are read through their own client id'
+    );
+    assert.equal(updates.at(-1).today.clients.qodercn, 7);
+    assert.equal(updates.at(-1).today.clients.qoder, 11);
+    assert.equal(updates.at(-1).month.clients.qoder, 11);
+    assert.equal(updates.at(-1).allTime.clients.qoder, 11);
+    assert.deepEqual(Object.keys(updates.at(-1).qoderDiagnostics).sort(), ['qoder', 'qodercn']);
+    assert.equal(updates.at(-1).qoderCnDiagnostics, updates.at(-1).qoderDiagnostics.qodercn,
+      'the historical CN field stays the CN entry of the per-client map');
+
+    const anchorPath = path.join(tmp, 'collector-anchor.json');
+    const firstAnchor = JSON.parse(fs.readFileSync(anchorPath, 'utf8'));
+    // Per-client, not a single scalar: an anchored tick derives each site's
+    // month/allTime from its own snapshot, so one site's delta must not be
+    // computed against the other's totals.
+    assert.deepEqual(Object.keys(firstAnchor.qoderPeriods).sort(), ['qoder', 'qodercn']);
+    for (const periodName of ['today', 'month', 'allTime']) {
+      assert.equal(firstAnchor.qoderPeriods.qodercn[periodName].clients.qodercn, 7);
+      assert.equal(firstAnchor.qoderPeriods.qoder[periodName].clients.qoder, 11);
+    }
+    // Today partitions are deliberately not persisted (they are rebuilt by the
+    // first anchored tick after a restart), so the retained per-client snapshot
+    // above is what an anchored fallback can lean on.
+    assert.equal('todayPartitions' in firstAnchor, false);
+
+    // A failure on one site must leave the other's fresh partition alone, which
+    // is the whole reason the anchor keeps a per-client map instead of a scalar.
+    readClientIds.length = 0;
+    failGlobal = true;
+    await handle.tick('manual');
+    assert.equal(updates.length, 2);
+    assert.equal(updates.at(-1).today.clients.qodercn, 7, 'the healthy site still publishes fresh data');
+    assert.equal(updates.at(-1).today.clients.qoder, 11, 'the failed site keeps its anchored partition');
+    assert.equal(updates.at(-1).qoderDiagnostics.qoder.failureCode, 'QODER_CN_READ_BUDGET_EXCEEDED');
+    assert.equal(updates.at(-1).qoderDiagnostics.qodercn.failureCode, null);
+  } finally {
+    if (handle) handle.stop();
+    os.homedir = originalHomedir;
+    qoderCnUsage.collectQoderCnRows = original.rows;
+    qoderCnUsage.collectQoderCnMainRows = original.mainRows;
+    qoderCnUsage.collectQoderCnTranscriptRows = original.transcriptRows;
+    qoderCnUsage.buildQoderCnPeriods = original.periods;
+    qoderCnUsage.resolveQoderCnPricing = original.pricing;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('collector publishes other clients when Qoder CN fails before the first complete snapshot', async () => {
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  const originalHomedir = os.homedir;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+  // Only the legacy SQLite read is stubbed to fail here; the main.sqlite and
+  // transcript readers still run. Point them at the fixture home so the case
+  // measures the failure path instead of the developer's real Qoder CN profile
+  // — which also priced five real models through the default lookup and blew
+  // the 2 s wait budget on a machine that has one.
+  os.homedir = () => tmp;
 
   const qoderCnUsagePath = require.resolve('../../src/shared/qoderCnUsage');
   const qoderCnUsage = require(qoderCnUsagePath);
@@ -3028,6 +3267,7 @@ test('collector publishes other clients when Qoder CN fails before the first com
   } finally {
     if (handle) handle.stop();
     qoderCnUsage.collectQoderCnRows = originalRows;
+    os.homedir = originalHomedir;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     delete require.cache[collectorPath];
@@ -3038,7 +3278,11 @@ test('collector publishes other clients when Qoder CN fails before the first com
 test('collector publishes live periods when only Qoder CN history read fails', async () => {
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  const originalHomedir = os.homedir;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+  // Same reason as the case above: the period readers are stubbed, the
+  // transcript reader is not, and historyEnabled makes this one read twice.
+  os.homedir = () => tmp;
 
   const qoderCnUsagePath = require.resolve('../../src/shared/qoderCnUsage');
   const qoderCnUsage = require(qoderCnUsagePath);
@@ -3096,6 +3340,7 @@ test('collector publishes live periods when only Qoder CN history read fails', a
     if (handle) handle.stop();
     qoderCnUsage.collectQoderCnRows = originalRows;
     qoderCnUsage.buildQoderCnHistoryGraph = originalHistory;
+    os.homedir = originalHomedir;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     delete require.cache[collectorPath];

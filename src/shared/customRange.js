@@ -127,6 +127,16 @@ function addSessionIntoPeriod(period, session) {
     if (output > 0) period.clientOutputs[client] = mapNumber(period.clientOutputs, client) + output;
   }
   if (cost > 0) period.clientCosts[client] = mapNumber(period.clientCosts, client) + cost;
+  // Kept consistent with the session fields above: a session already carries its
+  // own credits and provenance, so a period rebuilt from sessions must roll them
+  // up rather than drop them. Note that this does NOT make Qoder appear on the
+  // custom-range tabs — `collectCustomRangeOnce()` in collector.js has no Qoder
+  // branch, so a locally parsed Qoder period never reaches here. Wiring that up
+  // means extracting the three-source row collection out of
+  // `collectQoderClientUsage()` so the tick and the range share one implementation.
+  const credits = Math.max(0, Number(session.credits) || 0);
+  if (credits > 0) period.clientCredits[client] = mapNumber(period.clientCredits, client) + credits;
+  if (session.estimated === true && tokens > 0) period.clientEstimated[client] = true;
   for (const [model, modelTokens] of Object.entries(session.models || {})) {
     const modelKey = normalizeModelNameForClient(model, client);
     if (!modelKey) continue;
@@ -148,6 +158,16 @@ function addSessionIntoPeriod(period, session) {
       period.clientModelCosts[client] = {};
     }
     period.clientModelCosts[client][modelKey] = mapNumber(period.clientModelCosts[client], modelKey) + c;
+  }
+  for (const [model, modelCredits] of Object.entries(session.modelCredits || {})) {
+    const modelKey = normalizeModelNameForClient(model, client);
+    if (!modelKey) continue;
+    const c = Math.max(0, Number(modelCredits) || 0);
+    if (!c) continue;
+    if (!hasOwn(period.clientModelCredits, client) || !period.clientModelCredits[client] || typeof period.clientModelCredits[client] !== 'object') {
+      period.clientModelCredits[client] = {};
+    }
+    period.clientModelCredits[client][modelKey] = mapNumber(period.clientModelCredits[client], modelKey) + c;
   }
 }
 

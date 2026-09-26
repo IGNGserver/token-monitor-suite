@@ -3604,6 +3604,7 @@ async function fetchCustomRangeStats(rangeInput) {
           outputTokens: 0,
           clients: body.clients || {},
           clientCosts: body.clientCosts || {},
+          clientCredits: body.clientCredits || {},
           clientCacheReads: {},
           clientCacheWrites: {},
           clientOutputs: {},

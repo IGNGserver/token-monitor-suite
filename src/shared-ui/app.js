@@ -45,8 +45,10 @@ import {
 } from './views/trends.js';
 import {
   configureRates,
+  estimatedValue,
   formatCompact,
   formatCost,
+  formatCredits,
   formatNumber,
   toDatetimeLocalValue
 } from './core/format.js';
@@ -1114,7 +1116,12 @@ function segButtons(options, current, groupName) {
 
 function shareBarHtml(rows, { clientIcons = displayFlag('showToolIcons', true) } = {}) {
   if (!rows.length) return emptyHtml('empty.usage');
-  return `<div class="stack">${rows.map((row) => `
+  // `estimated` and `credits` are only ever attached to client rows, so model and
+  // project rows passed through here render unchanged — a model row can mix an
+  // exact client's tokens with an estimated one and earns no label either way.
+  return `<div class="stack">${rows.map((row) => {
+    const credits = formatCredits(row.credits);
+    return `
     <div class="share-row">
       <div class="row">
         <div class="row-main">
@@ -1123,17 +1130,17 @@ function shareBarHtml(rows, { clientIcons = displayFlag('showToolIcons', true) }
             : `<span class="swatch" style="background:${row.color}"></span>`}
           <div class="row-copy">
             <div class="row-name">${escapeHtml(row.name)}</div>
-            <div class="row-sub">${Math.round(row.percent || 0)}%</div>
+            <div class="row-sub">${Math.round(row.percent || 0)}%${credits ? escapeHtml(` · ${credits} ${tr('stats.credits')}`) : ''}</div>
           </div>
         </div>
         <div class="row-metrics">
-          <div class="row-value">${formatNumber(row.value)}</div>
-          <div class="row-cost">${formatCost(row.cost, state.prefs.currency)}</div>
+          <div class="row-value">${escapeHtml(estimatedValue(formatNumber(row.value), row.estimated))}</div>
+          <div class="row-cost">${escapeHtml(estimatedValue(formatCost(row.cost, state.prefs.currency), row.estimated))}</div>
         </div>
       </div>
       <div class="share-meter"><span style="width:${Math.max(0, Math.min(100, row.percent || 0))}%; background:${row.color}"></span></div>
     </div>
-  `).join('')}</div>`;
+  `;}).join('')}</div>`;
 }
 
 function loadingHtml() {

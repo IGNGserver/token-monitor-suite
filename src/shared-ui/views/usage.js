@@ -4,7 +4,9 @@
 // the app's shared state; anything host-specific goes through transport/.
 
 import {
+  estimatedValue,
   formatCost,
+  formatCredits,
   formatNumber,
   formatRelative
 } from '../core/format.js';
@@ -43,18 +45,26 @@ export function renderTools() {
   });
   const toolList = tools.map((row) => {
     const active = row.key === selected.key;
+    const credits = formatCredits(row.credits);
+    const ariaParts = [row.name];
+    // The estimate marker belongs in the accessible name too: a `~` prefix
+    // announces as a stray character, and screen-reader users get the same
+    // "this is a guess" warning sighted users read off the glyph.
+    if (row.estimated) ariaParts.push(tr('usage.estimatedAria'));
+    ariaParts.push(`${formatNumber(row.value)} tokens`, formatCost(row.cost, appState().prefs.currency));
+    if (credits) ariaParts.push(`${credits} ${tr('stats.credits')}`);
     return `
-      <button type="button" class="tool-select-row${active ? ' selected' : ''}" aria-pressed="${active}" aria-label="${escapeHtml(`${row.name}, ${formatNumber(row.value)} tokens, ${formatCost(row.cost, appState().prefs.currency)}`)}" data-select-tool="${escapeHtml(row.key)}">
+      <button type="button" class="tool-select-row${active ? ' selected' : ''}" aria-pressed="${active}" aria-label="${escapeHtml(ariaParts.join(', '))}" data-select-tool="${escapeHtml(row.key)}">
         <div class="row-main">
           ${toolIconHtml(row.key)}
           <div class="row-copy">
             <div class="row-name">${escapeHtml(row.name)}</div>
-            <div class="row-sub">${Math.round((row.value / Math.max(1, period.totalTokens || 0)) * 100)}%</div>
+            <div class="row-sub">${Math.round((row.value / Math.max(1, period.totalTokens || 0)) * 100)}%${credits ? ` · ${escapeHtml(`${credits} ${tr('stats.credits')}`)}` : ''}</div>
           </div>
         </div>
         <div class="row-side">
-          <div class="row-value">${formatNumber(row.value)}</div>
-          <div class="row-cost">${formatCost(row.cost, appState().prefs.currency)}</div>
+          <div class="row-value">${escapeHtml(estimatedValue(formatNumber(row.value), row.estimated))}</div>
+          <div class="row-cost">${escapeHtml(estimatedValue(formatCost(row.cost, appState().prefs.currency), row.estimated))}</div>
         </div>
       </button>`;
   }).join('');
@@ -71,6 +81,7 @@ export function renderTools() {
           <div class="panel-meta tiny">${tr('tools.models')}</div>
         </div>
         ${selected.metrics ? `<div class="usage-detail-label">${escapeHtml(tr('usage.breakdown'))}</div>${renderTokenMix(selected.metrics)}` : ''}
+        ${selected.estimated ? `<div class="usage-measurement-note tiny">${escapeHtml(tr('usage.estimatedHint'))}</div>` : ''}
         <div class="usage-detail-label usage-detail-label-spaced">${escapeHtml(tr('usage.tabs.models'))}</div>
         ${models.length ? shareBarHtml(models.slice(0, 16), { clientIcons: false }) : emptyHtml('empty.usage')}
       </section>

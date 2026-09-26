@@ -20,7 +20,14 @@ const SOURCE_ENV_KEYS = Object.freeze([
   'GROK_HOME',
   'KIMI_CODE_HOME',
   'GEMINI_CLI_HOME',
-  'HERMES_HOME'
+  'HERMES_HOME',
+  // Qoder exports both of these into every child process it spawns, and the
+  // Qoder CN adapter honours QODERCN_CONFIG_DIR *over* homeDir — so running the
+  // suite from inside a Qoder terminal resolved fixture homes to the
+  // developer's real profile. QODER_CONFIG_DIR is the international client's
+  // equivalent; clearing it here keeps the two sites from cross-resolving.
+  'QODER_CONFIG_DIR',
+  'QODERCN_CONFIG_DIR'
 ]);
 
 // Applied to a whole file rather than case by case, so a test added later is

@@ -67,7 +67,7 @@ const supportedToolOrder = [
   'WorkBuddy',
   'Proma',
   'DeepSeek Harness',
-  'Qoder',
+  'Qoder / Qoder CN',
   'Reasonix',
   'Gemini CLI',
   'Roo Code',

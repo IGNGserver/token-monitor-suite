@@ -338,3 +338,119 @@ test('a limits-only ingest preserves the stored usage and ledger', async () => {
     await hub.stop();
   }
 });
+
+// Migration 006 put a credit column on the ledger, so a custom range answered from
+// `usage_events` can report Qoder's exact consumption. What it must NOT do is
+// report a *partial* credit total: the daily-history graph has no credit concept,
+// so on a mixed answer the credits for the history-covered days would be missing.
+// Absent is the honest answer there, and these pin the difference.
+
+test('a range answered by the ledger reports credits', async () => {
+  const repository = new MemoryRepository();
+  await repository.insertUsageEvents('dev-a', [
+    {
+      client: 'qoder',
+      model: 'qwen3.7-plus',
+      inputTokens: 1000,
+      outputTokens: 200,
+      costUsd: 0.03,
+      credits: 0.5,
+      recordedAt: '2026-07-21T12:00:00.000Z'
+    },
+    {
+      client: 'qoder',
+      model: 'glm-4.7-flash',
+      inputTokens: 300,
+      outputTokens: 50,
+      costUsd: 0.01,
+      credits: 0.25,
+      recordedAt: '2026-07-21T13:00:00.000Z'
+    },
+    {
+      // A USD-billed client in the same window: no credit meter at all.
+      client: 'codex',
+      model: 'gpt-5',
+      inputTokens: 40,
+      outputTokens: 10,
+      costUsd: 0.2,
+      recordedAt: '2026-07-21T14:00:00.000Z'
+    }
+  ]);
+
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', repository, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const range = await hub.getUsageRange({
+      from: '2026-07-21T00:00:00.000Z',
+      to: '2026-07-22T00:00:00.000Z'
+    });
+
+    assert.equal(range.source, 'usage_events');
+    assert.equal(range.clientCredits.qoder, 0.75);
+    assert.ok(!('codex' in range.clientCredits), 'a client with no credit meter stays absent, not zero');
+    assert.ok(!('clientModelCredits' in range),
+      'the per-model credit split stays in the ledger rows: no range consumer reads it yet');
+    // Credits are their own axis: the USD totals are unchanged by them. (Summed
+    // as floats, which is what the range payload returns — it does not round the
+    // way the /api/stats aggregate does.)
+    assert.ok(Math.abs(range.costUsd - 0.24) < 1e-9);
+  } finally {
+    await hub.stop();
+  }
+});
+
+test('a mixed history-plus-ledger answer reports no credits rather than a partial total', async () => {
+  const repository = new MemoryRepository();
+  await repository.insertUsageEvents('dev-a', [{
+    client: 'qoder',
+    model: 'qwen3.7-plus',
+    inputTokens: 500,
+    outputTokens: 200,
+    costUsd: 7,
+    credits: 4,
+    recordedAt: '2024-06-01T00:00:00.000Z'
+  }]);
+
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', repository, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    await repository.saveDevice({
+      deviceId: 'dev-a',
+      hostname: 'host',
+      platform: 'linux-x64',
+      updatedAt: '2026-07-21T00:00:00.000Z',
+      receivedAt: '2026-07-21T00:00:00.000Z',
+      history: {
+        daily: [{ date: '2026-07-20', tokens: 100, cost: 1, perClient: { qoder: { tokens: 100, cost: 1 } }, perModel: { 'qwen3.7-plus': { tokens: 100, cost: 1 } } }],
+        monthly: [],
+        summary: {}
+      },
+      periods: {}
+    });
+
+    const range = await hub.getUsageRange({ startDate: '2024-06-01', endDate: '2026-07-20' });
+
+    assert.equal(range.source, 'history_daily+usage_events');
+    // The ledger half does have 4 credits and the history half has none, so any
+    // figure here would be a fraction of the range presented as the whole.
+    assert.deepEqual(range.clientCredits, {});
+    assert.equal(range.totalTokens, 800, 'tokens still merge: both sides report those');
+  } finally {
+    await hub.stop();
+  }
+});
+
+test('the daily-history graph contributes no credits', () => {
+  const result = aggregateHistoryRange({
+    daily: [{
+      date: '2026-07-20',
+      tokens: 100,
+      cost: 1,
+      perClient: { qoder: { tokens: 100, cost: 1 } },
+      perModel: { 'qwen3.7-plus': { tokens: 100, cost: 1 } }
+    }]
+  }, new Date('2026-07-20T00:00:00'), new Date('2026-07-21T00:00:00'), { startDate: '2026-07-20', endDate: '2026-07-20' });
+
+  assert.deepEqual(result.clientCredits, {},
+    'tokscale graph rows carry tokens and cost only, so this source can never answer for credits');
+});

@@ -29,11 +29,15 @@ const TOKEN_VALUE_MAPS = [
   'clients', 'clientCacheReads', 'clientCacheWrites', 'clientOutputs', 'clientUnclassifiedTokens',
   'models', 'modelCacheReads', 'modelCacheWrites', 'modelOutputs', 'modelUnclassifiedTokens'
 ];
-const COST_VALUE_MAPS = ['clientCosts', 'modelCosts'];
+// `clientCredits` joins the cost-bounded list deliberately: a credit is a small
+// positive float on the same order as a USD cost, and an unlisted map is not
+// range-checked at all — a corrupted 1e300 would then reach the DECIMAL(24,10)
+// column, fail the INSERT under strict mode, and lock the device out of ingest.
+const COST_VALUE_MAPS = ['clientCosts', 'modelCosts', 'clientCredits'];
 const PERIOD_NAMES = ['today', 'month', 'allTime'];
 const CLIENT_MAPS = [
-  'clients', 'clientCosts', 'clientCacheReads', 'clientCacheWrites', 'clientOutputs',
-  'clientUnclassifiedTokens', 'clientModels', 'clientModelCosts'
+  'clients', 'clientCosts', 'clientCredits', 'clientEstimated', 'clientCacheReads', 'clientCacheWrites', 'clientOutputs',
+  'clientUnclassifiedTokens', 'clientModels', 'clientModelCosts', 'clientModelCredits'
 ];
 const MODEL_MAPS = [
   'models', 'modelCosts', 'modelCacheReads', 'modelCacheWrites', 'modelOutputs',
@@ -170,7 +174,7 @@ function ensurePeriod(period, field) {
   for (const mapName of TOKEN_VALUE_MAPS) ensureBoundedMap(period[mapName], MAX_TOKEN_VALUE, `${field}.${mapName}`);
   for (const mapName of COST_VALUE_MAPS) ensureBoundedMap(period[mapName], MAX_COST_VALUE, `${field}.${mapName}`);
   for (const mapName of CLIENT_MAPS) {
-    if (mapName === 'clientModels' || mapName === 'clientModelCosts') {
+    if (mapName === 'clientModels' || mapName === 'clientModelCosts' || mapName === 'clientModelCredits') {
       ensureNestedMap(period[mapName], MAX_CLIENT_ID_LENGTH, MAX_MODEL_ID_LENGTH, `${field}.${mapName}`);
     } else {
       ensureMapKeys(period[mapName], MAX_CLIENT_ID_LENGTH, `${field}.${mapName}`);

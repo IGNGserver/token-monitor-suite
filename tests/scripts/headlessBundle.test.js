@@ -29,6 +29,11 @@ function agentClosurePackages() {
     for (const match of source.matchAll(pattern)) {
       const specifier = match[1];
       if (specifier.startsWith('node:')) continue;
+      // This walker does not strip comments, so prose such as `from "the other
+      // one"` in a doc comment matches too. No real package specifier contains
+      // whitespace, so that check filters the false positives without needing a
+      // comment-stripping pass over string literals.
+      if (/\s/.test(specifier)) continue;
       if (specifier.startsWith('.')) {
         const resolved = path.resolve(path.dirname(file), specifier);
         for (const candidate of [resolved, `${resolved}.js`, path.join(resolved, 'index.js')]) {

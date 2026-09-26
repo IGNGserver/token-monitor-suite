@@ -9,47 +9,179 @@ const { StringDecoder } = require('node:string_decoder');
 const { promisify } = require('node:util');
 const execFileAsync = promisify(execFile);
 const { customPricingPath } = require('./tokscaleConfig');
-const QODER_CN_DB_SUFFIX = path.join('SharedClientCache', 'cache', 'db', 'local.db');
-// Qoder 0.1.x moved its persisted conversation records out of the legacy
-// QoderCN cache. The desktop build currently observed in the target machine
-// stores them in the Electron app-support database below. Keep this as a
-// separate source: the legacy database has exact token fields, while this
-// message store only permits bounded content-based estimates.
-const QODER_CN_MAIN_DB_SUFFIX = path.join('com.qoder.app.stable', 'main.sqlite');
-// Qoder CN stores internal model codes (model_info.model_key) instead of real
-// model names. Official display names come from the app's bundled i18n keys
-// `modelSelector.item.<code>` (Qoder CN.app, 2026-07 build); the codes change
-// between releases, so historical rows can reference retired codes — e.g.
-// qmodel_preview maps to the same Qwen3.7-Max preview as today's
-// q35model_preview. Mapping at parse time keeps display and pricing (tokscale
-// resolves the display names case-insensitively) correct for every user's
-// data. Unmapped codes (custom models) pass through unchanged.
+const QODER_DB_SUFFIX = path.join('SharedClientCache', 'cache', 'db', 'local.db');
+const QODER_MAIN_DB_NAME = 'main.sqlite';
+
+// Per-site on-disk layout. Qoder and Qoder CN share a transcript schema (same
+// top-level keys, same `message.usage` shape, same model-code family) but not a
+// profile root, app-support directory name, or Electron bundle id, so the
+// adapter is parameterized by site rather than duplicated.
+//
+// `profileEnvVar` is the *client's own* relocation variable, and only the CN
+// client has one this adapter may trust. The CN runtime exports
+// QODERCN_CONFIG_DIR pointing at its own profile, which is how a relocated CN
+// profile is found. The international runtime exports QODER_CONFIG_DIR too —
+// and on a machine where only Qoder CN is installed it exports it pointing at
+// `~/.qoder-cn` (verified 2026-09-26: both variables held the same path). So
+// `global` resolves its profile from homeDir alone and accepts only
+// Token-Monitor-namespaced overrides; honouring QODER_CONFIG_DIR there would
+// bill CN usage to the `qoder` client, which is the same double-attribution
+// failure mode `micode` is warned about in clientTracking.js.
+//
+// Naming: this module predates the international client, so its exported
+// symbols are spelled `*QoderCn*`. Those names are historical, not a scope
+// limit — every entry point takes `options.site` (`'cn'` | `'global'`, default
+// `'cn'`) and resolves its roots, client id and emitted row ids through
+// QODER_SITES. Renaming ~260 call sites is a separate mechanical change and is
+// deliberately not mixed into the multi-site work.
+const QODER_SITES = Object.freeze({
+  cn: Object.freeze({
+    clientId: 'qodercn',
+    profileDirName: '.qoder-cn',
+    profileEnvVar: 'QODERCN_CONFIG_DIR',
+    appSupportDirNames: Object.freeze(['QoderCN']),
+    // `com.qodercn.app.stable` is verified on Linux (Qoder CN 0.4.2, where the
+    // previously hardcoded `com.qoder.app.stable` does not exist and this source
+    // was therefore never read). `com.qoder.app.stable` is the spelling Qoder CN
+    // 0.1.x used *and* the international app's own bundle id — a genuinely
+    // shared directory, resolved by the footprint gate in
+    // `selectQoderMainDbPaths` rather than by candidate order alone. Declared
+    // order still matters: the current spelling is tried first.
+    mainBundleIds: Object.freeze(['com.qodercn.app.stable', 'com.qoder.app.stable']),
+    dbEnvVar: 'TOKEN_MONITOR_QODER_CN_DB_PATH',
+    mainDbEnvVar: 'TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH',
+    transcriptsEnvVars: Object.freeze([
+      'TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR',
+      'TOKEN_MONITOR_QODERCN_TRANSCRIPTS_DIR',
+      'TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_PATH'
+    ])
+  }),
+  global: Object.freeze({
+    clientId: 'qoder',
+    profileDirName: '.qoder',
+    profileEnvVar: null,
+    appSupportDirNames: Object.freeze(['Qoder']),
+    // Unverified for the international desktop app: only its CLI is installed on
+    // the reference machine (`~/.config/Qoder/qodercli`, no main.sqlite). The
+    // candidate is retained so a machine that does have the desktop build is
+    // read, and the shared-id footprint gate keeps a Qoder CN 0.1.x install from
+    // being billed to this client.
+    mainBundleIds: Object.freeze(['com.qoder.app.stable']),
+    dbEnvVar: 'TOKEN_MONITOR_QODER_DB_PATH',
+    mainDbEnvVar: 'TOKEN_MONITOR_QODER_MAIN_DB_PATH',
+    transcriptsEnvVars: Object.freeze(['TOKEN_MONITOR_QODER_TRANSCRIPTS_DIR'])
+  })
+});
+
+const QODER_SITE_IDS = Object.freeze(Object.keys(QODER_SITES));
+
+// Bundle ids claimed by more than one site. A directory named after one of them
+// proves only that *a* Qoder desktop app ran, not which one, so a site may read
+// it only when that site's own footprint (app-support directory or profile
+// directory) is present. Derived from QODER_SITES so adding a site that reuses
+// an id cannot silently reintroduce cross-attribution.
+const SHARED_QODER_MAIN_BUNDLE_IDS = new Set((() => {
+  const counts = new Map();
+  for (const siteId of QODER_SITE_IDS) {
+    for (const bundleId of QODER_SITES[siteId].mainBundleIds) {
+      counts.set(bundleId, (counts.get(bundleId) || 0) + 1);
+    }
+  }
+  return [...counts].filter(([, claimedBy]) => claimedBy > 1).map(([bundleId]) => bundleId);
+})());
+
+function normalizeQoderSite(value, fallback = 'cn') {
+  const site = String(value || '').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(QODER_SITES, site) ? site : fallback;
+}
+
+// Reverse index. The collector keys its per-client state by the tracked client
+// id while this module resolves roots by site, so one direction is derived from
+// the other rather than hand-maintained as a pair that can drift.
+const QODER_SITE_BY_CLIENT_ID = Object.freeze(Object.fromEntries(
+  QODER_SITE_IDS.map((siteId) => [QODER_SITES[siteId].clientId, siteId])
+));
+const QODER_CLIENT_IDS = Object.freeze(Object.keys(QODER_SITE_BY_CLIENT_ID));
+
+function normalizeQoderClientId(value, fallback = 'qodercn') {
+  const clientId = String(value || '').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(QODER_SITE_BY_CLIENT_ID, clientId) ? clientId : fallback;
+}
+
+// The single place an entry point turns caller options into `{site, clientId}`.
+// `options.clientId` wins over `options.site`: a caller that already knows the
+// tracked id (the collector does) must not be able to ask for one site's roots
+// and stamp another site's client id on the rows.
+function resolveQoderSiteOptions(options = {}) {
+  const byClientId = QODER_SITE_BY_CLIENT_ID[normalizeQoderClientId(options.clientId, '')];
+  const siteId = byClientId || normalizeQoderSite(options.site, 'cn');
+  return { site: siteId, clientId: QODER_SITES[siteId].clientId };
+}
+
+function firstNonEmptyEnv(env, names) {
+  for (const name of names) {
+    const value = String(env?.[name] || '').trim();
+    if (value) return value;
+  }
+  return '';
+}
+// Qoder stores internal model codes (model_info.model_key / transcript
+// message.model) instead of real model names. The authoritative code→name table
+// is the client's own i18n bundle, key `modelSelector.item.<code>`, shipped as
+// `<home>/.qoder/.auth/dynamic-texts.json` (verified 2026-09-26 against the
+// international client; Qoder CN has no such file, so this table is its only
+// source). Two rules keep it useful:
+//
+//   1. Map to the underlying model a catalog can price, not the marketing
+//      label. tokscale resolves display names case-insensitively against
+//      models.dev, so a program name prices as nothing: `q35model_preview` is
+//      sold as "Qwen3.7-Max-DogFooding" but *is* Qwen3.7-Max, and `dfmodel` is
+//      sold as "DeepSeek-Flash" but its own description says DeepSeek-V4.1-Flash.
+//   2. Never drop a retired code. Codes are recycled between releases and
+//      historical rows keep referencing the old ones, so a deleted entry turns
+//      real past usage back into a raw code. `qmodel_preview` is such a row.
+//
+// Unmapped codes (custom models) pass through unchanged. The routing tiers in
+// QODER_CN_ROUTING_TIERS are plan slots, not models, and are excluded from
+// pricing separately — they are named here only so they display readably.
 const QODER_CN_MODEL_DISPLAY_NAMES = Object.freeze({
   auto: 'Auto',
+  cmodel: 'Cantus', // Qoder-branded; no underlying model published, so unpriceable
   dashscope_qmodel: 'Qwen3.7-Plus',
   dashscope_qwen3_coder: 'Qwen3-Coder-Plus',
   dashscope_qwen_max_latest: 'Qwen3-Max',
-  dfmodel: 'DeepSeek-V4-Flash',
+  dfmodel: 'DeepSeek-V4.1-Flash',
   dmodel: 'DeepSeek-V4-Pro',
   efficient: 'Efficient',
+  'experts-auto': 'Auto',
+  'experts-ultimate': 'Ultimate',
   gfmodel: 'GLM-5.3-Flash', // Qoder CN 0.1.2 client flash slot
   gm51model: 'GLM-5.2',
-  gmodel: 'GLM-5',
-  kmodel: 'Kimi-K2.7-Code',
-  kmodel_latest: 'Kimi-K2.7-Code',
+  gmodel: 'GLM-5.3',
+  kmodel: 'Kimi-K2.8-Preview',
+  kmodel_latest: 'Kimi-K3',
   lite: 'Lite',
   mmodel: 'MiniMax-M3',
   performance: 'Performance',
   q35model: 'Qwen3.5-Plus',
-  q35model_preview: 'Qwen3.8-Max-Preview',
+  q35model_preview: 'Qwen3.7-Max', // "Qwen3.7-Max-DogFooding" slot
   q36fmodel: 'Qwen3.6-Flash',
   q37fmodel: 'Qwen3.7-Flash',
+  qfmodel: 'Qwen3.8-Flash', // the dominant code in current transcripts
   qmodel: 'Qwen3.7-Plus',
-  qmodel_38max: 'Qwen3.8-Max-Preview',
+  qmodel_38max: 'Qwen3.8-Max',
   qmodel_latest: 'Qwen3.7-Max',
-  qmodel_preview: 'Qwen3.8-Max-Preview', // retired code, same preview model
+  qmodel_preview: 'Qwen3.8-Max-Preview', // retired code, still in older rows
+  'quest-auto': 'Auto',
+  'quest-ultimate': 'Ultimate',
+  smodel: 'Sonus', // Qoder-branded; no underlying model published, so unpriceable
   ultimate: 'Ultimate'
 });
+// Plan slots rather than models: the transcript names the tier, not the model
+// behind it, so an unrelated catalog entry must not supply a false price. The
+// `experts-*` / `quest-*` variants are the same five tiers on other surfaces;
+// every caller maps a code to its display name before this set is consulted, so
+// they collapse to the base names here and need no entries of their own.
 const QODER_CN_ROUTING_TIERS = new Set(['auto', 'ultimate', 'performance', 'efficient', 'lite']);
 const QODER_CN_READ_MAX_BYTES = 50 * 1024 * 1024;
 const QODER_CN_READ_MAX_ROWS = 100_000;
@@ -286,7 +418,7 @@ function resetQoderCnPricingCache() {
   qoderCnPricingCache.clear();
 }
 
-function normalizeQoderCnDbRow(row, source = 'local') {
+function normalizeQoderCnDbRow(row, source = 'local', clientId = 'qodercn') {
   const usage = jsonObject(row?.token_info);
   const prompt = numeric(usage?.prompt_tokens);
   const cached = numeric(usage?.cached_tokens ?? 0);
@@ -300,9 +432,10 @@ function normalizeQoderCnDbRow(row, source = 'local') {
   const displayName = Object.prototype.hasOwnProperty.call(QODER_CN_MODEL_DISPLAY_NAMES, modelKey)
     ? QODER_CN_MODEL_DISPLAY_NAMES[modelKey]
     : null;
+  const namespace = normalizeQoderClientId(clientId, 'qodercn');
   const normalized = {
-    sessionId: `qodercn:${source}:${session}`,
-    messageId: `qodercn:${source}:${session}:${message}`,
+    sessionId: `${namespace}:${source}:${session}`,
+    messageId: `${namespace}:${source}:${session}:${message}`,
     model: displayName || modelKey,
     projectLabel: normalizeQoderCnProjectLabel(row?.project_name),
     input: Math.max(0, prompt - cached),
@@ -317,7 +450,20 @@ function normalizeQoderCnDbRow(row, source = 'local') {
   return normalized;
 }
 
-function qoderCnDataPaths(options = {}) {
+function qoderAppSupportDir(home, platform, env) {
+  if (platform === 'darwin') return path.join(home, 'Library', 'Application Support');
+  if (platform === 'win32') {
+    return (typeof env.APPDATA === 'string' && env.APPDATA.length > 0)
+      ? env.APPDATA
+      : path.join(home, 'AppData', 'Roaming');
+  }
+  const xdg = env.XDG_CONFIG_HOME;
+  return (typeof xdg === 'string' && path.isAbsolute(xdg)) ? xdg : path.join(home, '.config');
+}
+
+function qoderDataPaths(options = {}) {
+  const { site: siteId } = resolveQoderSiteOptions(options);
+  const site = QODER_SITES[siteId];
   const home = options.homeDir || os.homedir();
   const env = options.env || process.env;
   // Electron callers may provide a host-plus-architecture label (for example
@@ -325,48 +471,109 @@ function qoderCnDataPaths(options = {}) {
   // Normalize at the shared descriptor boundary so parser, watcher, and anchor
   // callers cannot silently resolve different roots.
   const platform = String(options.platform || process.platform).split('-')[0];
-  let appSupport;
-  if (platform === 'darwin') appSupport = path.join(home, 'Library', 'Application Support');
-  else if (platform === 'win32') appSupport = (typeof env.APPDATA === 'string' && env.APPDATA.length > 0) ? env.APPDATA : path.join(home, 'AppData', 'Roaming');
-  else {
-    const xdg = env.XDG_CONFIG_HOME;
-    appSupport = (typeof xdg === 'string' && path.isAbsolute(xdg)) ? xdg : path.join(home, '.config');
-  }
+  const appSupport = qoderAppSupportDir(home, platform, env);
 
-  const explicitDb = String(env.TOKEN_MONITOR_QODER_CN_DB_PATH || '').trim();
-  const explicitMainDb = String(env.TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH || '').trim();
-  const configuredHome = String(env.QODERCN_CONFIG_DIR || '').trim();
-  const qoderCnHome = configuredHome ? path.resolve(configuredHome) : path.join(home, '.qoder-cn');
-  const explicitTranscripts = String(
-    env.TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR
-      || env.TOKEN_MONITOR_QODERCN_TRANSCRIPTS_DIR
-      || env.TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_PATH
-      || ''
-  ).trim();
+  const explicitDb = firstNonEmptyEnv(env, [site.dbEnvVar]);
+  const explicitMainDb = firstNonEmptyEnv(env, [site.mainDbEnvVar]);
+  // See QODER_SITES: only a site that names its own client variable may read
+  // it, so `global` never resolves through the ambient QODER_CONFIG_DIR.
+  const configuredHome = site.profileEnvVar ? String(env[site.profileEnvVar] || '').trim() : '';
+  const profileHome = configuredHome ? path.resolve(configuredHome) : path.join(home, site.profileDirName);
+  const explicitTranscripts = firstNonEmptyEnv(env, site.transcriptsEnvVars);
   const transcriptRoot = explicitTranscripts
     ? path.resolve(explicitTranscripts)
-    : path.join(qoderCnHome, 'projects');
+    : path.join(profileHome, 'projects');
+  const mainDbPaths = explicitMainDb
+    ? [path.resolve(explicitMainDb)]
+    : site.mainBundleIds.map((bundleId) => path.join(appSupport, bundleId, QODER_MAIN_DB_NAME));
+  // Directories whose presence proves *this* site is installed. Used only to
+  // decide whether a bundle id shared with the other site may be read; an
+  // explicit TOKEN_MONITOR_*_MAIN_DB_PATH is an operator decision and skips it.
+  const siteFootprintDirs = explicitMainDb
+    ? []
+    : [
+      ...site.appSupportDirNames.map((name) => path.join(appSupport, name)),
+      profileHome
+    ];
   return {
+    site: siteId,
+    clientId: site.clientId,
+    // Candidates are returned even when absent. The watcher needs the dirname
+    // of a database that does not exist yet so a later install still triggers
+    // a targeted refresh, and the evidence probe reports `not_present` per
+    // candidate; readers gate on existence themselves.
     dbPaths: explicitDb
       ? [path.resolve(explicitDb)]
-      : [path.join(appSupport, 'QoderCN', QODER_CN_DB_SUFFIX)],
-    mainDbPaths: explicitMainDb
-      ? [path.resolve(explicitMainDb)]
-      : [path.join(appSupport, QODER_CN_MAIN_DB_SUFFIX)],
-    // The legacy SQLite source and the 0.1.x transcript source are separate
-    // roots, but they are one adapter from the collector's point of view. Keep
-    // both in this descriptor so source status, watcher attribution and anchor
-    // invalidation cannot drift apart again.
+      : site.appSupportDirNames.map((name) => path.join(appSupport, name, QODER_DB_SUFFIX)),
+    mainDbPaths,
+    gatedMainDbPaths: explicitMainDb
+      ? []
+      : site.mainBundleIds
+        .filter((bundleId) => SHARED_QODER_MAIN_BUNDLE_IDS.has(bundleId))
+        .map((bundleId) => path.join(appSupport, bundleId, QODER_MAIN_DB_NAME)),
+    siteFootprintDirs,
+    // The legacy SQLite source, the desktop message store and the transcript
+    // tree are separate roots, but they are one adapter from the collector's
+    // point of view. Keep all three in this descriptor so source status,
+    // watcher attribution and anchor invalidation cannot drift apart again.
     transcriptRoots: [transcriptRoot]
   };
 }
 
-function qoderCnSourceFingerprint(options = {}) {
-  const paths = qoderCnDataPaths(options);
-  const dbs = paths.dbPaths.map((value) => path.resolve(value)).join(',');
+// The Qoder CN descriptor. Kept as its own name because every existing caller
+// (collector watch roots, anchor fingerprint, evidence probe) is CN-specific,
+// and because a function called `...CnDataPaths` must not silently honour a
+// `site: 'global'` argument.
+function qoderCnDataPaths(options = {}) {
+  return qoderDataPaths({ ...options, site: 'cn' });
+}
+
+// A descriptor lists bundle-id *candidates* because the watcher needs the
+// dirname of a database that does not exist yet. A reader, on the other hand,
+// must not read two candidates that both exist, and must not read a candidate
+// that only proves the *other* site is installed:
+//
+//   - first existing candidate wins, in declaration order, so a machine that
+//     kept both an old and a current bundle directory is read once;
+//   - a candidate whose bundle id is shared with the other site (see
+//     SHARED_QODER_MAIN_BUNDLE_IDS) additionally requires this site's own
+//     footprint on disk. Without that gate an international-only machine would
+//     bill `com.qoder.app.stable` to `qodercn`, and a Qoder CN 0.1.x-only
+//     machine would bill it to `qoder`.
+//
+// Returns [] when nothing is readable; callers already treat an empty list as
+// "source absent".
+function selectQoderMainDbPaths(paths) {
+  const candidates = Array.isArray(paths?.mainDbPaths) ? paths.mainDbPaths : [];
+  const gated = new Set(Array.isArray(paths?.gatedMainDbPaths) ? paths.gatedMainDbPaths : []);
+  const footprints = Array.isArray(paths?.siteFootprintDirs) ? paths.siteFootprintDirs : [];
+  let footprintPresent = null;
+  for (const candidate of candidates) {
+    if (!candidate || !fs.existsSync(candidate)) continue;
+    if (gated.has(candidate)) {
+      if (footprintPresent === null) {
+        footprintPresent = footprints.some((dir) => dir && fs.existsSync(dir));
+      }
+      if (!footprintPresent) continue;
+    }
+    return [candidate];
+  }
+  return [];
+}
+
+// Anchor-reuse key for one site's source set. The site id is part of the key so
+// a collector that tracks both Qoder and Qoder CN cannot reuse one site's anchor
+// for the other, and so a future profile relocation invalidates the anchor.
+function qoderSourceFingerprint(options = {}) {
+  const paths = options.dataPaths || qoderDataPaths(options);
+  const dbs = (paths.dbPaths || []).map((value) => path.resolve(value)).join(',');
   const mainDbs = (paths.mainDbPaths || []).map((value) => path.resolve(value)).join(',');
   const transcripts = (paths.transcriptRoots || []).map((value) => path.resolve(value)).join(',');
-  return `db:${dbs}|mainDb:${mainDbs}|transcripts:${transcripts}`;
+  return `${paths.site}|db:${dbs}|mainDb:${mainDbs}|transcripts:${transcripts}`;
+}
+
+function qoderCnSourceFingerprint(options = {}) {
+  return qoderSourceFingerprint({ ...options, site: 'cn' });
 }
 
 function positiveInteger(value, fallback) {
@@ -602,14 +809,15 @@ function qoderCnMainHash(value) {
   return createHash('sha256').update(String(value || '')).digest('hex').slice(0, 12);
 }
 
-function normalizeQoderCnMainMessage(row, source, state, contentTokens) {
+function normalizeQoderCnMainMessage(row, source, state, contentTokens, clientId = 'qodercn') {
   const payload = jsonObject(row?.payload_json ?? row?.payload);
   if (!payload) return null;
   const rawSession = String(row?.session_id || row?.sessionId || 'unknown');
   const rawMessage = String(row?.message_id || row?.messageId || '').trim();
   const sequence = String(row?.sequence ?? '').trim();
   const messageKey = rawMessage || `${sequence || 'message'}:${timestampMs(row?.created_at)}`;
-  const sessionId = `qodercn:main:${source}:${qoderCnMainHash(rawSession)}`;
+  const namespace = normalizeQoderClientId(clientId, 'qodercn');
+  const sessionId = `${namespace}:main:${source}:${qoderCnMainHash(rawSession)}`;
   const modelKey = String(
     row?.session_model || payload.model || payload.modelName || payload.model_name || 'qoder-agent'
   ).trim() || 'qoder-agent';
@@ -624,7 +832,11 @@ function normalizeQoderCnMainMessage(row, source, state, contentTokens) {
     messageId: `${sessionId}:${qoderCnMainHash(messageKey)}`,
     model,
     projectLabel: normalizeQoderCnProjectLabel(row?.project_name || row?.projectLabel),
-    input: Math.max(0, Math.trunc(Number(state.cumulativeTokens) || 0)),
+    // Same once-per-session rule as the transcript parser (see
+    // `processTranscriptLine`): the caller owns the `countedTokens` watermark so an
+    // assistant row outside the window still advances it, and this row is charged
+    // only for the conversation appended since the previous one.
+    input: Math.max(0, (Number(state.cumulativeTokens) || 0) - (Number(state.countedTokens) || 0)),
     output: Math.max(0, Math.trunc(Number(contentTokens) || 0)),
     cacheRead: 0,
     cacheWrite: 0,
@@ -633,18 +845,25 @@ function normalizeQoderCnMainMessage(row, source, state, contentTokens) {
     estimated: true
   };
   if (rawMessage) defineTranscriptIdentity(normalized, [rawMessage]);
+  // `unknown` is this module's placeholder for a row with no session column; it
+  // must not become a join key, or every such row would suppress every other.
+  if (rawSession && rawSession !== 'unknown') defineSourceSession(normalized, rawSession);
   return normalized;
 }
 
 async function collectQoderCnMainRows(options = {}) {
-  const paths = options.dataPaths || qoderCnDataPaths({
-    homeDir: options.homeDir,
-    platform: options.platform,
-    env: options.env
-  });
+  // The descriptor is the single authority for both roots and client id, so a
+  // caller that hands in its own `dataPaths` cannot end up reading one site's
+  // database and stamping another site's client id on the rows.
+  const paths = options.dataPaths || qoderDataPaths(options);
+  const clientId = normalizeQoderClientId(paths.clientId, resolveQoderSiteOptions(options).clientId);
+  // An explicit `mainDbPaths` is a caller-supplied list (tests inject a stub
+  // reader against a virtual path), so it is used verbatim; only the
+  // descriptor-derived candidate list goes through existence + footprint
+  // selection.
   const mainDbPaths = Array.isArray(options.mainDbPaths)
     ? options.mainDbPaths
-    : (paths.mainDbPaths || []);
+    : selectQoderMainDbPaths(paths);
   const readMainDbRows = options.readMainDbRows || readQoderCnMainDbRows;
   const sinceMs = options.sinceMs;
   const rows = [];
@@ -667,9 +886,13 @@ async function collectQoderCnMainRows(options = {}) {
           payload.timestamp ?? payload.createdAt ?? payload.created_at ?? dbRow?.created_at
         );
         if (sinceMs === undefined || createdAt >= sinceMs) {
-          const normalized = normalizeQoderCnMainMessage(dbRow, source, state, contentTokens);
+          const normalized = normalizeQoderCnMainMessage(dbRow, source, state, contentTokens, clientId);
           if (normalized) rows.push(normalized);
         }
+        // Advanced for every assistant row, not just the emitted ones: skipping an
+        // out-of-window row here would hand the first in-window request the whole
+        // earlier conversation as its input.
+        state.countedTokens = (Number(state.cumulativeTokens) || 0) + contentTokens;
       }
       state.cumulativeTokens += contentTokens;
       sessions.set(sessionKey, state);
@@ -682,7 +905,8 @@ async function collectQoderCnMainRows(options = {}) {
 }
 
 async function collectQoderCnRows(options = {}) {
-  const paths = qoderCnDataPaths(options);
+  const paths = options.dataPaths || qoderDataPaths(options);
+  const clientId = normalizeQoderClientId(paths.clientId, resolveQoderSiteOptions(options).clientId);
   const dbPaths = Array.isArray(options.dbPaths) ? options.dbPaths : paths.dbPaths;
   const readDbRows = options.readDbRows || readQoderCnDbRows;
   const sinceMs = options.sinceMs;
@@ -693,7 +917,7 @@ async function collectQoderCnRows(options = {}) {
     const source = sourceId(dbPath);
     const dbRows = await readDbRows(dbPath, { ...options, sinceMs });
     for (const dbRow of dbRows) {
-      const row = normalizeQoderCnDbRow(dbRow, source);
+      const row = normalizeQoderCnDbRow(dbRow, source, clientId);
       if (row) rows.push(row);
     }
   }
@@ -703,20 +927,26 @@ async function collectQoderCnRows(options = {}) {
   return [...unique.values()];
 }
 
-function buildTokscaleJson(startMs, rows, pricingByModel, includeUndated = false) {
+function buildTokscaleJson(startMs, rows, pricingByModel, includeUndated = false, clientId = 'qodercn') {
+  const client = normalizeQoderClientId(clientId, 'qodercn');
   const grouped = new Map();
   for (const row of rows) {
     // Mirrors promaUsage: dated rows must fall inside the window, undated rows
     // count only for allTime (includeUndated) — never for today/month.
     if (startMs && (row.createdAt ? row.createdAt < startMs : !includeUndated)) continue;
     const key = `${row.sessionId}\0${row.model}`;
-    if (!grouped.has(key)) grouped.set(key, { ...row, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, messages: 0, startedAt: 0, lastUsedAt: 0, cost: 0 });
+    if (!grouped.has(key)) grouped.set(key, { ...row, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, messages: 0, credits: 0, startedAt: 0, lastUsedAt: 0, cost: 0 });
     const group = grouped.get(key);
     group.input += row.input;
     group.output += row.output;
     group.cacheRead += row.cacheRead;
     group.cacheWrite += row.cacheWrite;
     group.messages += row.messages;
+    // Only the transcript parser sets `credits`; a SQLite row omits the key, so
+    // a mixed-source group sums the transcript share and nothing else. That is
+    // correct rather than a gap — the databases hold no credit meter to add.
+    const credits = Number(row.credits);
+    if (Number.isFinite(credits) && credits > 0) group.credits += credits;
     const cost = estimatedQoderCnRowCost(row, pricingByModel);
     group.cost += cost === null ? 0 : cost;
     if (row.createdAt && (!group.startedAt || row.createdAt < group.startedAt)) group.startedAt = row.createdAt;
@@ -724,9 +954,9 @@ function buildTokscaleJson(startMs, rows, pricingByModel, includeUndated = false
   }
 
   const entries = [...grouped.values()].map((row) => ({
-    client: 'qodercn', mergedClients: null, sessionId: row.sessionId, model: row.model, provider: 'qodercn',
+    client, mergedClients: null, sessionId: row.sessionId, model: row.model, provider: client,
     input: row.input, output: row.output, cacheRead: row.cacheRead, cacheWrite: row.cacheWrite,
-    reasoning: 0, messageCount: row.messages, cost: row.cost,
+    reasoning: 0, messageCount: row.messages, cost: row.cost, credits: row.credits,
     startedAt: row.startedAt ? new Date(row.startedAt).toISOString() : '',
     lastUsedAt: row.lastUsedAt ? new Date(row.lastUsedAt).toISOString() : '',
     projectLabel: row.projectLabel || '', performance: null,
@@ -745,12 +975,13 @@ function buildQoderCnPeriods(options = {}) {
   const now = options.now ? new Date(options.now) : new Date();
   const rows = Array.isArray(options.rows) ? options.rows : [];
   const pricingByModel = options.pricingByModel;
+  const clientId = resolveQoderSiteOptions(options).clientId;
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
   return {
-    today: buildTokscaleJson(todayStart, rows, pricingByModel),
-    month: buildTokscaleJson(monthStart, rows, pricingByModel),
-    allTime: buildTokscaleJson(timestampMs(options.allTimeSince), rows, pricingByModel, true)
+    today: buildTokscaleJson(todayStart, rows, pricingByModel, false, clientId),
+    month: buildTokscaleJson(monthStart, rows, pricingByModel, false, clientId),
+    allTime: buildTokscaleJson(timestampMs(options.allTimeSince), rows, pricingByModel, true, clientId)
   };
 }
 
@@ -762,6 +993,7 @@ function localDateKey(value) {
 }
 
 function buildQoderCnHistoryGraph(options = {}) {
+  const client = resolveQoderSiteOptions(options).clientId;
   const days = new Map();
   for (const row of options.rows || []) {
     const date = localDateKey(row.createdAt);
@@ -770,7 +1002,7 @@ function buildQoderCnHistoryGraph(options = {}) {
     const day = days.get(date);
     let model = day.clients.find((entry) => entry.modelId === row.model);
     if (!model) {
-      model = { client: 'qodercn', modelId: row.model, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: 0, messages: 0 };
+      model = { client, modelId: row.model, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: 0, messages: 0 };
       day.clients.push(model);
     }
     const cost = estimatedQoderCnRowCost(row, options.pricingByModel);
@@ -784,7 +1016,6 @@ function buildQoderCnHistoryGraph(options = {}) {
   return { contributions: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)) };
 }
 
-const QODER_CN_TRANSCRIPTS_PROJECTS_DIR = path.join('.qoder-cn', 'projects');
 const QODER_CN_TRANSCRIPT_MAX_BYTES = 64 * 1024 * 1024;
 const QODER_CN_TRANSCRIPT_MAX_LINE_BYTES = 256 * 1024;
 const QODER_CN_TRANSCRIPT_READ_CHUNK_BYTES = 64 * 1024;
@@ -1005,6 +1236,29 @@ function defineTranscriptIdentity(row, identities) {
   return row;
 }
 
+// The raw upstream session id a row was derived from. Like `sourceIdentities`
+// this is an internal de-duplication aid and stays non-enumerable, so it can
+// never reach the wire or a diagnostics dump as a session identifier.
+//
+// Producers: `normalizeQoderCnMainMessage` (the desktop `main.sqlite` store) and
+// the transcript parser. `normalizeQoderCnDbRow` deliberately does NOT set it —
+// the legacy `local.db` carries an exact `token_info` and must keep its
+// precedence, so "database row with a source session" means "main.sqlite row".
+function defineSourceSession(row, session) {
+  const value = String(session || '').trim();
+  if (!value) return row;
+  Object.defineProperty(row, 'sourceSession', {
+    value,
+    enumerable: false,
+    configurable: true
+  });
+  return row;
+}
+
+function qoderCnRowSourceSession(row) {
+  return typeof row?.sourceSession === 'string' ? row.sourceSession : '';
+}
+
 function processTranscriptLine(line, state) {
   const { diagnostics, buckets, projectLabel, sessionId, sinceMs } = state;
   if (!line) return;
@@ -1028,6 +1282,15 @@ function processTranscriptLine(line, state) {
   // it through state.modelKey.
   const declaredModel = transcriptEventModel(event, message);
   if (declaredModel !== 'unknown') state.modelKey = declaredModel;
+  // The same goes for the session id: it is declared by every record, but only
+  // assistant records become rows. Capture it before the body filter so the
+  // first bucket of the file can already join against the desktop store.
+  // Subagent transcripts declare their *parent* session id (verified on Qoder CN
+  // 0.4.2: all 7 subagent files matched their parent directory), which is the
+  // value `main.sqlite` keys on, so the event field is authoritative and the
+  // path-derived `state.sessionKey` is only a fallback for records without one.
+  const declaredSession = String(event?.sessionId || event?.session_id || '').trim();
+  if (declaredSession) state.rawSession = declaredSession;
   if (!message || typeof message !== 'object' || Array.isArray(message)) {
     diagnostics.ignoredEvents += 1;
     return;
@@ -1066,9 +1329,11 @@ function processTranscriptLine(line, state) {
       modelKey,
       projectLabel,
       sessionId,
+      sourceSession: state.rawSession || state.sessionKey || '',
       input: 0,
       output: 0,
       requests: 0,
+      credits: 0,
       sourceIdentities: new Set()
     };
     // The anchored collector normally supplies the local day start, but the
@@ -1076,10 +1341,27 @@ function processTranscriptLine(line, state) {
     // the event's actual timestamp here; comparing the bucket's noon marker
     // would incorrectly retain early same-day events when sinceMs is inside
     // that day.
+    // Each message's tokens are attributed once per session, not once per
+    // request. `state.cumulativeTokens` is the whole preceding conversation, so
+    // adding it per request made an N-request session cost O(N²): measured on a
+    // real Qoder CN profile on 2026-09-26, one day of 8593 requests summed to
+    // 2.97B tokens where the conversation's actual content is 5.6M — 532x
+    // inflation, and an implied 668K tokens per credit where Qoder's own credit
+    // pricing supports ~10-17K. The counter below advances for out-of-window
+    // events too, so an anchored today-only scan of a session that began last
+    // week bills the context appended today rather than the entire backlog.
+    const newContextTokens = Math.max(0, state.cumulativeTokens - (state.countedTokens || 0));
     if (sinceMs === undefined || timestamp >= sinceMs) {
-      bucket.input += state.cumulativeTokens;
+      bucket.input += newContextTokens;
       bucket.output += messageTokens;
       bucket.requests += 1;
+      // Qoder bills in credits, not tokens. Verified on 2026-09-26 across 5617
+      // usage records in both editions' transcript trees: `input_tokens`,
+      // `output_tokens` and both cache fields are structurally present and
+      // always 0, while `credits` is the provider's own exact per-request meter.
+      // So this is the one Qoder number that is not an estimate, and it has to
+      // survive to the wire even though the token totals beside it cannot.
+      if (Number.isFinite(credits)) bucket.credits += credits;
       if (identity) bucket.sourceIdentities.add(identity);
       diagnostics.recognizedEvents += 1;
       diagnostics.estimated = true;
@@ -1090,11 +1372,15 @@ function processTranscriptLine(line, state) {
     } else {
       diagnostics.ignoredEvents += 1;
     }
+    // Only a request consumes context, so only a request moves the watermark —
+    // and it does so whether or not the row fell inside the window, which is what
+    // keeps a day-scoped scan from re-billing an older session's backlog.
+    state.countedTokens = state.cumulativeTokens + messageTokens;
   } else {
     diagnostics.ignoredEvents += 1;
   }
   // File order is append order = conversation order; the cumulative counter
-  // tracks how much context the next request re-sends. It is intentionally
+  // tracks how much context the session holds at this point. It is intentionally
   // advanced for old events even during an anchored read.
   state.cumulativeTokens += messageTokens;
 }
@@ -1105,9 +1391,22 @@ function transcriptProjectLabel(root, filePath) {
   return normalizeQoderCnProjectLabel(first);
 }
 
-function transcriptSessionId(filePath, dayKey = '') {
+function transcriptSessionId(filePath, dayKey = '', clientId = 'qodercn') {
   const suffix = sourceId(filePath);
-  return `qodercn:transcript:${dayKey || 'session'}:${suffix}`;
+  return `${normalizeQoderClientId(clientId, 'qodercn')}:transcript:${dayKey || 'session'}:${suffix}`;
+}
+
+// The raw upstream session id a transcript file belongs to, derived from its
+// location: a top-level `<session>.jsonl` is named after its session, and a
+// `<session>/subagents/agent-*.jsonl` belongs to the session directory that
+// owns it. Used only as the fallback when the records themselves do not declare
+// `sessionId`, and as the join key that lets `mergeQoderCnRows` recognise a
+// desktop `main.sqlite` session the transcript tree already covers.
+function transcriptRawSessionId(root, filePath) {
+  const parts = path.relative(root, filePath).split(path.sep);
+  const subagents = parts.lastIndexOf('subagents');
+  if (subagents > 0) return parts[subagents - 1];
+  return parts[parts.length - 1].replace(/\.jsonl$/, '');
 }
 
 function dirExistsForQoder(dir) {
@@ -1182,14 +1481,11 @@ function streamTranscriptFile(filePath, stat, state, diagnostics, startedAt, opt
 function collectQoderCnTranscriptRows(options = {}) {
   const homeDir = options.homeDir || os.homedir();
   const sinceMs = typeof options.sinceMs === 'number' ? options.sinceMs : undefined;
-  const paths = options.dataPaths || qoderCnDataPaths({
-    homeDir,
-    platform: options.platform,
-    env: options.env
-  });
+  const paths = options.dataPaths || qoderDataPaths({ ...options, homeDir });
+  const clientId = normalizeQoderClientId(paths.clientId, resolveQoderSiteOptions(options).clientId);
   const roots = Array.isArray(options.transcriptRoots)
     ? options.transcriptRoots
-    : (paths.transcriptRoots || [path.join(homeDir, QODER_CN_TRANSCRIPTS_PROJECTS_DIR)]);
+    : (paths.transcriptRoots || [path.join(homeDir, QODER_SITES[paths.site || 'cn'].profileDirName, 'projects')]);
   const diagnostics = transcriptDiagnostics(options);
   const startedAt = transcriptScanNow(options);
   const buckets = new Map();
@@ -1225,10 +1521,15 @@ function collectQoderCnTranscriptRows(options = {}) {
         const dayHint = relative.split(path.sep).find((part) => /^\d{4}-\d{2}-\d{2}$/.test(part)) || '';
         const state = {
           cumulativeTokens: 0,
+          // Tokens already attributed to a row — as some earlier request's output
+          // or as context billed up to. See `processTranscriptLine`.
+          countedTokens: 0,
           diagnostics,
           buckets,
           projectLabel: transcriptProjectLabel(root, filePath),
-          sessionId: transcriptSessionId(filePath, dayHint),
+          sessionId: transcriptSessionId(filePath, dayHint, clientId),
+          sessionKey: transcriptRawSessionId(root, filePath),
+          rawSession: '',
           sinceMs
         };
         try {
@@ -1257,7 +1558,7 @@ function collectQoderCnTranscriptRows(options = {}) {
       ? QODER_CN_MODEL_DISPLAY_NAMES[bucket.modelKey]
       : bucket.modelKey;
     const sessionSource = bucket.sessionId.split(':').pop();
-    const sessionId = transcriptSessionId(sessionSource, bucket.dayKey);
+    const sessionId = transcriptSessionId(sessionSource, bucket.dayKey, clientId);
     const identity = [...bucket.sourceIdentities][0] || '';
     const identitySuffix = identity
       ? createHash('sha256').update(identity).digest('hex').slice(0, 12)
@@ -1273,9 +1574,14 @@ function collectQoderCnTranscriptRows(options = {}) {
       cacheWrite: 0,
       createdAt,
       messages: bucket.requests,
+      // A genuine 0: an identity-less or non-billable request really did spend
+      // no credit, which is different from a source that never reports credits
+      // (the SQLite adapters, which omit the key entirely).
+      credits: bucket.credits,
       estimated: true
     };
     defineTranscriptIdentity(row, [...bucket.sourceIdentities]);
+    defineSourceSession(row, bucket.sourceSession);
     rows.push(row);
   }
   diagnostics.source = rows.length > 0 ? 'transcript' : 'none';
@@ -1297,20 +1603,58 @@ function qoderCnRowFallbackKey(row) {
 // request identity; when an older transcript has no identity, use a documented
 // same-day/model/project precedence instead of silently concatenating a likely
 // duplicate. Rows from non-overlapping buckets remain additive.
+//
+// On top of that per-request rule sits a per-session rule for the desktop
+// `main.sqlite` store. It holds the desktop UI's own copy of a conversation and
+// carries no usage columns at all, so its rows are pure content estimates —
+// while the transcript tree holds the agent's append-only log for the very same
+// session, estimated the same way but also covering CLI-only sessions and
+// subagent runs. Verified on Qoder CN 0.4.2 (2026-09-26): every one of the 7
+// `chat_sessions` rows appears as a transcript session, against 15 transcript
+// sessions overall, i.e. the desktop store is a strict subset. The two sources
+// share the raw session id but have disjoint internal identities, so the
+// request-level dedup below cannot see the overlap and would bill it twice. A
+// main row whose session the transcript tree covers is therefore dropped, and
+// the transcript estimate wins. Legacy `local.db` rows are exempt because they
+// carry an exact `token_info`; they are also the only database rows without a
+// `sourceSession`, which is what makes the two sources distinguishable here.
+//
+// Two fail-open edges are accepted deliberately: a transcript scan truncated by
+// its file/byte/duration budget reports fewer covered sessions, and an anchored
+// today-only scan compares today's rows on both sides, so a message whose two
+// timestamps straddle local midnight could survive one tick. Both over-count by
+// at most a message and are corrected by the next full scan.
 function mergeQoderCnRows(dbRows = [], transcriptRows = [], diagnostics = null, options = {}) {
   const databaseRows = Array.isArray(dbRows) ? dbRows : [];
   const transcript = Array.isArray(transcriptRows) ? transcriptRows : [];
+  const transcriptSessions = new Set();
+  for (const row of transcript) {
+    const session = qoderCnRowSourceSession(row);
+    if (session) transcriptSessions.add(session);
+  }
+  let suppressedMainRows = 0;
+  const effectiveDatabaseRows = transcriptSessions.size === 0
+    ? databaseRows
+    : databaseRows.filter((row) => {
+      const session = qoderCnRowSourceSession(row);
+      if (!session || !transcriptSessions.has(session)) return true;
+      suppressedMainRows += 1;
+      return false;
+    });
+  const mainContributed = effectiveDatabaseRows.some((row) => qoderCnRowSourceSession(row) !== '');
   const databaseSources = options.databaseSources && typeof options.databaseSources === 'object'
     ? [
       ...(options.databaseSources.legacy ? ['sqlite'] : []),
-      ...(options.databaseSources.main ? ['main-sqlite'] : [])
+      // A caller reports `main` when it *read* main rows; the source only counts
+      // as used when a row survived the transcript suppression above.
+      ...(options.databaseSources.main && mainContributed ? ['main-sqlite'] : [])
     ]
-    : (databaseRows.length > 0 ? ['sqlite'] : []);
-  const merged = [...databaseRows];
+    : (effectiveDatabaseRows.length > 0 ? ['sqlite'] : []);
+  const merged = [...effectiveDatabaseRows];
   const identities = new Set(merged.flatMap(qoderCnRowIdentities));
   const fallbackKeys = new Set(merged.map(qoderCnRowFallbackKey));
   const databaseFallbackKeysWithoutIdentity = new Set(
-    databaseRows
+    effectiveDatabaseRows
       .filter((row) => qoderCnRowIdentities(row).length === 0)
       .map(qoderCnRowFallbackKey)
   );
@@ -1335,9 +1679,11 @@ function mergeQoderCnRows(dbRows = [], transcriptRows = [], diagnostics = null, 
   }
   if (diagnostics && typeof diagnostics === 'object') {
     diagnostics.duplicateRows = Number(diagnostics.duplicateRows || 0) + duplicates;
+    diagnostics.suppressedMainRows = Number(diagnostics.suppressedMainRows || 0) + suppressedMainRows;
     const transcriptUsed = acceptedTranscriptRows.length > 0;
+    const databaseUsed = effectiveDatabaseRows.length > 0;
     diagnostics.source = merged.length > 0
-      ? (databaseRows.length > 0 && transcriptUsed ? 'sqlite+transcript' : databaseRows.length > 0 ? 'sqlite' : 'transcript')
+      ? (databaseUsed && transcriptUsed ? 'sqlite+transcript' : databaseUsed ? 'sqlite' : 'transcript')
       : 'none';
     diagnostics.usedSources = [
       ...databaseSources,
@@ -1352,6 +1698,11 @@ module.exports = {
   QODER_CN_SQLITE_BACKEND_UNAVAILABLE,
   QODER_CN_TRANSCRIPT_BUDGET_CODES,
   QODER_CN_MODEL_DISPLAY_NAMES,
+  QODER_SITES,
+  QODER_SITE_IDS,
+  QODER_SITE_BY_CLIENT_ID,
+  QODER_CLIENT_IDS,
+  SHARED_QODER_MAIN_BUNDLE_IDS,
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
   collectQoderCnMainRows,
@@ -1361,11 +1712,17 @@ module.exports = {
   mergeQoderCnRows,
   normalizeQoderCnMainMessage,
   normalizeQoderCnDbRow,
+  normalizeQoderClientId,
+  normalizeQoderSite,
   qoderCnDataPaths,
   qoderCnSourceFingerprint,
+  qoderDataPaths,
+  qoderSourceFingerprint,
   readQoderCnMainDbRows,
   readQoderCnDbRows,
   resolveQoderCnPricing,
+  resolveQoderSiteOptions,
   resetQoderCnPricingCache,
+  selectQoderMainDbPaths,
   resetQoderCnChatSessionProbe() { qoderCnChatSessionTableCache.clear(); }
 };

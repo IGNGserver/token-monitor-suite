@@ -182,3 +182,74 @@ test('collectQoderCnEvidence reports a corrupt SQLite source as FAIL', async () 
   assert.equal(serialized.includes(dbPath), false, 'main database paths must not be emitted');
   assert.equal(serialized.includes('private answer'), false, 'main database content must not be emitted');
 });
+
+(sqlite ? test : test.skip)('collectQoderCnEvidence selects one main.sqlite and reports transcript suppression', async (t) => {
+  const home = temporaryHome();
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const appSupport = path.join(home, '.config');
+  const sessionId = 'cccccccc-1111-2222-3333-444444444444';
+
+  // A current install plus the stale bundle directory an in-place upgrade can
+  // leave behind. Both are readable; only the current one may be billed.
+  const mainDbPaths = ['com.qodercn.app.stable', 'com.qoder.app.stable'].map((bundleId) => {
+    const dir = path.join(appSupport, bundleId);
+    fs.mkdirSync(dir, { recursive: true });
+    const dbPath = path.join(dir, 'main.sqlite');
+    const database = new sqlite.DatabaseSync(dbPath);
+    database.exec(`CREATE TABLE chat_sessions (session_id TEXT PRIMARY KEY, model TEXT);
+      CREATE TABLE chat_session_messages (
+        session_id TEXT NOT NULL, message_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+        payload_json TEXT NOT NULL, status TEXT NOT NULL, source TEXT NOT NULL,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );`);
+    database.prepare('INSERT INTO chat_sessions (session_id, model) VALUES (?, ?)').run(sessionId, 'qfmodel');
+    const timestamp = Date.parse('2026-09-03T10:00:00.000Z');
+    database.prepare(`INSERT INTO chat_session_messages
+      (session_id, message_id, sequence, payload_json, status, source, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'completed', 'local', ?, ?)`)
+      .run(sessionId, 'a1', 1, JSON.stringify({
+        role: 'assistant',
+        text: 'private answer',
+        timestamp: new Date(timestamp).toISOString()
+      }), timestamp, timestamp);
+    database.close();
+    return dbPath;
+  });
+  // The CN profile footprint is what makes the shared bundle id attributable.
+  fs.mkdirSync(path.join(home, '.qoder-cn'), { recursive: true });
+
+  // The transcript tree covers the same session, so the desktop copy must not be
+  // billed on top of it.
+  const projects = path.join(home, '.qoder-cn', 'projects', 'private-project');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(path.join(projects, `${sessionId}.jsonl`), `${JSON.stringify({
+    type: 'assistant',
+    sessionId,
+    uuid: 'private-request-id',
+    timestamp: '2026-09-03T10:00:00Z',
+    message: { role: 'assistant', content: 'private transcript content', model: 'qfmodel' }
+  })}\n`);
+
+  const evidence = await collectQoderCnEvidence({
+    homeDir: home,
+    platform: 'linux',
+    env: {},
+    requireData: true,
+    now: '2026-09-03T12:00:00.000Z'
+  });
+
+  assert.equal(evidence.status, 'PASS');
+  const mainDb = evidence.qoderCn.sources.mainDb;
+  assert.deepEqual(mainDb.map((candidate) => candidate.selected), [true, false]);
+  assert.deepEqual(mainDb.map((candidate) => candidate.rows), [1, 1], 'both copies are still probed');
+  assert.equal(evidence.qoderCn.merge.mainDbRows, 1, 'only the selected copy is billed');
+  assert.equal(evidence.qoderCn.merge.suppressedMainRows, 1, 'the transcript tree covers that session');
+  assert.equal(evidence.qoderCn.merge.transcriptRows, 1);
+  assert.equal(evidence.qoderCn.merge.mergedRows, 1);
+  assert.deepEqual(evidence.qoderCn.merge.usedSources, ['transcript']);
+  const serialized = JSON.stringify(evidence);
+  for (const dbPath of mainDbPaths) {
+    assert.equal(serialized.includes(dbPath), false, 'main database paths must not be emitted');
+  }
+  assert.equal(serialized.includes(sessionId), false, 'session ids must not be emitted');
+});

@@ -7,6 +7,9 @@ const { REASONIX_CLIENT } = require('./reasonixPaths');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./reasonixSessionGuard');
 const { canonicalProjectKey, deterministicProjectLabel } = require('./projectKey');
 const { normalizeSyncUploadIntervalMs, staleAfterMsForSyncUpload } = require('./syncUploadInterval');
+// Only for the client-id allowlist on the per-client Qoder diagnostics map: a
+// device record must not be able to invent arbitrary keys there.
+const { QODER_CLIENT_IDS } = require('./qoderCnUsage');
 const TOKEN_KEYS = ['totalTokens', 'total_tokens', 'totalTokenCount', 'total_token_count', 'tokens', 'tokenCount', 'token_count'];
 // Additive components for a token total. `reasoning` is deliberately excluded for ordinary clients:
 // OpenAI/Codex report reasoning_output_tokens WITHIN output_tokens (tokscale's `output` already
@@ -22,6 +25,11 @@ const TOKEN_COMPONENT_KEYS = [
   'totalInput', 'totalOutput', 'totalCacheRead', 'totalCacheWrite'
 ];
 const COST_KEYS = ['costUsd', 'cost_usd', 'costUSD', 'cost', 'totalCost', 'total_cost'];
+// Qoder's own credit meter, reported per request by its transcripts. It is a
+// provider-published amount in a currency of its own, not a USD cost, so it gets
+// its own per-client map rather than folding into `costUsd`/`clientCosts` — and
+// unlike every Qoder token total it is exact, never estimated.
+const CREDITS_KEYS = ['credits', 'totalCredits', 'total_credits'];
 const MESSAGE_COUNT_KEYS = ['messageCount', 'message_count', 'messages', 'totalMessages', 'total_messages'];
 const SESSION_ID_KEYS = ['sessionId', 'session_id', 'session', 'conversationId', 'conversation_id', 'threadId', 'thread_id'];
 const INPUT_TOKEN_KEYS = ['input', 'inputTokens', 'input_tokens', 'promptTokens', 'prompt_tokens', 'totalInput'];
@@ -153,6 +161,20 @@ function emptyPeriod() {
     timedDurationMs: 0,
     clients: {},
     clientCosts: {},
+    // Provider-published credit consumption, keyed by client. Only a client whose
+    // own source reports credits appears here, so an absent client means "this
+    // tool does not meter in credits" rather than zero. Kept as a raw per-client
+    // sum for the same reason costUsd is: credits have no exchange rate to divide
+    // by, and a sum is what lets the anchored delta and the Hub aggregation
+    // treat it additively.
+    clientCredits: {},
+    // Which clients contributed content-estimated token totals. The period-level
+    // `estimated` flag says "at least one row here was estimated", which on a
+    // machine tracking Claude and Qoder would brand the whole period — and every
+    // client in it — as a guess. Sparse and boolean: a client is present only
+    // when some of its tokens were estimated, and absent when its totals came
+    // from exact provider billing.
+    clientEstimated: {},
     clientCacheReads: {},
     clientCacheWrites: {},
     clientOutputs: {},
@@ -165,6 +187,10 @@ function emptyPeriod() {
     modelUnclassifiedTokens: {},
     clientModels: {},
     clientModelCosts: {},
+    // Credits down to the client+model grain, so a range query and the event
+    // ledger can both carry the exact figure without the per-client total having
+    // to be split across models it cannot attribute.
+    clientModelCredits: {},
     projects: Object.create(null),
     sessions: {}
   };
@@ -208,6 +234,12 @@ function normalizeClientName(value, options = {}) {
   if (raw.includes('workbuddy')) return 'workbuddy';
   if (raw.includes('proma')) return 'proma';
   if (raw.includes('qodercn') || raw === 'qoder-cn' || raw === 'qoder cn') return 'qodercn';
+  // Must follow the `qodercn` rule above: every CN spelling contains "qoder", so
+  // a substring test here would silently bill China-site usage to the
+  // international client. tokscale has no Qoder entry, so these rows only ever
+  // come from the project's own per-site adapter — the branch exists so that its
+  // alternate spellings fold to one id instead of leaking through the slug rule.
+  if (raw.includes('qoder')) return 'qoder';
   if (raw.includes('reasonix')) return 'reasonix';
   // Must precede the generic `opencode` test below: OpenCodeReview is a distinct
   // tokscale client (~/.opencodereview/sessions) whose name merely contains
@@ -467,6 +499,12 @@ function emptySession(client, id) {
     projectLabel: '',
     models: {},
     modelCosts: {},
+    // Session-level credits, mirroring costUsd/modelCosts. The Qoder adapter
+    // groups each row by session and model before this sees it, so a session's
+    // credit total is the sum of its own requests — not the client's total split
+    // across its sessions, which is the allocation this must never become.
+    credits: 0,
+    modelCredits: {},
     providers: {}
   };
 }
@@ -504,6 +542,11 @@ function mergeSession(target, source) {
     const key = normalizeModelNameForClient(model, target.client);
     if (key) target.modelCosts[key] = mapNumber(target.modelCosts, key) + asNumber(cost);
   }
+  target.credits += asNumber(source.credits);
+  for (const [model, credits] of Object.entries(source.modelCredits || {})) {
+    const key = normalizeModelNameForClient(model, target.client);
+    if (key) target.modelCredits[key] = mapNumber(target.modelCredits, key) + asNumber(credits);
+  }
   for (const [provider, tokens] of Object.entries(source.providers || {})) {
     const key = normalizeProviderName(provider);
     if (key) target.providers[key] = mapNumber(target.providers, key) + Math.max(0, Math.round(asNumber(tokens)));
@@ -540,6 +583,7 @@ function sessionFromRow(row) {
   if (row.estimated === true) session.estimated = true;
   session.totalTokens = Math.max(0, Math.round(tokenValueForClient(row, client)));
   session.costUsd = costValue(row);
+  session.credits = Math.max(0, firstNumber(row, CREDITS_KEYS));
   session.messageCount = Math.max(0, Math.round(firstNumber(row, MESSAGE_COUNT_KEYS)));
   Object.assign(session, sessionTokenComponents(row));
   session.startedAt = normalizeIsoTimestamp(firstString(row, STARTED_AT_KEYS));
@@ -550,6 +594,7 @@ function sessionFromRow(row) {
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   if (model && session.totalTokens > 0) session.models[model] = mapNumber(session.models, model) + session.totalTokens;
   if (model && session.costUsd > 0) session.modelCosts[model] = mapNumber(session.modelCosts, model) + session.costUsd;
+  if (model && session.credits > 0) session.modelCredits[model] = mapNumber(session.modelCredits, model) + session.credits;
   const provider = normalizeProviderName(row.provider);
   if (provider && session.totalTokens > 0) session.providers[provider] = mapNumber(session.providers, provider) + session.totalTokens;
   return session;
@@ -568,6 +613,7 @@ function normalizeSession(input, fallbackKey) {
   const componentTotal = components.inputTokens + components.outputTokens + components.cacheReadTokens + components.cacheWriteTokens; // reasoning is a subset of output — see TOKEN_COMPONENT_KEYS
   session.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? input.tokens ?? componentTotal)));
   session.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
+  session.credits = Math.max(0, asNumber(input.credits ?? 0));
   session.messageCount = Math.max(0, Math.round(firstNumber(input, MESSAGE_COUNT_KEYS)));
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
@@ -583,6 +629,12 @@ function normalizeSession(input, fallbackKey) {
     for (const [model, value] of Object.entries(input.modelCosts)) {
       const key = normalizeModelNameForClient(model, client);
       if (key) session.modelCosts[key] = mapNumber(session.modelCosts, key) + asNumber(value);
+    }
+  }
+  if (input.modelCredits && typeof input.modelCredits === 'object') {
+    for (const [model, value] of Object.entries(input.modelCredits)) {
+      const key = normalizeModelNameForClient(model, client);
+      if (key && asNumber(value) > 0) session.modelCredits[key] = mapNumber(session.modelCredits, key) + asNumber(value);
     }
   }
   if (input.providers && typeof input.providers === 'object') {
@@ -673,6 +725,22 @@ function normalizePeriod(input, options = {}) {
       if (key) period.clientCosts[key] = mapNumber(period.clientCosts, key) + asNumber(value);
     }
   }
+  if (input.clientCredits && typeof input.clientCredits === 'object') {
+    for (const [client, value] of Object.entries(input.clientCredits)) {
+      const key = normalizeClientName(client);
+      // Never negative: a credit total is a consumption amount, and a device
+      // record is untrusted input that must not be able to subtract usage.
+      if (key && asNumber(value) > 0) period.clientCredits[key] = mapNumber(period.clientCredits, key) + asNumber(value);
+    }
+  }
+  if (input.clientEstimated && typeof input.clientEstimated === 'object') {
+    for (const [client, value] of Object.entries(input.clientEstimated)) {
+      const key = normalizeClientName(client);
+      // Strict `=== true`: a device record must not be able to smuggle a truthy
+      // string or object into a flag the UI renders as a provenance marker.
+      if (key && value === true) period.clientEstimated[key] = true;
+    }
+  }
   if (input.models && typeof input.models === 'object') {
     for (const [model, value] of Object.entries(input.models)) {
       const key = normalizeModelName(model);
@@ -728,6 +796,18 @@ function normalizePeriod(input, options = {}) {
       }
     }
   }
+  if (input.clientModelCredits && typeof input.clientModelCredits === 'object') {
+    for (const [client, models] of Object.entries(input.clientModelCredits)) {
+      const clientKey = normalizeClientName(client);
+      if (!clientKey || !models || typeof models !== 'object') continue;
+      for (const [model, value] of Object.entries(models)) {
+        const modelKey = normalizeModelNameForClient(model, clientKey);
+        if (!modelKey || asNumber(value) <= 0) continue;
+        const modelsForClient = ensureNestedMap(period.clientModelCredits, clientKey);
+        modelsForClient[modelKey] = mapNumber(modelsForClient, modelKey) + asNumber(value);
+      }
+    }
+  }
   if (input.sessions && typeof input.sessions === 'object') {
     for (const [key, value] of Object.entries(input.sessions)) {
       const session = normalizeSession(value, key);
@@ -760,6 +840,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   if (row?.estimated === true) period.estimated = true;
   const tokens = tokenValueForClient(row, client);
   const cost = costValue(row);
+  const credits = Math.max(0, firstNumber(row, CREDITS_KEYS));
   const cacheRead = Math.max(0, Math.round(firstNumber(row, CACHE_READ_TOKEN_KEYS)));
   const cacheWrite = Math.max(0, Math.round(firstNumber(row, CACHE_WRITE_TOKEN_KEYS)));
   const output = Math.max(0, Math.round(outputValueForClient(row, client)));
@@ -782,11 +863,20 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   period.timedDurationMs += timedDurationMs;
   if (client && tokens > 0) {
     period.clients[client] = mapNumber(period.clients, client) + Math.round(tokens);
+    // Gated on the same `tokens > 0` as the client total: a client with no
+    // tokens of its own has nothing for this flag to qualify.
+    if (row?.estimated === true) period.clientEstimated[client] = true;
     if (cacheRead > 0) period.clientCacheReads[client] = mapNumber(period.clientCacheReads, client) + cacheRead;
     if (cacheWrite > 0) period.clientCacheWrites[client] = mapNumber(period.clientCacheWrites, client) + cacheWrite;
     if (output > 0) period.clientOutputs[client] = mapNumber(period.clientOutputs, client) + output;
   }
   if (client && cost > 0) period.clientCosts[client] = mapNumber(period.clientCosts, client) + cost;
+  // Deliberately not folded into `costUsd`: a credit is Qoder's own unit with no
+  // published token or USD conversion, so adding it to a dollar total would
+  // invent an exchange rate. A 0 is also not recorded — an entry that reports no
+  // credit and one that reports zero credits both leave the client absent, which
+  // is what lets the map stay sparse across dozens of non-credit clients.
+  if (client && credits > 0) period.clientCredits[client] = mapNumber(period.clientCredits, client) + credits;
   if (model && tokens > 0) {
     period.models[model] = mapNumber(period.models, model) + Math.round(tokens);
     if (cacheRead > 0) period.modelCacheReads[model] = mapNumber(period.modelCacheReads, model) + cacheRead;
@@ -801,6 +891,10 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   if (client && model && cost > 0) {
     const modelsForClient = ensureNestedMap(period.clientModelCosts, client);
     modelsForClient[model] = mapNumber(modelsForClient, model) + cost;
+  }
+  if (client && model && credits > 0) {
+    const modelsForClient = ensureNestedMap(period.clientModelCredits, client);
+    modelsForClient[model] = mapNumber(modelsForClient, model) + credits;
   }
   const session = sessionFromRow(row);
   if (session) addSession(period, session);
@@ -940,6 +1034,22 @@ function normalizeQoderCnDiagnostics(input) {
   return result;
 }
 
+// Per-client diagnostics for the locally parsed Qoder sites. `qoderCnDiagnostics`
+// stays on the wire as the CN alias so existing consumers keep working, but a
+// machine that runs both installers has to be read through this map — one field
+// can only describe one site. Unknown keys are dropped rather than coerced, so
+// the map can never grow past the tracked Qoder client ids.
+function normalizeQoderDiagnosticsMap(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const result = {};
+  for (const clientId of QODER_CLIENT_IDS) {
+    if (!hasOwn(input, clientId)) continue;
+    const diagnostics = normalizeQoderCnDiagnostics(input[clientId]);
+    if (diagnostics) result[clientId] = diagnostics;
+  }
+  return Object.keys(result).length > 0 ? result : null;
+}
+
 function normalizeDeviceOsVersion(value) {
   return String(value || '').trim().slice(0, 128);
 }
@@ -1000,6 +1110,10 @@ function normalizeDeviceRecord(record) {
     const diagnostics = normalizeQoderCnDiagnostics(record.qoderCnDiagnostics);
     if (diagnostics) normalized.qoderCnDiagnostics = diagnostics;
   }
+  if (hasOwn(record, 'qoderDiagnostics')) {
+    const diagnostics = normalizeQoderDiagnosticsMap(record.qoderDiagnostics);
+    if (diagnostics) normalized.qoderDiagnostics = diagnostics;
+  }
   for (const periodName of PERIODS) {
     normalized.periods[periodName] = normalizePeriod(record[periodName] || record.periods?.[periodName], {
       projectsEnabled: normalized.projectsEnabled !== false
@@ -1045,6 +1159,15 @@ function addClientModelUsage(target, source, client) {
     target.modelCosts[modelKey] = mapNumber(target.modelCosts, modelKey) + cost;
     const targetCosts = ensureNestedMap(target.clientModelCosts, client);
     targetCosts[modelKey] = mapNumber(targetCosts, modelKey) + cost;
+  }
+  // Restored along the client×model axis only. There is no model-level credit
+  // map to roll into: credits are a per-provider meter, so a model row shared by
+  // Qoder and a USD-billed client would have no meaningful credit total.
+  for (const [model, credits] of Object.entries(source.clientModelCredits?.[client] || {})) {
+    const modelKey = normalizeModelNameForClient(model, client);
+    if (!modelKey) continue;
+    const targetCredits = ensureNestedMap(target.clientModelCredits, client);
+    targetCredits[modelKey] = mapNumber(targetCredits, modelKey) + credits;
   }
 }
 
@@ -1113,11 +1236,16 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
       const client = normalizeClientName(rawClient);
       if (!client || active.has(client) || hasOwn(target.clients, client)) continue;
       const cost = mapNumber(source.clientCosts, client);
+      const credits = mapNumber(source.clientCredits, client);
       target.totalTokens += tokens;
       target.costUsd += cost;
       target.clients[client] = tokens;
       preservedClients.add(client);
       if (cost > 0) target.clientCosts[client] = cost;
+      if (credits > 0) target.clientCredits[client] = credits;
+      // A restored client keeps its provenance label, or an untracked Qoder
+      // would come back looking exact after one disabled toggle.
+      if (source.clientEstimated?.[client] === true) target.clientEstimated[client] = true;
       const cacheRead = Math.min(tokens, mapNumber(source.clientCacheReads, client));
       const cacheWrite = Math.min(tokens - cacheRead, mapNumber(source.clientCacheWrites, client));
       const output = Math.min(tokens - cacheRead - cacheWrite, mapNumber(source.clientOutputs, client));
@@ -1395,6 +1523,20 @@ function addPeriodInto(target, source) {
     const client = normalizeClientName(rawClient);
     if (client) target.clientCosts[client] = mapNumber(target.clientCosts, client) + cost;
   }
+  // Credits merge additively exactly like costs. That is what lets an anchored
+  // watch tick derive month/allTime from the persisted anchor without special
+  // casing: `deltaValue` walks this map generically (base + fresh - anchor).
+  for (const [rawClient, credits] of Object.entries(source.clientCredits)) {
+    const client = normalizeClientName(rawClient);
+    if (client) target.clientCredits[client] = mapNumber(target.clientCredits, client) + credits;
+  }
+  // OR-semantics, unlike the sums around it: if either side estimated this
+  // client's tokens, the combined total is not exact. The honest direction is
+  // the only one that cannot under-report.
+  for (const [rawClient, estimated] of Object.entries(source.clientEstimated)) {
+    const client = normalizeClientName(rawClient);
+    if (client && estimated === true) target.clientEstimated[client] = true;
+  }
   for (const [rawModel, tokens] of Object.entries(source.models)) {
     const model = normalizeModelName(rawModel);
     if (!model) continue;
@@ -1428,6 +1570,15 @@ function addPeriodInto(target, source) {
     for (const [rawModel, cost] of Object.entries(models)) {
       const model = normalizeModelNameForClient(rawModel, client);
       if (model) targetCosts[model] = mapNumber(targetCosts, model) + cost;
+    }
+  }
+  for (const [rawClient, models] of Object.entries(source.clientModelCredits)) {
+    const client = normalizeClientName(rawClient);
+    if (!client || !models || typeof models !== 'object') continue;
+    const targetCredits = ensureNestedMap(target.clientModelCredits, client);
+    for (const [rawModel, credits] of Object.entries(models)) {
+      const model = normalizeModelNameForClient(rawModel, client);
+      if (model) targetCredits[model] = mapNumber(targetCredits, model) + credits;
     }
   }
   for (const [key, project] of Object.entries(source.projects || {})) addProjectInto(target.projects, key, project);
@@ -1537,6 +1688,12 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
     for (const [client, cost] of Object.entries(aggregate.periods[periodName].clientCosts)) {
       aggregate.periods[periodName].clientCosts[client] = Number(cost.toFixed(6));
     }
+    // Same 6-dp trim as costs: a per-request credit is ~1e-9 granularity, but a
+    // month of thousands of them sums to a float whose trailing digits are
+    // accumulation noise, not measurement.
+    for (const [client, credits] of Object.entries(aggregate.periods[periodName].clientCredits)) {
+      aggregate.periods[periodName].clientCredits[client] = Number(credits.toFixed(6));
+    }
     for (const [model, cost] of Object.entries(aggregate.periods[periodName].modelCosts)) {
       aggregate.periods[periodName].modelCosts[model] = Number(cost.toFixed(6));
     }
@@ -1545,13 +1702,22 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
         models[model] = Number(cost.toFixed(6));
       }
     }
+    for (const models of Object.values(aggregate.periods[periodName].clientModelCredits)) {
+      for (const [model, credits] of Object.entries(models)) {
+        models[model] = Number(credits.toFixed(6));
+      }
+    }
     for (const project of Object.values(aggregate.periods[periodName].projects)) {
       project.costUsd = Number(project.costUsd.toFixed(6));
     }
     for (const session of Object.values(aggregate.periods[periodName].sessions)) {
       session.costUsd = Number(session.costUsd.toFixed(6));
+      session.credits = Number(asNumber(session.credits).toFixed(6));
       for (const [model, cost] of Object.entries(session.modelCosts)) {
         session.modelCosts[model] = Number(cost.toFixed(6));
+      }
+      for (const [model, credits] of Object.entries(session.modelCredits || {})) {
+        session.modelCredits[model] = Number(credits.toFixed(6));
       }
     }
   }

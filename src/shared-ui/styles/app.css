@@ -1372,6 +1372,15 @@ html[data-theme="dark"] .heat.heat-cost.lvl-4 { fill: rgba(251, 191, 36, 0.92); 
   text-transform: uppercase;
 }
 .usage-detail-label-spaced { margin-top: 18px; }
+/* Provenance note under a tool's token mix. Not uppercase like
+   `.usage-detail-label`: this is a sentence a reader has to parse, not a
+   heading, and the `~` on the figures above it does not explain itself. */
+.usage-measurement-note {
+  margin: -2px 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
 .token-mix {
   display: grid;
   gap: 9px;

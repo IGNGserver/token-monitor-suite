@@ -154,6 +154,7 @@ function emptyUsageRange() {
     costUsd: 0,
     clients: {},
     clientCosts: {},
+    clientCredits: {},
     models: {},
     modelCosts: {},
     clientModels: {},
@@ -492,8 +493,8 @@ function createRepository(pool) {
       input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
       message_count_delta, price_input_per_million, price_output_per_million,
       price_cache_read_per_million, price_cache_write_per_million, pricing_source,
-      pricing_snapshot_at, cost_usd
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+      pricing_snapshot_at, cost_usd, credits
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
     for (const event of events) {
       await executor.execute(sql, [
         deviceId, event.client, event.sessionId, event.model, event.provider, event.projectId,
@@ -501,7 +502,7 @@ function createRepository(pool) {
         event.cacheReadTokens, event.cacheWriteTokens, event.reasoningTokens, event.messageCount,
         event.priceInputPerMillion, event.priceOutputPerMillion, event.priceCacheReadPerMillion,
         event.priceCacheWritePerMillion, event.pricingSource, event.pricingSnapshotAt ? date(event.pricingSnapshotAt) : null,
-        event.costUsd
+        event.costUsd, event.credits
       ]);
     }
   }
@@ -599,7 +600,8 @@ function createRepository(pool) {
         client,
         model,
         SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) AS tokens,
-        SUM(cost_usd) AS cost_usd
+        SUM(cost_usd) AS cost_usd,
+        SUM(credits) AS credits
       FROM usage_events
       WHERE recorded_at >= ? AND recorded_at < ?
       GROUP BY client, model
@@ -608,6 +610,7 @@ function createRepository(pool) {
     for (const row of rows) {
       const tokens = Math.round(number(row.tokens));
       const cost = number(row.cost_usd);
+      const credits = number(row.credits);
       const client = safeDynamicKey(row.client);
       const model = safeDynamicKey(row.model);
       result.totalTokens += tokens;
@@ -618,6 +621,14 @@ function createRepository(pool) {
       const clientModelCosts = ensureNestedMap(result.clientModelCosts, client);
       clientModels[model] = mapNumber(clientModels, model) + tokens;
       clientModelCosts[model] = mapNumber(clientModelCosts, model) + cost;
+      // Sparse on purpose, mirroring the live period: a client with no credit
+      // meter is absent from the map, which is not the same statement as zero.
+      // The per-model credit split stays in the ledger rows rather than this
+      // response — no surface consumes it yet, and the range payload shape is a
+      // compatibility boundary.
+      if (credits > 0) {
+        result.clientCredits[client] = mapNumber(result.clientCredits, client) + credits;
+      }
     }
     return result;
   }

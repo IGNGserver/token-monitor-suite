@@ -14,7 +14,7 @@ const CLIENT_LABELS = {
   gemini: 'Gemini', cursor: 'Cursor', opencode: 'OpenCode', openclaw: 'OpenClaw',
   antigravity: 'Antigravity', cline: 'Cline',
   kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot',
-  pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', commandcode: 'Command Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', 'deepseek-harness': 'DeepSeek Harness', 'claude-desktop': 'Claude Desktop',
+  pi: 'Pi', zed: 'Zed', kilocode: 'Kilo Code', micode: 'MiMo Code', commandcode: 'Command Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qoder: 'Qoder', qodercn: 'Qoder CN', reasonix: 'Reasonix', 'deepseek-harness': 'DeepSeek Harness', 'claude-desktop': 'Claude Desktop',
   // Text labels only: its small image key is used just when the id is in
   // KNOWN_CLIENT_ASSETS (assets uploaded to the Discord app), and a missing
   // asset there is a silent no-op, so new clients degrade to the text label.

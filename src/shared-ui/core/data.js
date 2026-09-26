@@ -519,6 +519,16 @@ export function periodActivityCounts(period = {}) {
   };
 }
 
+// Per-client measurement provenance. Only the client axis carries this: a model
+// or project row can mix an exact client's tokens with an estimated one, so it
+// inherits no label rather than claiming one it cannot support.
+export function clientMeasurementFields(period, client) {
+  return {
+    estimated: period?.clientEstimated?.[client] === true,
+    credits: Number(period?.clientCredits?.[client] || 0) || 0
+  };
+}
+
 export function deviceBreakdownRows(device, periodKey = 'today') {
   const period = device?.periods?.[periodKey] || {};
   const totalTokens = Math.max(0, Number(period.totalTokens || 0));
@@ -539,6 +549,7 @@ export function deviceBreakdownRows(device, periodKey = 'today') {
     }));
     return {
       ...row,
+      ...clientMeasurementFields(period, row.key),
       client: row.key,
       metrics: tokenMetricsForRow(period, 'client', row.key, row.value),
       percent: totalTokens > 0 ? (row.value / totalTokens) * 100 : 0,
@@ -573,7 +584,11 @@ export function toolRows(period) {
   return mapRows(period?.clients, period?.clientCosts, {
     labelFor: clientLabel,
     colorFor: clientColor
-  }).map((row) => ({ ...row, metrics: tokenMetricsForRow(period, 'client', row.key, row.value) }));
+  }).map((row) => ({
+    ...row,
+    ...clientMeasurementFields(period, row.key),
+    metrics: tokenMetricsForRow(period, 'client', row.key, row.value)
+  }));
 }
 
 export function modelRows(period) {

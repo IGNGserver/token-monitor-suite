@@ -4,8 +4,10 @@
 // the app's shared state; anything host-specific goes through transport/.
 
 import {
+  estimatedValue,
   formatCompact,
   formatCost,
+  formatCredits,
   formatNumber
 } from '../core/format.js';
 import {
@@ -69,6 +71,8 @@ export function renderHome() {
   const toolsBody = tools.length
     ? `<div class="stack">${tools.map((row) => {
         const pct = Math.round((row.value / totalTokens) * 100);
+        const credits = formatCredits(row.credits);
+        const creditsText = credits ? ` · ${credits} ${tr('stats.credits')}` : '';
         return `
           <fluent-button appearance="secondary" type="button" class="home-interactive-row" data-jump-view="tool" data-jump-tool="${escapeHtml(row.key)}">
             <div class="row">
@@ -76,11 +80,11 @@ export function renderHome() {
                 ${toolIconHtml(row.key)}
                 <div class="row-copy">
                   <div class="row-name">${escapeHtml(row.name)}</div>
-                  <div class="row-sub">${pct}% · ${formatCost(row.cost, appState().prefs.currency)}</div>
+                  <div class="row-sub">${pct}% · ${escapeHtml(estimatedValue(formatCost(row.cost, appState().prefs.currency), row.estimated))}${creditsText ? escapeHtml(creditsText) : ''}</div>
                 </div>
               </div>
               <div class="row-metrics">
-                <div class="row-value">${formatCompact(row.value)}</div>
+                <div class="row-value">${escapeHtml(estimatedValue(formatCompact(row.value), row.estimated))}</div>
               </div>
             </div>
             <div class="share-meter"><span style="width:${Math.max(2, Math.min(100, pct))}%; background:${row.color}"></span></div>

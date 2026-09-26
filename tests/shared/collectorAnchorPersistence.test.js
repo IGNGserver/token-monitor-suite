@@ -59,6 +59,35 @@ test('configFingerprint handles undefined and empty clients', () => {
   assert.match(c, /\|undefined\|projects:on$/, 'undefined allTimeSince produces string "undefined"');
 });
 
+test('configFingerprint keeps a structured Qoder source key verbatim', () => {
+  // The key qoderSourceFingerprintForClients builds is already an absolute,
+  // per-site fingerprint. Resolving it as a path would fold in the process cwd
+  // and invalidate a persisted anchor on every launch from a different
+  // directory — which is exactly what happened when the site id moved in front
+  // of the historical `db:` prefix this check used to key off.
+  const { qoderSourceFingerprintForClients } = freshCollector();
+  const options = { homeDir: '/home/test', platform: 'linux', env: {} };
+  const cn = qoderSourceFingerprintForClients('qodercn', options);
+  assert.match(cn, /^cn\|db:/, 'the CN key is a structured fingerprint, not a bare path');
+  const fingerprint = configFingerprint('qodercn', '2024-01-01', true, cn);
+  assert.ok(fingerprint.endsWith(`|qoder:${cn}`), 'a structured key must not be path-resolved');
+  assert.equal(fingerprint.includes(process.cwd()), false, 'the fingerprint must not depend on the process cwd');
+
+  // Enabling the international site changes the key, so an anchor computed
+  // without it cannot stand in for a tick that does read it.
+  const both = qoderSourceFingerprintForClients('qodercn,qoder', options);
+  assert.notEqual(both, cn);
+  assert.ok(both.includes('global|db:'), 'each tracked site contributes its own fingerprint');
+  assert.notEqual(configFingerprint('qodercn,qoder', '2024-01-01', true, both), fingerprint);
+
+  // A bare relative path from a caller that has not resolved one yet is still
+  // normalised, so the two spellings cannot both describe the same source.
+  assert.ok(
+    configFingerprint('qodercn', '2024-01-01', true, 'relative/local.db')
+      .endsWith(`|qoder:${path.resolve('relative', 'local.db')}`)
+  );
+});
+
 test('anchored tick with valid anchor runs todayOnly scan and derives month/allTime', async () => {
   const dateKey = localTodayKey();
 

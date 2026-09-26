@@ -13,7 +13,8 @@ const {
   collectQoderCnRows,
   collectQoderCnTranscriptRows,
   mergeQoderCnRows,
-  qoderCnDataPaths
+  qoderCnDataPaths,
+  selectQoderMainDbPaths
 } = require('../src/shared/qoderCnUsage');
 
 const EVIDENCE_SCHEMA_VERSION = 1;
@@ -234,7 +235,14 @@ function dbStatusFromError(error) {
 
 async function collectQoderCnEvidence(options = {}, deps = {}) {
   const fsImpl = deps.fs || fs;
-  const env = { ...process.env, ...(options.env || {}) };
+  // An explicit `options.env` *is* the environment to probe, not a set of
+  // overrides on top of the ambient one. Merging under `process.env` made the
+  // probe unisolatable: the Qoder CN runtime exports QODERCN_CONFIG_DIR into
+  // every child process, so running the suite from inside the app pointed an
+  // "empty machine" fixture at the developer's real profile and reported PASS.
+  // The CLI is unaffected — `main()` always passes `env` (defaulting to
+  // `process.env`), so ambient discovery still works for real operators.
+  const env = options.env || process.env;
   const homeDir = options.homeDir || os.homedir();
   const paths = (deps.qoderCnDataPaths || qoderCnDataPaths)({
     homeDir,
@@ -245,7 +253,7 @@ async function collectQoderCnEvidence(options = {}, deps = {}) {
   const dbCandidates = [];
   const databaseRows = [];
   let dbFailure = null;
-  const inspectDatabase = async (dbPath, { kind, collectRows, sourceKey }) => {
+  const inspectDatabase = async (dbPath, { kind, collectRows, sourceKey, selected }) => {
     const presence = filePresence(dbPath, fsImpl);
     const candidate = {
       kind,
@@ -254,6 +262,10 @@ async function collectQoderCnEvidence(options = {}, deps = {}) {
       sizeBytes: presence.sizeBytes,
       integrity: presence.exists ? quickCheckSqlite(dbPath, deps) : { status: 'not_present', engine: null },
       rows: 0,
+      // Whether the product would actually read this candidate. Reported so a
+      // machine that kept both an old and a current bundle directory is not
+      // mistaken for one with twice the usage.
+      selected,
       status: presence.exists ? 'pending' : 'not_present',
       failureCode: null
     };
@@ -275,7 +287,10 @@ async function collectQoderCnEvidence(options = {}, deps = {}) {
         });
         candidate.rows = rows.length;
         candidate.status = 'ok';
-        databaseRows.push(...rows);
+        // Every candidate is still read and reported — that is the point of the
+        // probe — but only the selected ones feed the merged totals, matching
+        // what the collector would publish.
+        if (selected) databaseRows.push(...rows);
       } catch (error) {
         candidate.status = dbStatusFromError(error);
         candidate.failureCode = safeFailureCode(error?.code, 'QODER_CN_DB_READ_FAILED');
@@ -288,14 +303,19 @@ async function collectQoderCnEvidence(options = {}, deps = {}) {
     await inspectDatabase(dbPath, {
       kind: 'legacy_sqlite',
       collectRows: deps.collectQoderCnRows || collectQoderCnRows,
-      sourceKey: 'dbPaths'
+      sourceKey: 'dbPaths',
+      selected: true
     });
   }
+  // The product resolves the shared bundle id through the site footprint and
+  // reads at most one main.sqlite, so the probe must select the same one.
+  const selectedMainDbPaths = new Set(selectQoderMainDbPaths(paths));
   for (const dbPath of paths.mainDbPaths || []) {
     await inspectDatabase(dbPath, {
       kind: 'main_sqlite',
       collectRows: deps.collectQoderCnMainRows || collectQoderCnMainRows,
-      sourceKey: 'mainDbPaths'
+      sourceKey: 'mainDbPaths',
+      selected: selectedMainDbPaths.has(dbPath)
     });
   }
 
@@ -317,11 +337,12 @@ async function collectQoderCnEvidence(options = {}, deps = {}) {
     Object.assign(transcriptDiagnostics, error?.diagnostics || {});
   }
 
-  const mergeDiagnostics = { source: 'none', usedSources: [], duplicateRows: 0 };
+  const mergeDiagnostics = { source: 'none', usedSources: [], duplicateRows: 0, suppressedMainRows: 0 };
+  const selectedCandidates = dbCandidates.filter((candidate) => candidate.selected !== false);
   const mergedRows = (deps.mergeQoderCnRows || mergeQoderCnRows)(databaseRows, transcriptRows, mergeDiagnostics, {
     databaseSources: {
-      legacy: dbCandidates.some((candidate) => candidate.kind === 'legacy_sqlite' && candidate.rows > 0),
-      main: dbCandidates.some((candidate) => candidate.kind === 'main_sqlite' && candidate.rows > 0)
+      legacy: selectedCandidates.some((candidate) => candidate.kind === 'legacy_sqlite' && candidate.rows > 0),
+      main: selectedCandidates.some((candidate) => candidate.kind === 'main_sqlite' && candidate.rows > 0)
     }
   });
   const now = options.now || new Date().toISOString();
@@ -377,15 +398,19 @@ async function collectQoderCnEvidence(options = {}, deps = {}) {
       },
       merge: {
         dbRows: databaseRows.length,
-        legacyDbRows: dbCandidates
+        legacyDbRows: selectedCandidates
           .filter((candidate) => candidate.kind === 'legacy_sqlite')
           .reduce((total, candidate) => total + candidate.rows, 0),
-        mainDbRows: dbCandidates
+        mainDbRows: selectedCandidates
           .filter((candidate) => candidate.kind === 'main_sqlite')
           .reduce((total, candidate) => total + candidate.rows, 0),
         transcriptRows: transcriptRows.length,
         mergedRows: mergedRows.length,
         duplicateRows: Number(mergeDiagnostics.duplicateRows) || 0,
+        // main.sqlite rows the transcript tree already covers. Non-zero is the
+        // expected steady state on a desktop install: the transcript log is the
+        // more complete source, so the desktop copy must not be billed twice.
+        suppressedMainRows: Number(mergeDiagnostics.suppressedMainRows) || 0,
         source: ['none', 'sqlite', 'transcript', 'sqlite+transcript'].includes(mergeDiagnostics.source)
           ? mergeDiagnostics.source
           : 'none',

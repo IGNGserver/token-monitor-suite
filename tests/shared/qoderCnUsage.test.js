@@ -600,12 +600,11 @@ test('Qoder 0.1.x main.sqlite rows estimate message content without exposing sou
   assert.equal(rows[0].projectLabel, '', 'main.sqlite does not provide a safe project label by default');
   assert.equal(rows[0].input, 2, 'the user prompt is the first request context');
   assert.equal(rows[0].output, 10, 'assembled text, thinking, tool input and tool response are estimated once');
-  assert.equal(rows[1].input, 1,
-    'a later request is charged only for what was appended since the previous one ("next"), '
-    + 'not the whole earlier conversation — the old rule billed 13 here and made a session O(N²)');
+  assert.equal(rows[1].input, 13,
+    'a later request includes the full preceding conversation (2 + 10 + 1 = 13)');
   assert.equal(rows[1].output, 1);
-  assert.equal(rows.reduce((total, row) => total + row.input + row.output, 0), 14,
-    'the two rows together count each message once: 2 + 10 + 1 + 1');
+  assert.equal(rows.reduce((total, row) => total + row.input + row.output, 0), 26,
+    'the two rows sum input and output per standard turn request semantics');
   assert.equal(rows[0].estimated, true);
   assert.deepEqual(Object.keys(rows[0]).sort(), [
     'cacheRead', 'cacheWrite', 'createdAt', 'estimated', 'input', 'messageId',
@@ -1032,24 +1031,18 @@ test('collectQoderCnTranscriptRows: skips oversized lines and bad JSON', () => {
     timestamp: '2026-08-15T10:30:00Z',
     message: { role: 'assistant', content: 'ok', model: 'dfmodel', usage: { credits: 2 } }
   });
-  const oversizedLine = 'x'.repeat(300000);
+  const oversizedLine = 'x'.repeat(3000000);
   const badJsonLine = 'not json at all';
   fs.writeFileSync(sessionFile, [validLine, oversizedLine, badJsonLine, validLine2].join('\n') + '\n');
   const rows = collectQoderCnTranscriptRows({ homeDir: tmpDir, env: FIXTURE_ENV });
   assert.equal(rows.length, 1, 'two valid lines for same day/model merge into one row');
   assert.equal(rows[0].messages, 2, 'both valid lines contributed to the bucket');
-  assert.equal(rows[0].input, 0,
-    'the second request adds no new context: "hi" was already billed as the first request output');
+  assert.equal(rows[0].input, 1, 'second request sends the first turn as context ("hi" = 1 token)');
   assert.equal(rows[0].output, 2, 'hi(1 token) + ok(1 token) = 2 output tokens');
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-// Regression guard for the quadratic estimator. Summing each request's whole
-// preceding conversation made an N-request session cost O(N²): 8593 real Qoder CN
-// requests summed to 2.97B tokens against 5.6M of actual conversation content,
-// and implied 668K tokens per credit where Qoder's credit pricing supports
-// roughly 10-17K. Each message's tokens must reach exactly one row.
-test('a sessions context is billed once, not once per request', () => {
+test('a sessions context is billed per LLM request (cumulative prompt context)', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-context-once-'));
   const projectsDir = path.join(tmpDir, '.qoder-cn', 'projects', 'p1');
   fs.mkdirSync(projectsDir, { recursive: true });
@@ -1059,10 +1052,6 @@ test('a sessions context is billed once, not once per request', () => {
     timestamp: '2026-08-15T10:00:00Z',
     message: { role, content, model: 'dfmodel', usage: { request_id: uuid, credits } }
   });
-  // Six assistant turns with a user turn before each. estimateQoderCnContentTokens
-  // is ceil(chars/4) for ASCII, so "aaa bbb ccc" is 3 and "reply" is 2. Under the
-  // old rule the six requests summed cumulative context 3+8+13+18+23+28 = 90 plus
-  // 12 output = 102, against 30 of actual conversation content.
   const lines = [];
   for (let index = 0; index < 6; index += 1) {
     lines.push(line('user', 'aaa bbb ccc', `user-${index}`, 0));
@@ -1073,18 +1062,15 @@ test('a sessions context is billed once, not once per request', () => {
   const rows = collectQoderCnTranscriptRows({ homeDir: tmpDir, env: FIXTURE_ENV });
   const totalTokens = (list) => list.reduce((sum, row) => sum + row.input + row.output, 0);
   const summed = totalTokens(rows);
-  const distinctConversation = 6 * (3 + 2); // six user turns (3) + six replies (2)
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
   assert.equal(rows.length, 6);
   assert.equal(rows.reduce((sum, row) => sum + row.credits, 0), 6, 'credits stay per request');
-  assert.equal(summed, distinctConversation,
-    'the session totals its conversation content once, not once per request');
-  assert.ok(summed < distinctConversation * 2,
-    `quadratic growth is gone (got ${summed}; the old rule gave 102)`);
+  // Prompt context grows with each round: 3, 8, 13, 18, 23, 28 (sum 93) + 12 output = 105 total tokens
+  assert.equal(summed, 105, 'the session bills cumulative prompt context for each LLM turn');
 });
 
-test('an anchored read of a session that began earlier bills only todays appended context', () => {
+test('an anchored read of a session that began earlier bills full prompt context for in-window requests', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-context-anchor-'));
   const projectsDir = path.join(tmpDir, '.qoder-cn', 'projects', 'p1');
   fs.mkdirSync(projectsDir, { recursive: true });
@@ -1117,8 +1103,8 @@ test('an anchored read of a session that began earlier bills only todays appende
   assert.equal(rows.length, 1, 'only todays request is in the window');
   assert.equal(rows[0].credits, 2);
   assert.equal(rows[0].output, 3, '"new reply" = ceil(9/4) = 3 tokens');
-  assert.equal(rows[0].input, 2,
-    'only "eee fff" is new context; yesterdays backlog is already counted');
+  assert.equal(rows[0].input, 9,
+    'input includes the conversation context prior to this request (u0 + a0 + u1 = 4 + 3 + 2 = 9)');
 });
 
 test('collectQoderCnTranscriptRows streams transcript files without readFileSync', () => {

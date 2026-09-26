@@ -179,17 +179,32 @@ fun MetricHeroCard(
   title: String,
   period: PeriodDto?,
   modifier: Modifier = Modifier,
+  subtitle: String? = null,
   trailing: @Composable (() -> Unit)? = null
 ) {
   val colors = LocalFluentColors.current
+  val cost = rememberCostFormatter()
   AppCard(modifier = modifier, contentPadding = FluentSpacingDefaults.xl) {
-    Text(
-      title.uppercase(),
-      style = FluentTypeRamp.caption1,
-      fontWeight = FontWeight.SemiBold,
-      letterSpacing = 0.6.sp,
-      color = colors.neutralForeground3
-    )
+    Row(
+      Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Text(
+        title.uppercase(),
+        style = FluentTypeRamp.caption1,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.6.sp,
+        color = colors.neutralForeground3
+      )
+      if (subtitle != null) {
+        Text(
+          subtitle,
+          style = FluentTypeRamp.caption2,
+          color = colors.neutralForeground3
+        )
+      }
+    }
     Spacer(Modifier.height(FluentSpacingDefaults.xs))
     Row(
       Modifier.fillMaxWidth(),
@@ -212,9 +227,10 @@ fun MetricHeroCard(
         )
         Spacer(Modifier.height(FluentSpacingDefaults.s))
         Text(
-          formatUsd(period?.costUsd ?: 0.0),
+          cost.format(period?.costUsd ?: 0.0),
           style = FluentTypeRamp.title3,
-          color = colors.neutralForeground1,
+          color = colors.brandForeground1,
+          fontWeight = FontWeight.SemiBold,
           maxLines = 1
         )
       }
@@ -237,6 +253,7 @@ fun CompactMetricCard(
   modifier: Modifier = Modifier
 ) {
   val colors = LocalFluentColors.current
+  val cost = rememberCostFormatter()
   Column(
     modifier
       .fillMaxWidth()
@@ -259,7 +276,7 @@ fun CompactMetricCard(
       color = colors.neutralForeground1
     )
     Text(
-      formatUsd(period?.costUsd ?: 0.0, compact = true),
+      cost.format(period?.costUsd ?: 0.0, compact = true),
       style = FluentTypeRamp.caption1,
       color = colors.neutralForeground2
     )

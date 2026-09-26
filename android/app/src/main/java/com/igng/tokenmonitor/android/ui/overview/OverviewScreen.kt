@@ -89,7 +89,10 @@ fun OverviewScreen(
   onOpenAnalytics: () -> Unit,
   onOpenDevices: () -> Unit,
   onOpenSettings: () -> Unit,
-  preferencesViewModel: PreferencesViewModel = hiltViewModel()
+  onSelectPeriod: (AnalyticsPeriodKind) -> Unit = {},
+  onOpenLimits: (() -> Unit)? = null,
+  preferencesViewModel: PreferencesViewModel = hiltViewModel(),
+  hubViewModel: HubViewModel = hiltViewModel()
 ) {
   val prefs by preferencesViewModel.preferences.collectAsStateWithLifecycle()
   val colors = LocalFluentColors.current
@@ -98,20 +101,44 @@ fun OverviewScreen(
 
   val periods = state.stats?.periods
   val today = periods?.today
+  val resolvedPeriod = state.customRangeResult?.toPeriodDto() ?: when (state.analyticsPeriod) {
+    AnalyticsPeriodKind.Today -> periods?.today
+    AnalyticsPeriodKind.Month -> periods?.month
+    AnalyticsPeriodKind.AllTime -> periods?.allTime
+    else -> periods?.today
+  }
+  val activePeriod = resolvedPeriod ?: today
+  val customSupported = state.authorization?.capabilities?.usageRange == true
+  val periodOptions = if (customSupported) {
+    listOf("今日", "昨日", "本周", "本月", "全部", "自定义")
+  } else {
+    listOf("今日", "本月", "全部")
+  }
+  val selectedPeriodIndex = when (state.analyticsPeriod) {
+    AnalyticsPeriodKind.Today -> 0
+    AnalyticsPeriodKind.Yesterday -> 1
+    AnalyticsPeriodKind.Week -> 2
+    AnalyticsPeriodKind.Month -> if (customSupported) 3 else 1
+    AnalyticsPeriodKind.AllTime -> if (customSupported) 4 else 2
+    AnalyticsPeriodKind.Custom -> 5
+  }
+  var showPicker by rememberSaveable { mutableStateOf(false) }
+
   val clientShares = topShareEntries(
-      today?.clients.orEmpty(),
-      today?.clientCosts.orEmpty(),
-      today?.clientEstimated.orEmpty(),
-      today?.clientCredits.orEmpty(),
+      activePeriod?.clients.orEmpty(),
+      activePeriod?.clientCosts.orEmpty(),
+      activePeriod?.clientEstimated.orEmpty(),
+      activePeriod?.clientCredits.orEmpty(),
       limit = 6
     )
-  val modelShares = topShareEntries(today?.models.orEmpty(), today?.modelCosts.orEmpty(), limit = 5)
+  val modelShares = topShareEntries(activePeriod?.models.orEmpty(), activePeriod?.modelCosts.orEmpty(), limit = 5)
   val devices = fleetSorted(state.devices)
   val activeDevices = devices.filter { deviceCountsAsOnline(it.stale, it.clientStatus) }
   val historySource = state.history ?: state.stats?.historyPreview
   val historyDays = historySource?.daily.orEmpty().takeRange(TrendRange.Days7)
   val historyDailyAll = historySource?.daily.orEmpty()
   val summary = historySource?.summary
+  val urgentLimit = remember(state.stats?.limits) { findUrgentLimit(state.stats?.limits) }
 
   var trendMetricIndex by rememberSaveable { mutableIntStateOf(0) }
   val trendMetric = when (trendMetricIndex) {

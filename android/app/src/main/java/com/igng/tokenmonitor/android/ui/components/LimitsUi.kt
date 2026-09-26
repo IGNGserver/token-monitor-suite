@@ -91,6 +91,79 @@ fun windowKindLabel(kind: String): String = when (kind.lowercase(Locale.US)) {
   else -> kind
 }
 
+fun findUrgentLimit(limits: LimitsDto?): Pair<LimitProviderDto, Double>? {
+  val providers = limits?.providers.orEmpty()
+  var mostUrgent: Pair<LimitProviderDto, Double>? = null
+  for (provider in providers) {
+    val meterWindows = provider.windows.filter { it.showMeter && windowUsedPercent(it) != null }
+    val headlineUsed = meterWindows.mapNotNull { windowUsedPercent(it) }.maxOrNull() ?: continue
+    val remaining = (100.0 - headlineUsed).coerceIn(0.0, 100.0)
+    if (remaining <= 25.0) {
+      if (mostUrgent == null || remaining < mostUrgent.second) {
+        mostUrgent = Pair(provider, remaining)
+      }
+    }
+  }
+  return mostUrgent
+}
+
+@Composable
+fun UrgentLimitAlertBar(
+  provider: LimitProviderDto,
+  remainingPercent: Double,
+  onClick: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  val colors = LocalFluentColors.current
+  val isExhausted = remainingPercent <= 0.0
+  val bg = if (isExhausted) colors.errorBackground else colors.warningBackground
+  val fg = if (isExhausted) colors.errorForeground else colors.warningForeground
+  val text = if (isExhausted) {
+    "${providerDisplayName(provider.provider)} 额度已用尽"
+  } else {
+    "${providerDisplayName(provider.provider)} 额度告急，仅剩 ${String.format(Locale.US, "%.0f%%", remainingPercent)}"
+  }
+
+  Row(
+    modifier
+      .fillMaxWidth()
+      .clip(FluentShapeDefaults.cardCorner)
+      .background(bg)
+      .border(0.5.dp, fg.copy(alpha = 0.35f), FluentShapeDefaults.cardCorner)
+      .clickable(onClick = onClick)
+      .padding(horizontal = FluentSpacingDefaults.l, vertical = FluentSpacingDefaults.s),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.SpaceBetween
+  ) {
+    Row(
+      Modifier.weight(1f),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.s)
+    ) {
+      Icon(
+        painter = painterResource(FluentIcons.AlertBadge),
+        contentDescription = null,
+        tint = fg,
+        modifier = Modifier.size(16.dp)
+      )
+      Text(
+        text,
+        style = FluentTypeRamp.caption1,
+        fontWeight = FontWeight.SemiBold,
+        color = fg,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+      )
+    }
+    Text(
+      "查看",
+      style = FluentTypeRamp.caption2,
+      fontWeight = FontWeight.SemiBold,
+      color = fg
+    )
+  }
+}
+
 // ─── Section ────────────────────────────────────────────────────────────────
 //
 // Fluent treats a limit as *utilisation*, so every account row carries a real

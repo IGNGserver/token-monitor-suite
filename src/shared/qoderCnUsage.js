@@ -183,7 +183,7 @@ const QODER_CN_MODEL_DISPLAY_NAMES = Object.freeze({
 // every caller maps a code to its display name before this set is consulted, so
 // they collapse to the base names here and need no entries of their own.
 const QODER_CN_ROUTING_TIERS = new Set(['auto', 'ultimate', 'performance', 'efficient', 'lite']);
-const QODER_CN_READ_MAX_BYTES = 50 * 1024 * 1024;
+const QODER_CN_READ_MAX_BYTES = 250 * 1024 * 1024;
 const QODER_CN_READ_MAX_ROWS = 100_000;
 const QODER_CN_NEGATIVE_SCHEMA_CACHE_TTL_MS = 5 * 60 * 1000;
 const QODER_CN_READ_BUDGET_ERROR = 'QODER_CN_READ_BUDGET_EXCEEDED';
@@ -832,11 +832,8 @@ function normalizeQoderCnMainMessage(row, source, state, contentTokens, clientId
     messageId: `${sessionId}:${qoderCnMainHash(messageKey)}`,
     model,
     projectLabel: normalizeQoderCnProjectLabel(row?.project_name || row?.projectLabel),
-    // Same once-per-session rule as the transcript parser (see
-    // `processTranscriptLine`): the caller owns the `countedTokens` watermark so an
-    // assistant row outside the window still advances it, and this row is charged
-    // only for the conversation appended since the previous one.
-    input: Math.max(0, (Number(state.cumulativeTokens) || 0) - (Number(state.countedTokens) || 0)),
+    // Standard LLM API request model: each request sends the cumulative session context.
+    input: Math.max(0, Number(state.cumulativeTokens) || 0),
     output: Math.max(0, Math.trunc(Number(contentTokens) || 0)),
     cacheRead: 0,
     cacheWrite: 0,
@@ -889,10 +886,6 @@ async function collectQoderCnMainRows(options = {}) {
           const normalized = normalizeQoderCnMainMessage(dbRow, source, state, contentTokens, clientId);
           if (normalized) rows.push(normalized);
         }
-        // Advanced for every assistant row, not just the emitted ones: skipping an
-        // out-of-window row here would hand the first in-window request the whole
-        // earlier conversation as its input.
-        state.countedTokens = (Number(state.cumulativeTokens) || 0) + contentTokens;
       }
       state.cumulativeTokens += contentTokens;
       sessions.set(sessionKey, state);
@@ -1016,13 +1009,13 @@ function buildQoderCnHistoryGraph(options = {}) {
   return { contributions: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)) };
 }
 
-const QODER_CN_TRANSCRIPT_MAX_BYTES = 64 * 1024 * 1024;
-const QODER_CN_TRANSCRIPT_MAX_LINE_BYTES = 256 * 1024;
+const QODER_CN_TRANSCRIPT_MAX_BYTES = 256 * 1024 * 1024;
+const QODER_CN_TRANSCRIPT_MAX_LINE_BYTES = 2 * 1024 * 1024;
 const QODER_CN_TRANSCRIPT_READ_CHUNK_BYTES = 64 * 1024;
-const QODER_CN_TRANSCRIPT_MAX_FILES = 2_000;
-const QODER_CN_TRANSCRIPT_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+const QODER_CN_TRANSCRIPT_MAX_FILES = 5_000;
+const QODER_CN_TRANSCRIPT_MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
 const QODER_CN_TRANSCRIPT_MAX_DEPTH = 8;
-const QODER_CN_TRANSCRIPT_MAX_DURATION_MS = 2_000;
+const QODER_CN_TRANSCRIPT_MAX_DURATION_MS = 30_000;
 const QODER_CN_CJK_RE = /[\u{1100}-\u{11FF}\u{2E80}-\u{9FFF}\u{A960}-\u{A97F}\u{AC00}-\u{D7FF}\u{F900}-\u{FAFF}\u{FF00}-\u{FF60}\u{FF66}-\u{FF9D}\u{20000}-\u{3FFFD}]/u;
 const QODER_CN_TRANSCRIPT_BUDGET_CODES = Object.freeze({
   files: 'QODER_CN_TRANSCRIPT_FILE_LIMIT',
@@ -1142,8 +1135,12 @@ function checkTranscriptBudget(diagnostics, startedAt, options = {}) {
   if (transcriptScanNow(options) - startedAt > diagnostics.maxDurationMs) {
     diagnostics.failureCode = QODER_CN_TRANSCRIPT_BUDGET_CODES.duration;
     diagnostics.truncated = true;
-    throw transcriptBudgetError(diagnostics.failureCode, diagnostics);
+    if (options.failHardOnBudget) {
+      throw transcriptBudgetError(diagnostics.failureCode, diagnostics);
+    }
+    return false;
   }
+  return true;
 }
 
 function listTranscriptFiles(dir, options = {}) {
@@ -1152,7 +1149,9 @@ function listTranscriptFiles(dir, options = {}) {
   const diagnostics = options.diagnostics;
   const startedAt = options.startedAt ?? transcriptScanNow(options);
   while (stack.length > 0) {
-    checkTranscriptBudget(diagnostics, startedAt, options);
+    if (!checkTranscriptBudget(diagnostics, startedAt, options)) {
+      break;
+    }
     const current = stack.pop();
     let entries;
     try {
@@ -1167,7 +1166,9 @@ function listTranscriptFiles(dir, options = {}) {
       continue;
     }
     for (const entry of entries) {
-      checkTranscriptBudget(diagnostics, startedAt, options);
+      if (!checkTranscriptBudget(diagnostics, startedAt, options)) {
+        break;
+      }
       const full = path.join(current.dir, entry.name);
       if (entry.isDirectory()) {
         if (current.depth >= diagnostics.maxDepth) {
@@ -1299,89 +1300,71 @@ function processTranscriptLine(line, state) {
   const messageRole = String(message.role || '').trim().toLowerCase();
   const eventType = String(event?.type || '').trim().toLowerCase();
   const usage = message.usage && typeof message.usage === 'object' ? message.usage : event.usage;
+  const rawInputTokens = Number(usage?.input_tokens ?? usage?.inputTokens);
+  const rawOutputTokens = Number(usage?.output_tokens ?? usage?.outputTokens);
+  const rawCacheReadTokens = Number(usage?.cache_read_input_tokens ?? usage?.cacheReadInputTokens);
+  const rawCacheWriteTokens = Number(usage?.cache_creation_input_tokens ?? usage?.cacheCreationInputTokens);
+  const hasExactTokens = Number.isFinite(rawInputTokens) && rawInputTokens > 0;
   const credits = Number(usage?.credits);
   const timestamp = transcriptEventTimestamp(event, message);
   const identity = transcriptEventIdentity(event, message);
   const terminalEvent = new Set(['result', 'progress', 'system', 'status', 'user']);
   const isAssistant = !terminalEvent.has(eventType)
     && (messageRole === 'assistant' || (!messageRole && eventType === 'assistant'));
-  // `credits` and `billable` describe Qoder's Credits accounting, not whether
-  // the model response consumed token context. Credits may be absent on older
-  // CLIs, and a promoted/free request can legitimately be non-billable; both
-  // still need an estimated token row. Malformed negative credits remain
-  // ignored, while Result.total_credits never reaches this branch because its
-  // event type is terminal.
+  const hasUsageBlock = Boolean(usage && typeof usage === 'object');
+  // In Qoder transcripts, a complete LLM turn is marked by an assistant event with a `usage` block.
+  // Thinking and text chunks emitted during the turn also have role === 'assistant' but have no `usage`.
+  // Under standard LLM API request semantics, each complete turn's prompt input is the cumulative session context.
   if (isAssistant && (!Number.isFinite(credits) || credits >= 0) && timestamp > 0) {
-    const date = new Date(timestamp);
-    const dayKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-    // Qoder's complete assistant record does not repeat the model; it is
-    // declared by the session's system.init record. Carry that value forward
-    // so otherwise valid requests are not collapsed into an `unknown` model.
-    const modelKey = transcriptEventModel(event, message, state.modelKey);
-    // Keep requests with a stable upstream identity in separate buckets. If
-    // SQLite contains one of several transcript requests, mergeQoderCnRows
-    // can then drop only that request instead of discarding the whole day.
-    // Identity-less records still use one conservative same-day bucket and
-    // are handled by the documented source-precedence fallback.
-    const key = JSON.stringify([dayKey, modelKey, projectLabel, sessionId, identity || '']);
-    const bucket = buckets.get(key) || {
-      dayKey,
-      modelKey,
-      projectLabel,
-      sessionId,
-      sourceSession: state.rawSession || state.sessionKey || '',
-      input: 0,
-      output: 0,
-      requests: 0,
-      credits: 0,
-      sourceIdentities: new Set()
-    };
-    // The anchored collector normally supplies the local day start, but the
-    // parser also accepts an arbitrary sinceMs for diagnostics and tests. Use
-    // the event's actual timestamp here; comparing the bucket's noon marker
-    // would incorrectly retain early same-day events when sinceMs is inside
-    // that day.
-    // Each message's tokens are attributed once per session, not once per
-    // request. `state.cumulativeTokens` is the whole preceding conversation, so
-    // adding it per request made an N-request session cost O(N²): measured on a
-    // real Qoder CN profile on 2026-09-26, one day of 8593 requests summed to
-    // 2.97B tokens where the conversation's actual content is 5.6M — 532x
-    // inflation, and an implied 668K tokens per credit where Qoder's own credit
-    // pricing supports ~10-17K. The counter below advances for out-of-window
-    // events too, so an anchored today-only scan of a session that began last
-    // week bills the context appended today rather than the entire backlog.
-    const newContextTokens = Math.max(0, state.cumulativeTokens - (state.countedTokens || 0));
-    if (sinceMs === undefined || timestamp >= sinceMs) {
-      bucket.input += newContextTokens;
-      bucket.output += messageTokens;
-      bucket.requests += 1;
-      // Qoder bills in credits, not tokens. Verified on 2026-09-26 across 5617
-      // usage records in both editions' transcript trees: `input_tokens`,
-      // `output_tokens` and both cache fields are structurally present and
-      // always 0, while `credits` is the provider's own exact per-request meter.
-      // So this is the one Qoder number that is not an estimate, and it has to
-      // survive to the wire even though the token totals beside it cannot.
-      if (Number.isFinite(credits)) bucket.credits += credits;
-      if (identity) bucket.sourceIdentities.add(identity);
-      diagnostics.recognizedEvents += 1;
-      diagnostics.estimated = true;
-      if (!diagnostics.lastDataAt || timestamp > Date.parse(diagnostics.lastDataAt)) {
-        diagnostics.lastDataAt = new Date(timestamp).toISOString();
+    const isCompletedRequest = hasUsageBlock || state.hasUsageSeen !== true;
+    if (isCompletedRequest) {
+      const date = new Date(timestamp);
+      const dayKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      const modelKey = transcriptEventModel(event, message, state.modelKey);
+      const key = JSON.stringify([dayKey, modelKey, projectLabel, sessionId, identity || '']);
+      const bucket = buckets.get(key) || {
+        dayKey,
+        modelKey,
+        projectLabel,
+        sessionId,
+        sourceSession: state.rawSession || state.sessionKey || '',
+        input: 0,
+        output: 0,
+        requests: 0,
+        credits: 0,
+        sourceIdentities: new Set()
+      };
+      if (sinceMs === undefined || timestamp >= sinceMs) {
+        if (hasExactTokens) {
+          bucket.input += rawInputTokens;
+          bucket.output += (Number.isFinite(rawOutputTokens) && rawOutputTokens > 0) ? rawOutputTokens : (state.turnOutputTokens || messageTokens);
+          if (Number.isFinite(rawCacheReadTokens) && rawCacheReadTokens > 0) bucket.cacheRead = (bucket.cacheRead || 0) + rawCacheReadTokens;
+          if (Number.isFinite(rawCacheWriteTokens) && rawCacheWriteTokens > 0) bucket.cacheWrite = (bucket.cacheWrite || 0) + rawCacheWriteTokens;
+        } else {
+          // Standard LLM API request model: each request sends the cumulative session context.
+          bucket.input += Math.max(0, state.cumulativeTokens);
+          bucket.output += (state.turnOutputTokens || messageTokens);
+        }
+        bucket.requests += 1;
+        if (Number.isFinite(credits)) bucket.credits += credits;
+        if (identity) bucket.sourceIdentities.add(identity);
+        diagnostics.recognizedEvents += 1;
+        diagnostics.estimated = true;
+        if (!diagnostics.lastDataAt || timestamp > Date.parse(diagnostics.lastDataAt)) {
+          diagnostics.lastDataAt = new Date(timestamp).toISOString();
+        }
+        buckets.set(key, bucket);
+      } else {
+        diagnostics.ignoredEvents += 1;
       }
-      buckets.set(key, bucket);
+      state.turnOutputTokens = 0;
     } else {
-      diagnostics.ignoredEvents += 1;
+      state.turnOutputTokens = (state.turnOutputTokens || 0) + messageTokens;
     }
-    // Only a request consumes context, so only a request moves the watermark —
-    // and it does so whether or not the row fell inside the window, which is what
-    // keeps a day-scoped scan from re-billing an older session's backlog.
-    state.countedTokens = state.cumulativeTokens + messageTokens;
   } else {
     diagnostics.ignoredEvents += 1;
   }
-  // File order is append order = conversation order; the cumulative counter
-  // tracks how much context the session holds at this point. It is intentionally
-  // advanced for old events even during an anchored read.
+  if (hasUsageBlock) state.hasUsageSeen = true;
   state.cumulativeTokens += messageTokens;
 }
 
@@ -1443,7 +1426,9 @@ function streamTranscriptFile(filePath, stat, state, diagnostics, startedAt, opt
       remaining = '';
       let newline;
       while ((newline = pendingLine.indexOf('\n')) >= 0) {
-        checkTranscriptBudget(diagnostics, startedAt, options);
+        if (!checkTranscriptBudget(diagnostics, startedAt, options)) {
+          break;
+        }
         const line = pendingLine.slice(0, newline);
         pendingLine = pendingLine.slice(newline + 1);
         processTranscriptLine(line.endsWith('\r') ? line.slice(0, -1) : line, state);
@@ -1460,13 +1445,18 @@ function streamTranscriptFile(filePath, stat, state, diagnostics, startedAt, opt
   try {
     descriptor = fs.openSync(filePath, 'r');
     while (fileRemaining > 0) {
-      checkTranscriptBudget(diagnostics, startedAt, options);
+      if (!checkTranscriptBudget(diagnostics, startedAt, options)) {
+        break;
+      }
       const requested = Math.min(buffer.length, fileRemaining);
       const bytesRead = fs.readSync(descriptor, buffer, 0, requested, null);
       if (!bytesRead) break;
       fileRemaining -= bytesRead;
       diagnostics.readBytes += bytesRead;
       consumeText(decoder.write(buffer.subarray(0, bytesRead)));
+      if (!checkTranscriptBudget(diagnostics, startedAt, options)) {
+        break;
+      }
     }
     consumeText(decoder.end());
     if (!discardingOversizedLine && pendingLine) {
@@ -1491,7 +1481,9 @@ function collectQoderCnTranscriptRows(options = {}) {
   const buckets = new Map();
   try {
     for (const rawRoot of roots) {
-      checkTranscriptBudget(diagnostics, startedAt, options);
+      if (!checkTranscriptBudget(diagnostics, startedAt, options)) {
+        break;
+      }
       const rootValue = String(rawRoot || '').trim();
       if (!rootValue) continue;
       const root = path.resolve(rootValue);
@@ -1500,7 +1492,9 @@ function collectQoderCnTranscriptRows(options = {}) {
       diagnostics.rootsFound += 1;
       const files = listTranscriptFiles(root, { ...options, diagnostics, startedAt });
       for (const filePath of files) {
-        checkTranscriptBudget(diagnostics, startedAt, options);
+        if (!checkTranscriptBudget(diagnostics, startedAt, options)) {
+          break;
+        }
         let stat;
         try { stat = fs.statSync(filePath); } catch (_) { diagnostics.readErrors += 1; continue; }
         if (!stat.isFile() || stat.size <= 0) {

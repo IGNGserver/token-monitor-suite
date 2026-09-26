@@ -1,4 +1,4 @@
 <resources>
   <!-- Fluent 2 `colorNeutralBackground1`, dark (FluentDarkColors.neutralBackground1). -->
-  <color name="window_background">#292929</color>
+  <color name="window_background">#141414</color>
 </resources>

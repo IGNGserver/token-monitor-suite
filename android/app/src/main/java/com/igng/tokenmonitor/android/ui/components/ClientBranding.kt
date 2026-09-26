@@ -180,6 +180,7 @@ fun ClientMonogram(
   size: Dp = 28.dp
 ) {
   val bg = ClientBranding.color(clientId)
+  val isDark = androidx.compose.foundation.isSystemInDarkTheme()
   val fg = if (0.2126f * bg.red + 0.7152f * bg.green + 0.0722f * bg.blue > 0.55f) {
     Color(0xFF1A1A1A)
   } else {
@@ -191,18 +192,24 @@ fun ClientMonogram(
     // the monogram used.  `ClientBranding.liftDark` already keeps near-black marks
     // legible on a dark surface.  4 dp corners, matching every other tile in the
     // client, rather than the circular Material avatar.
+    val tileBg = if (isDark) {
+      bg.copy(alpha = 0.22f)
+    } else {
+      bg.copy(alpha = 0.12f)
+    }
     Box(
       modifier = modifier
         .size(size)
         .clip(FluentShapeDefaults.controlCorner)
-        .background(bg.copy(alpha = 0.14f)),
+        .background(tileBg)
+        .border(0.5.dp, bg.copy(alpha = if (isDark) 0.35f else 0.18f), FluentShapeDefaults.controlCorner),
       contentAlignment = Alignment.Center
     ) {
       Icon(
         painter = painterResource(mark),
         contentDescription = ClientBranding.label(clientId),
         tint = ClientBranding.liftDarkTinted(clientId),
-        modifier = Modifier.size(size * 0.68f)
+        modifier = Modifier.size(size * 0.65f)
       )
     }
     return
@@ -210,7 +217,8 @@ fun ClientMonogram(
   Box(
     modifier = modifier
       .size(size)
-      .background(bg, CircleShape),
+      .clip(FluentShapeDefaults.controlCorner)
+      .background(bg),
     contentAlignment = Alignment.Center
   ) {
     Text(
@@ -218,10 +226,6 @@ fun ClientMonogram(
       color = fg,
       fontSize = (size.value * 0.36f).sp,
       fontWeight = FontWeight.Bold,
-      // The last `MaterialTheme.typography` read in the client used M3's
-      // `labelSmall`, whose mapped value is Fluent `caption2` — i.e. the role name
-      // was pointing at a different level than the hand-set 0.36× font size.  The
-      // Fluent ramp is the honest source; the size is optical, not a ramp level.
       style = FluentTypeRamp.caption2.copy(fontSize = (size.value * 0.36f).sp)
     )
   }

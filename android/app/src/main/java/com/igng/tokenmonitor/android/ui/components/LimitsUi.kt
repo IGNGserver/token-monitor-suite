@@ -280,6 +280,7 @@ private fun LimitAccountRow(
       primary = displayName,
       secondary = meta.ifBlank { null },
       tertiary = balanceLines.firstOrNull(),
+      leading = { ClientMonogram(provider.provider, size = 32.dp) },
       dividerAbove = dividerAbove,
       trailingPrimary = headlineRemaining?.let { String.format(Locale.US, "%.0f%%", it) },
       trailingSecondary = if (headlineRemaining != null) "剩余" else null,

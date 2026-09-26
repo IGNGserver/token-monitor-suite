@@ -219,10 +219,10 @@ val FluentDarkColors = FluentColorTokens(
   warningForegroundOnSubtle = argb("FAA06B"),
   foregroundOnAccent = argb("FFFFFF"),
 
-  neutralBackground1 = argb("292929"),
-  neutralBackground2 = argb("1F1F1F"),
-  neutralBackground3 = argb("141414"),
-  neutralBackground4 = argb("0A0A0A"),
+  neutralBackground1 = argb("141414"),          // colorNeutralBackground1 (AMOLED dark)
+  neutralBackground2 = argb("0D0D0D"),
+  neutralBackground3 = argb("080808"),
+  neutralBackground4 = argb("040404"),
   neutralBackground5 = argb("000000"),
   neutralBackgroundDisabled = argb("1F1F1F"),
   brandBackground = argb("115EA3"),             // colorBrandBackground (dark)
@@ -233,27 +233,26 @@ val FluentDarkColors = FluentColorTokens(
   successBackground = argb("052505"),
   warningBackground = argb("4A1E04"),
   subtleBackground = Color.Transparent,
-  subtleBackgroundHover = argb("383838"),
-  subtleBackgroundPressed = argb("2E2E2E"),
+  subtleBackgroundHover = argb("2A2A2A"),
+  subtleBackgroundPressed = argb("222222"),
 
   brandContainer = argb("082338"),             // colorBrandBackground2 (dark)
   brandContainerForeground = argb("96C6FA"),
   brandOnInverse = argb("0F6CBD"),
 
   neutralStroke1 = argb("ADADAD"),              // colorNeutralStrokeAccessible
-  neutralStroke2 = argb("666666"),              // colorNeutralStroke1
-  neutralStroke3 = argb("525252"),              // colorNeutralStroke2
-  neutralStrokeDisabled = argb("525252"),
+  neutralStroke2 = argb("4A4A4A"),              // colorNeutralStroke1
+  neutralStroke3 = argb("333333"),              // colorNeutralStroke2
+  neutralStrokeDisabled = argb("333333"),
   brandStroke = argb("479EF5"),
   errorStroke = argb("EEACB2"),                 // colorStatusDangerForeground3
 
-  // In dark, Fluent layers *up* by lightening, so the card matches the page and
-  // gains separation from its shadow only — the same rule as light, applied
-  // consistently rather than inverting the ladder.
-  surfaceCard = argb("292929"),
-  surfaceCardContainer = argb("1F1F1F"),
-  surfaceFlyout = argb("2E2E2E"),
-  neutralLayerInner = argb("383838"),        // steps *up* from the card, as light does
+  // In dark AMOLED mode, surfaceCard steps up from the pitch-dark page (#141414)
+  // to #1F1F1F, giving cards clear separation and tactile presence.
+  surfaceCard = argb("1F1F1F"),                 // colorNeutralBackground1
+  surfaceCardContainer = argb("141414"),        // colorNeutralBackground2
+  surfaceFlyout = argb("242424"),               // colorNeutralBackground1
+  neutralLayerInner = argb("2A2A2A"),           // colorNeutralBackground3 (inner wells)
   inverseBackground = argb("F5F5F5"),
   inverseForeground = argb("1B1B1B"),
   scrim = argb("000000")

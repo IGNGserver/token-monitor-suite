@@ -123,6 +123,34 @@ const DOCUMENTED_DEVIATIONS = {
       officialToken: 'colorStatusDangerForeground1',
       reason:
         'official #dc626d measures 4.16:1 as small text on the dark page surface; lightened to stay under AA'
+    },
+    neutralBackground1: {
+      officialToken: 'colorNeutralBackground1',
+      reason: 'AMOLED dark theme adjustment: #141414 provides a deep pitch dark surface while maintaining Fluent hierarchy'
+    },
+    surfaceCard: {
+      officialToken: 'colorNeutralBackground1',
+      reason: 'AMOLED dark theme adjustment: #1F1F1F steps up from the page surface (#141414) for clear card contrast'
+    },
+    surfaceCardContainer: {
+      officialToken: 'colorNeutralBackground2',
+      reason: 'AMOLED dark theme adjustment: #141414 aligns with deep recessed elements'
+    },
+    surfaceFlyout: {
+      officialToken: 'colorNeutralBackground1',
+      reason: 'AMOLED dark theme adjustment: #242424 provides elevated flyout surface above cards'
+    },
+    neutralLayerInner: {
+      officialToken: 'colorNeutralBackground3',
+      reason: 'AMOLED dark theme adjustment: #2A2A2A provides quiet inner wells inside cards'
+    },
+    neutralStroke2: {
+      officialToken: 'colorNeutralStroke1',
+      reason: 'AMOLED dark theme adjustment: #4A4A4A keeps subtle borders harmonious with #1F1F1F card background'
+    },
+    neutralStroke3: {
+      officialToken: 'colorNeutralStroke2',
+      reason: 'AMOLED dark theme adjustment: #333333 keeps hairline dividers harmonious with #1F1F1F card background'
     }
   },
   light: {}

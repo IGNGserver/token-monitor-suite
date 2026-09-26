@@ -44,9 +44,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.igng.tokenmonitor.android.data.model.DeviceDto
+import com.igng/tokenmonitor.android.data.model.DeviceDto
+import com.igng.tokenmonitor.android.ui.AnalyticsPeriodKind
 import com.igng.tokenmonitor.android.ui.HubUiState
+import com.igng.tokenmonitor.android.ui.HubViewModel
 import com.igng.tokenmonitor.android.ui.PreferencesViewModel
+import com.igng.tokenmonitor.android.ui.toPeriodDto
+import com.igng.tokenmonitor.android.ui.components.DateTimeRangePickerDialog
+import com.igng.tokenmonitor.android.ui.components.UrgentLimitAlertBar
+import com.igng.tokenmonitor.android.ui.components.findUrgentLimit
 import com.igng.tokenmonitor.android.ui.components.AppCard
 import com.igng.tokenmonitor.android.ui.components.CompactMetricCard
 import com.igng.tokenmonitor.android.ui.components.ContributionHeatmap
@@ -205,17 +211,71 @@ fun OverviewScreen(
         ) {
           item {
             FluentPageHeader(
-              title = "今日用量",
-              subtitle = "多设备 Token 汇总",
+              title = "总览",
+              subtitle = "多设备 Token 汇总与健康度",
               trailing = { RealtimeStatusChip(state.realtime) }
             )
           }
 
+          if (urgentLimit != null) {
+            item {
+              FluentStaggeredIn(index = 0) {
+                UrgentLimitAlertBar(
+                  provider = urgentLimit.first,
+                  remainingPercent = urgentLimit.second,
+                  onClick = { onOpenLimits?.invoke() ?: onOpenSettings() },
+                  modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l)
+                )
+              }
+            }
+          }
+
           item {
-            FluentStaggeredIn(index = 0) {
+            FluentTabStrip(
+              options = periodOptions,
+              selectedIndex = selectedPeriodIndex,
+              onSelect = { index ->
+                haptics.perform(HapticEvent.Selection)
+                val kinds = if (customSupported) {
+                  listOf(
+                    AnalyticsPeriodKind.Today,
+                    AnalyticsPeriodKind.Yesterday,
+                    AnalyticsPeriodKind.Week,
+                    AnalyticsPeriodKind.Month,
+                    AnalyticsPeriodKind.AllTime,
+                    AnalyticsPeriodKind.Custom
+                  )
+                } else {
+                  listOf(AnalyticsPeriodKind.Today, AnalyticsPeriodKind.Month, AnalyticsPeriodKind.AllTime)
+                }
+                val kind = kinds.getOrElse(index) { AnalyticsPeriodKind.Today }
+                if (kind == AnalyticsPeriodKind.Custom) showPicker = true
+                onSelectPeriod(kind)
+              },
+              contentPadding = FluentSpacingDefaults.l
+            )
+          }
+
+          item {
+            val periodTitle = when (state.analyticsPeriod) {
+              AnalyticsPeriodKind.Today -> "今日用量"
+              AnalyticsPeriodKind.Yesterday -> "昨日用量"
+              AnalyticsPeriodKind.Week -> "本周用量"
+              AnalyticsPeriodKind.Month -> "本月用量"
+              AnalyticsPeriodKind.AllTime -> "历史全部用量"
+              AnalyticsPeriodKind.Custom -> "自定义范围"
+            }
+            val periodSubtitle = when (state.analyticsPeriod) {
+              AnalyticsPeriodKind.Custom -> state.customRange?.label ?: "自定义区间"
+              AnalyticsPeriodKind.Week -> state.customRange?.label ?: "本周累计"
+              AnalyticsPeriodKind.Yesterday -> state.customRange?.label ?: "昨日"
+              else -> null
+            }
+            FluentStaggeredIn(index = 1) {
               MetricHeroCard(
-                title = "今日",
-                period = today,
+                title = periodTitle,
+                subtitle = periodSubtitle,
+                period = activePeriod,
                 modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l),
                 trailing = if (clientShares.isNotEmpty()) {
                   {
@@ -233,11 +293,18 @@ fun OverviewScreen(
             }
           }
 
-          // Period roll-up + activity summary share one card: they are the same
-          // question ("how much, how consistently") asked over different windows,
-          // and splitting them across three rows cost vertical space for no gain.
           item {
-            FluentStaggeredIn(index = 1) {
+            FluentStaggeredIn(index = 2) {
+              LimitsSection(
+                state.stats?.limits,
+                maxAccounts = prefs.homeLimitAccountCount,
+                modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l)
+              )
+            }
+          }
+
+          item {
+            FluentStaggeredIn(index = 3) {
               AppCard(modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l)) {
                 Row(
                   Modifier.fillMaxWidth(),
@@ -280,9 +347,39 @@ fun OverviewScreen(
             }
           }
 
+          if (clientShares.isNotEmpty() || modelShares.isNotEmpty()) {
+            item {
+              FluentStaggeredIn(index = 4) {
+                AppCard(modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l)) {
+                  SectionHeader(
+                    title = "周期构成",
+                    subtitle = "客户端与模型",
+                    actionLabel = "分析",
+                    onAction = onOpenAnalytics
+                  )
+                  if (clientShares.isNotEmpty()) {
+                    Spacer(Modifier.height(FluentSpacingDefaults.m))
+                    ShareBarList(clientShares)
+                  }
+                  if (modelShares.isNotEmpty()) {
+                    Spacer(Modifier.height(FluentSpacingDefaults.l))
+                    Text(
+                      "Top 模型",
+                      style = FluentTypeRamp.caption1,
+                      fontWeight = FontWeight.SemiBold,
+                      color = colors.neutralForeground3
+                    )
+                    Spacer(Modifier.height(FluentSpacingDefaults.xs))
+                    ShareBarList(modelShares, brandClients = false)
+                  }
+                }
+              }
+            }
+          }
+
           if (historyDays.isNotEmpty()) {
             item {
-              FluentStaggeredIn(index = 2) {
+              FluentStaggeredIn(index = 5) {
                 AppCard(modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l)) {
                   SectionHeader(
                     title = "近 7 日趋势",
@@ -312,7 +409,7 @@ fun OverviewScreen(
 
           if (historyDailyAll.isNotEmpty()) {
             item {
-              FluentStaggeredIn(index = 3) {
+              FluentStaggeredIn(index = 6) {
                 AppCard(modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l)) {
                   SectionHeader(
                     title = "贡献热力图",
@@ -334,49 +431,9 @@ fun OverviewScreen(
             }
           }
 
-          item {
-            FluentStaggeredIn(index = 4) {
-              LimitsSection(
-                state.stats?.limits,
-                maxAccounts = prefs.homeLimitAccountCount,
-                modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l)
-              )
-            }
-          }
-
-          if (clientShares.isNotEmpty() || modelShares.isNotEmpty()) {
-            item {
-              FluentStaggeredIn(index = 5) {
-                AppCard(modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l)) {
-                  SectionHeader(
-                    title = "今日构成",
-                    subtitle = "客户端与模型",
-                    actionLabel = "分析",
-                    onAction = onOpenAnalytics
-                  )
-                  if (clientShares.isNotEmpty()) {
-                    Spacer(Modifier.height(FluentSpacingDefaults.m))
-                    ShareBarList(clientShares)
-                  }
-                  if (modelShares.isNotEmpty()) {
-                    Spacer(Modifier.height(FluentSpacingDefaults.l))
-                    Text(
-                      "Top 模型",
-                      style = FluentTypeRamp.caption1,
-                      fontWeight = FontWeight.SemiBold,
-                      color = colors.neutralForeground3
-                    )
-                    Spacer(Modifier.height(FluentSpacingDefaults.xs))
-                    ShareBarList(modelShares, brandClients = false)
-                  }
-                }
-              }
-            }
-          }
-
           if (activeDevices.isNotEmpty()) {
             item {
-              FluentStaggeredIn(index = 6) {
+              FluentStaggeredIn(index = 7) {
                 AppCard(
                   modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l),
                   onClick = onOpenDevices
@@ -396,6 +453,20 @@ fun OverviewScreen(
         }
       }
     }
+  }
+
+  if (showPicker && customSupported) {
+    DateTimeRangePickerDialog(
+      onDismiss = { showPicker = false },
+      onConfirm = { startDate, endDate, startHour, endHour ->
+        showPicker = false
+        hubViewModel.loadCustomRange(startDate.toString(), endDate.toString(), startHour, endHour)
+      },
+      initialStartDate = state.customRange?.startDate?.let { java.time.LocalDate.parse(it) },
+      initialEndDate = state.customRange?.endDate?.let { java.time.LocalDate.parse(it) },
+      initialStartHour = state.customRange?.startHour,
+      initialEndHour = state.customRange?.endHour
+    )
   }
 }
 

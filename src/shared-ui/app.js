@@ -79,6 +79,7 @@ const UI_ICON_PATHS = Object.freeze({
   subscriptions: '<path d="M5 7h14M5 12h14M5 17h8"/><path d="M17 16v4M15 18h4"/>',
   pricing: '<path d="M6 4h12M6 20h12M8 4c0 4 8 4 8 8s-8 4-8 8"/><path d="M16 4c0 4-8 4-8 8s8 4 8 8"/>',
   management: '<path d="M4 7h16M4 12h16M4 17h10"/><path d="M17 15v6M14 18h6"/>',
+  transfer: '<path d="M4 8h12M13 4l4 4-4 4"/><path d="M20 16H8"/><path d="m11 12-4 4 4 4"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   back: '<path d="m15 5-7 7 7 7"/><path d="M8 12h12"/>',
   range: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 9h16M8 13h3M13 13h3M8 16h3"/>',

@@ -450,11 +450,13 @@ private fun FluentTab(
   val colors = LocalFluentColors.current
   val interaction = remember { MutableInteractionSource() }
   val pressed by interaction.collectIsPressedAsState()
+  val hovered = rememberFluentHover(interaction)
   val weight = if (selected) FontWeight.SemiBold else FontWeight.Normal
   val fg by androidx.compose.animation.animateColorAsState(
     targetValue = when {
-      pressed -> colors.neutralForeground2
+      pressed -> colors.neutralForeground1
       selected -> colors.brandForeground1
+      hovered -> colors.neutralForeground1
       else -> colors.neutralForeground2
     },
     animationSpec = tween(FluentMotion.faster),
@@ -466,6 +468,7 @@ private fun FluentTab(
       // semibold weight were the only thing carrying which tab was on, so the state
       // existed purely as paint.  This also gives the strip arrow-key traversal for
       // free on a keyboard / d-pad.
+      .hoverable(interaction)
       .selectable(
         selected = selected,
         role = Role.Tab,
@@ -481,8 +484,21 @@ private fun FluentTab(
         )
       )
       .heightIn(min = FluentTouchMin)
-      .padding(top = FluentSpacingDefaults.s, bottom = FluentSpacingDefaults.xs),
-    horizontalAlignment = Alignment.Start
+      .clip(FluentShapeDefaults.controlCorner)
+      .background(
+        when {
+          pressed -> colors.subtleBackgroundPressed
+          hovered -> colors.subtleBackgroundHover
+          else -> androidx.compose.ui.graphics.Color.Transparent
+        }
+      )
+      .padding(
+        start = FluentSpacingDefaults.xs,
+        end = FluentSpacingDefaults.xs,
+        top = FluentSpacingDefaults.s,
+        bottom = FluentSpacingDefaults.xs
+      ),
+    horizontalAlignment = Alignment.CenterHorizontally
   ) {
     Text(label, style = FluentTypeRamp.body1, fontWeight = weight, color = fg)
     Spacer(Modifier.height(FluentSpacingDefaults.xs))

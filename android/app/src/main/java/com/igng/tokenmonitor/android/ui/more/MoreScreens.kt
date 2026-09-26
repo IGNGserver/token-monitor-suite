@@ -1,5 +1,6 @@
 package com.igng.tokenmonitor.android.ui.more
 import com.igng.tokenmonitor.android.ui.components.FluentIcons
+import com.igng.tokenmonitor.android.ui.components.FluentSection
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.graphics.Color
@@ -119,96 +120,137 @@ fun MoreHubScreen(
   viewModel: HubViewModel = hiltViewModel()
 ) {
   val haptics = rememberAppHaptics()
-  Column(Modifier.fillMaxSize()) {
+  val scrollState = rememberScrollState()
+
+  Column(
+    Modifier
+      .fillMaxSize()
+      .verticalScroll(scrollState)
+      .padding(bottom = FluentSpacingDefaults.xxxl)
+  ) {
     FluentPageHeader(
       title = "更多",
       subtitle = "会话、项目、配额账号、订阅、定价与连接设置"
     )
-    // One grouped surface with hairline separators: these destinations are a
-    // single set of peers, so giving each its own elevated card overstates them.
-    // The `index` is the stagger position, and it is counted rather than literal
-    // because the capability-gated rows below make a hand-written sequence wrong on
-    // some Hubs and right on others — which is how the entrance order ended up
-    // disagreeing with the visual order.
-    var row by remember { mutableStateOf(0) }
-    FluentCardList(modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l)) {
-      MoreNavRow(
-        index = row++,
-        title = "对话",
-        subtitle = "查看会话快照与 token 拆解",
-        icon = FluentIcons.Chat,
-        onClick = {
-          haptics.perform(HapticEvent.Tap)
-          navController.navigate("sessions")
-        }
-      )
-      MoreNavRow(
-        index = row++,
-        title = "项目",
-        subtitle = "按工作区汇总 token / 费用",
-        icon = FluentIcons.Folder,
-        onClick = {
-          haptics.perform(HapticEvent.Tap)
-          navController.navigate("projects")
-        }
-      )
-      MoreNavRow(
-        index = row++,
-        title = "配额账号",
-        subtitle = "Hub 托管的凭据、启用状态与立即刷新",
-        icon = FluentIcons.Wallet,
-        onClick = {
-          haptics.perform(HapticEvent.Tap)
-          navController.navigate("accounts")
-        }
-      )
-      if (state.authorization?.capabilities?.subscriptions != false) {
+
+    Spacer(Modifier.height(FluentSpacingDefaults.s))
+
+    var row = 0
+
+    // Group 1: 监控与分析 (Monitoring & Analytics)
+    FluentSection(
+      title = "监控与分析",
+      subtitle = "会话详情、工作区项目与配额健康"
+    ) {
+      FluentCardList(modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l)) {
         MoreNavRow(
           index = row++,
-          title = "订阅",
-          subtitle = "手工记账的计划价与月度折算",
-          icon = FluentIcons.Timeline,
+          title = "服务状态",
+          subtitle = "各账号额度与健康状态",
+          icon = FluentIcons.Heart,
+          dividerAbove = false,
           onClick = {
             haptics.perform(HapticEvent.Tap)
-            viewModel.refreshSubscriptions()
-            navController.navigate("subscriptions")
+            navController.navigate("status")
+          }
+        )
+        MoreNavRow(
+          index = row++,
+          title = "对话",
+          subtitle = "查看会话快照与 token 拆解",
+          icon = FluentIcons.Chat,
+          dividerAbove = true,
+          onClick = {
+            haptics.perform(HapticEvent.Tap)
+            navController.navigate("sessions")
+          }
+        )
+        MoreNavRow(
+          index = row++,
+          title = "项目",
+          subtitle = "按工作区汇总 token / 费用",
+          icon = FluentIcons.Folder,
+          dividerAbove = true,
+          onClick = {
+            haptics.perform(HapticEvent.Tap)
+            navController.navigate("projects")
           }
         )
       }
-      MoreNavRow(
-        index = row++,
-        title = "服务状态",
-        subtitle = "各账号额度与健康状态",
-        icon = FluentIcons.Heart,
-        onClick = {
-          haptics.perform(HapticEvent.Tap)
-          navController.navigate("status")
-        }
-      )
-      if (state.authorization?.capabilities?.pricing == true &&
-        state.authorization.scopes.contains("admin")
-      ) {
+    }
+
+    Spacer(Modifier.height(FluentSpacingDefaults.l))
+
+    // Group 2: 资产与订购 (Assets & Subscriptions)
+    FluentSection(
+      title = "资产与订购",
+      subtitle = "托管凭据与手工订阅账本"
+    ) {
+      FluentCardList(modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l)) {
         MoreNavRow(
           index = row++,
-          title = "定价",
-          subtitle = "管理模型单价与上游同步",
-          icon = FluentIcons.ArrowExport,
+          title = "配额账号",
+          subtitle = "Hub 托管的凭据、启用状态与立即刷新",
+          icon = FluentIcons.Wallet,
+          dividerAbove = false,
           onClick = {
             haptics.perform(HapticEvent.Tap)
-            navController.navigate("pricing")
+            navController.navigate("accounts")
+          }
+        )
+        if (state.authorization?.capabilities?.subscriptions != false) {
+          MoreNavRow(
+            index = row++,
+            title = "订阅",
+            subtitle = "手工记账的计划价与月度折算",
+            icon = FluentIcons.Timeline,
+            dividerAbove = true,
+            onClick = {
+              haptics.perform(HapticEvent.Tap)
+              viewModel.refreshSubscriptions()
+              navController.navigate("subscriptions")
+            }
+          )
+        }
+      }
+    }
+
+    Spacer(Modifier.height(FluentSpacingDefaults.l))
+
+    // Group 3: 系统与配置 (System & Configuration)
+    FluentSection(
+      title = "系统与配置",
+      subtitle = "定价同步与应用设置"
+    ) {
+      FluentCardList(modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l)) {
+        var groupIndex = 0
+        if (state.authorization?.capabilities?.pricing == true &&
+          state.authorization.scopes.contains("admin")
+        ) {
+          MoreNavRow(
+            index = row++,
+            title = "定价",
+            subtitle = "管理模型单价与上游同步",
+            icon = FluentIcons.ArrowExport,
+            dividerAbove = groupIndex++ > 0,
+            onClick = {
+              haptics.perform(HapticEvent.Tap)
+              navController.navigate("pricing")
+            }
+          )
+        }
+        MoreNavRow(
+          index = row++,
+          title = "设置",
+          subtitle = "外观、触感、币种与 Hub 连接",
+          icon = FluentIcons.Settings,
+          dividerAbove = groupIndex > 0,
+          onClick = {
+            haptics.perform(HapticEvent.Tap)
+            navController.navigate("settings")
           }
         )
       }
-      MoreNavRow(
-        index = row,
-        title = "设置",
-        subtitle = "外观、触感、币种与 Hub 连接",
-        icon = FluentIcons.Settings,
-        onClick = {
-          haptics.perform(HapticEvent.Tap)
-          navController.navigate("settings")
-        }
-      )
     }
   }
 }
@@ -219,12 +261,14 @@ private fun MoreNavRow(
   title: String,
   subtitle: String,
   @DrawableRes icon: Int,
+  dividerAbove: Boolean = false,
   onClick: () -> Unit
 ) {
   val colors = LocalFluentColors.current
   FluentListRow(
     primary = title,
     secondary = subtitle,
+    dividerAbove = dividerAbove,
     leading = {
       Box(
         Modifier
@@ -242,11 +286,9 @@ private fun MoreNavRow(
       }
     },
     disclosure = true,
-    dividerAbove = index > 0,
     onClick = onClick
   )
 }
-
 
 private const val MAX_SESSION_ROWS = 200
 @Composable

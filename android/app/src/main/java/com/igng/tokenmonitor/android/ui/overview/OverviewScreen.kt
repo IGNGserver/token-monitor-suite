@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -44,7 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.igng/tokenmonitor.android.data.model.DeviceDto
+import com.igng.tokenmonitor.android.data.model.DeviceDto
 import com.igng.tokenmonitor.android.ui.AnalyticsPeriodKind
 import com.igng.tokenmonitor.android.ui.HubUiState
 import com.igng.tokenmonitor.android.ui.HubViewModel

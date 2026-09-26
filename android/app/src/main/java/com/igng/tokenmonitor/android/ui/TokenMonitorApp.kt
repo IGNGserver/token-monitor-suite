@@ -318,7 +318,10 @@ private fun AppNavHost(
         onRefresh = hubViewModel::refreshAll,
         onOpenAnalytics = { navController.navigate("analytics") },
         onOpenDevices = { navController.navigate("devices") },
-        onOpenSettings = { navController.navigate("settings") }
+        onOpenSettings = { navController.navigate("settings") },
+        onSelectPeriod = hubViewModel::setAnalyticsPeriod,
+        onOpenLimits = { navController.navigate("status") },
+        hubViewModel = hubViewModel
       )
     }
     composable("analytics") {

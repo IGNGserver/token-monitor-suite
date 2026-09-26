@@ -509,7 +509,7 @@ test('every id the dashboard can request an icon for resolves to a shipped file'
 });
 
 test('the shared client list is fully branded on the dashboard', async () => {
-  const shared = require('../../src/shared/clientTracking.js').KNOWN_CLIENTS.split(',');
+  const shared = require('../../src/shared/clientTracking.js').TRACKED_CLIENTS.split(',');
   const aliasBlock = source.match(/const ICON_ALIASES = \{([\s\S]*?)\n\};/)[1];
   const aliases = Object.fromEntries(
     [...aliasBlock.matchAll(/^\s*'?([a-z0-9-]+)'?:\s*'([a-z0-9-]+)'/gm)].map((match) => [match[1], match[2]])
@@ -566,9 +566,9 @@ test('the dashboard fetches its rates through the transport during boot', () => 
 
 test('every tracked client is labelled and coloured on the dashboard', () => {
   // The dashboard kept its own copies of these maps, which had drifted: three
-  // DEFAULT_CLIENTS ids (commandcode, deepseek-harness, reasonix) plus the opt-in
-  // qodercn rendered as raw slugs with hashed fallback colours.
-  const shared = require('../../src/shared/clientTracking.js').KNOWN_CLIENTS.split(',');
+  // ids (commandcode, deepseek-harness, reasonix) plus the Qoder sites rendered
+  // as raw slugs with hashed fallback colours.
+  const shared = require('../../src/shared/clientTracking.js').TRACKED_CLIENTS.split(',');
   const labelsBlock = source.match(/const CLIENT_LABELS = \{([\s\S]*?)\n\};/)[1];
   const colorsBlock = source.match(/const CLIENT_COLORS = \{([\s\S]*?)\n\};/)[1];
   const keysOf = (block) => [...block.matchAll(/^\s*'?([a-z0-9-]+)'?:\s*'/gm)].map((match) => match[1]);

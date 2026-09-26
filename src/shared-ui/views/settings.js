@@ -31,7 +31,7 @@ export function renderSettingsPage() {
         <div class="drawer-actions settings-actions"><fluent-button appearance="primary" type="submit" class="primary-btn" data-settings-submit disabled>${escapeHtml(tr('settings.savePage'))}</fluent-button>${desktopHost ? '' : `<fluent-button appearance="transparent" type="button" class="ghost-btn" data-web-signout>${escapeHtml(tr('settings.signOut'))}</fluent-button>`}</div>
       </form>
       ${desktopHost
-        ? `<div class="settings-desktop-stack" data-desktop-settings>${renderDesktopSettings(appState().desktopSettings || {}, appState().desktopCatalog || {}, appState().desktopInfo || {})}</div>
+        ? `<div class="settings-desktop-stack" data-desktop-settings>${renderDesktopSettings(appState().desktopSettings || {}, appState().desktopInfo || {})}</div>
       <section class="panel desktop-settings-group" data-desktop-group="transfer">
         <div class="panel-head"><h2 class="panel-title">${escapeHtml(tr('transfer.title'))}</h2></div>
         <div class="desktop-settings-body">${renderTransferPanel()}</div>

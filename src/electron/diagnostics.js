@@ -19,7 +19,7 @@ const SECRET_KEY_PATTERN = /(^|[^a-z])(secret|cookie|credential|password|authori
 const DIAGNOSTIC_SETTING_KEYS = Object.freeze([
   'hubMode', 'hubUrl', 'allowInsecureHubHttp', 'deviceId', 'lastPostedDeviceId',
   'collectionMode', 'collectionIntervalMs', 'collectionPaused',
-  'watchEnabled', 'watchDebounceMs', 'clients', 'projectsEnabled',
+  'watchEnabled', 'watchDebounceMs', 'projectsEnabled',
   'historyEnabled', 'historyIntervalMs', 'sessionUsageArchiveEnabled', 'wslScanEnabled',
   'allTimeSince', 'trackedClients', 'clientStatus', 'wslStatus', 'periodWindows',
   'language', 'theme', 'currency', 'reduceMotion', 'zoomFactor',
@@ -29,7 +29,7 @@ const DIAGNOSTIC_SETTING_KEYS = Object.freeze([
   'showToolIcons', 'showLiveDot', 'showCompactTotalTokens', 'titleIconOnly',
   'showLimitSource', 'showLimitUsed', 'maskLimitAccountEmails',
   'showHomeLimitBars', 'showHomeLimitProviderNames', 'homeLimitAccountCount',
-  'heatmapMetric', 'homeActiveDaysWindow', 'hiddenViews', 'hiddenClients', 'pinnedClients'
+  'heatmapMetric', 'homeActiveDaysWindow', 'hiddenViews'
 ]);
 
 function pickSettings(settings) {

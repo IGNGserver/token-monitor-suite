@@ -20,7 +20,7 @@ const main = fs.readFileSync(path.join(root, 'src', 'electron', 'main.js'), 'utf
 // defaultSettings(), or an upgraded profile would lose it on the next write.
 const RETAINED_KEYS = [
   'hubMode', 'hubUrl', 'secret', 'allowInsecureHubHttp', 'deviceId',
-  'clients', 'projectsEnabled', 'historyEnabled', 'historyIntervalMs',
+  'projectsEnabled', 'historyEnabled', 'historyIntervalMs',
   'sessionUsageArchiveEnabled', 'wslScanEnabled', 'allTimeSince',
   'collectionMode', 'collectionIntervalMs', 'watchEnabled', 'watchDebounceMs',
   'exportAutoEnabled', 'exportDir', 'exportIntervalMs',
@@ -29,7 +29,6 @@ const RETAINED_KEYS = [
   'reduceMotion', 'showLiveDot', 'showToolIcons', 'titleIconOnly',
   'showCompactTotalTokens', 'zoomFactor', 'heatmapMetric', 'homeActiveDaysWindow',
   'themeColors', 'vendorColors',
-  'clientDisplayOrder', 'hiddenClients', 'pinnedClients',
   'viewDisplayOrder', 'hiddenViews', 'homeModuleOrder', 'hiddenHomeModules',
   'homeLimitProviderOrder', 'hiddenHomeLimitProviders', 'homeLimitAccountCount',
   'showHomeLimitBars', 'showHomeLimitProviderNames', 'limitProviderOrder',
@@ -37,12 +36,11 @@ const RETAINED_KEYS = [
   'startAtLogin', 'automaticAppUpdates', 'appUpdate', 'discordRpcEnabled',
   'collectionPaused', 'closeToTray', 'startHidden',
   'language', 'currency', 'currencyRates',
-  'windowBounds', 'lastViewState', 'archivedClientUsage', 'migratedDefaultClients',
-  'lastPostedDeviceId'
+  'windowBounds', 'lastViewState', 'lastPostedDeviceId'
 ];
 
 // Keys that must NOT survive: nothing reads them now. Both widget-era leftovers
-// and the retired service-status preferences land here.
+// and the retired service-status / client-selection preferences land here.
 const DROPPED_KEYS = [
   'windowBehavior', 'alwaysOnTop', 'floatingBubbleEnabled', 'floatingBubbleTrigger',
   'floatingBubbleContent', 'floatingBubbleCustomLayout', 'floatingBubbleBounds',
@@ -50,7 +48,10 @@ const DROPPED_KEYS = [
   'trayCustomLayout', 'showTrayProviderBadge', 'windowToggleShortcut',
   'limitsEnabled', 'limitProviders',
   'serviceProviderDisplayOrder', 'hiddenServiceProviders', 'serviceStatusRefreshMs',
-  'refreshMs', 'glassOpacity', 'glassBlur'
+  'refreshMs', 'glassOpacity', 'glassBlur',
+  'clients', 'migratedDefaultClients',
+  'clientDisplayOrder', 'hiddenClients', 'pinnedClients',
+  'archivedClientUsage'
 ];
 
 function defaultSettingsBlock() {
@@ -82,6 +83,15 @@ test('widget-only settings are not declared and are stripped on read', () => {
   const stripBlock = main.slice(stripStart, stripEnd);
   const unstripped = DROPPED_KEYS.filter((key) => !stripBlock.includes(`'${key}'`));
   assert.deepEqual(unstripped, [], `widget keys not stripped on read: ${unstripped.join(', ')}`);
+});
+
+test('removed client-selection keys cannot be revived through settings:update', () => {
+  // The renderer snapshot omits them, but an old preload or a hand-written patch
+  // could still send one; the update path must drop it rather than write it back.
+  assert.match(
+    main,
+    /for \(const key of \['clients', 'migratedDefaultClients', 'clientDisplayOrder',\s+'hiddenClients', 'pinnedClients', 'archivedClientUsage'\]\) \{\s+delete normalizedPatch\[key\];/
+  );
 });
 
 test('the glass preference is normalized to a boolean on both paths', () => {
@@ -180,8 +190,8 @@ test('main-process runtime state stays out of the renderer surface', () => {
   const declared = /const INTERNAL_ONLY_SETTING_KEYS = Object\.freeze\(\[([\s\S]*?)\]\)/.exec(main);
   assert.ok(declared, 'the internal-state key list must exist');
   const keys = [...declared[1].matchAll(/'([A-Za-z]+)'/g)].map((match) => match[1]);
-  assert.deepEqual(keys, ['windowBounds', 'lastViewState', 'archivedClientUsage',
-    'migratedDefaultClients', 'lastPostedDeviceId', 'appUpdate']);
+  assert.deepEqual(keys, ['windowBounds', 'lastViewState',
+    'lastPostedDeviceId', 'appUpdate']);
 
   // Both the settings read for the renderer and the write path go through it, so
   // neither can leak or clobber runtime state.

@@ -1,7 +1,7 @@
 'use strict';
 
 const { parseBoolean } = require('./config');
-const { clientsCsvForSetting } = require('./clientTracking');
+const { TRACKED_CLIENTS } = require('./clientTracking');
 const { normalizeHistoryIntervalMs } = require('./collector');
 const { normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 
@@ -59,7 +59,11 @@ function usageConfigFromSource(source = {}, context = {}) {
   const intervalRequiresActivity = context.intervalRequiresActivity ?? mode === 'smart';
 
   return {
-    clients: clientsCsvForSetting(source.clients),
+    // The tracked set is fixed. Neither runtime narrows it any more — the desktop
+    // settings surface that selected clients is gone and the headless agent no
+    // longer accepts --clients / TOKEN_MONITOR_CLIENTS — so `source.clients` is
+    // intentionally ignored rather than honoured.
+    clients: TRACKED_CLIENTS,
     allTimeSince: source.allTimeSince || '2024-01-01',
     commandTimeoutMs: Number(context.commandTimeoutMs ?? source.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS),
     deviceId: source.deviceId || context.defaultDeviceId,

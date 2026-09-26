@@ -40,7 +40,7 @@ function loadView(state = {}) {
 
 test('the three groups render and no legacy group remains', () => {
   const { renderDesktopSettings } = loadView();
-  const html = renderDesktopSettings({ hubMode: 'client' }, {}, { platform: 'win32', loginItemSupported: true });
+  const html = renderDesktopSettings({ hubMode: 'client' }, { platform: 'win32', loginItemSupported: true });
   for (const id of ['display', 'behaviour', 'connection']) {
     assert.ok(html.includes(`data-desktop-group="${id}"`), `the ${id} group exists`);
   }
@@ -53,7 +53,7 @@ test('every retained settings key has a form control', () => {
   const { renderDesktopSettings } = loadView();
   const html = renderDesktopSettings({
     hubUrl: '', hubMode: 'client', deviceId: 'box'
-  }, {}, { platform: 'win32', loginItemSupported: true });
+  }, { platform: 'win32', loginItemSupported: true });
 
   const required = [
     'language', 'windowSurface', 'reduceMotion',
@@ -68,11 +68,11 @@ test('every retained settings key has a form control', () => {
 
 test('hub-owned fields are offered only in hub mode', () => {
   const { renderDesktopSettings } = loadView();
-  const client = renderDesktopSettings({ hubMode: 'client' }, {}, { platform: 'linux', loginItemSupported: true });
+  const client = renderDesktopSettings({ hubMode: 'client' }, { platform: 'linux', loginItemSupported: true });
   for (const key of ['hubUrl', 'allowInsecureHubHttp', 'deviceId']) {
     assert.ok(client.includes(`name="${key}"`), `${key} appears in hub mode`);
   }
-  const local = renderDesktopSettings({ hubMode: 'local' }, {}, { platform: 'linux', loginItemSupported: true });
+  const local = renderDesktopSettings({ hubMode: 'local' }, { platform: 'linux', loginItemSupported: true });
   for (const key of ['hubUrl', 'allowInsecureHubHttp', 'deviceId']) {
     assert.ok(!local.includes(`name="${key}"`), `${key} is hidden in local mode`);
   }
@@ -95,11 +95,11 @@ test('the window material folds into the legacy (systemGlass, windowsBackdrop) p
 
 test('acrylic and mica are offered only on Windows', () => {
   const { renderDesktopSettings } = loadView();
-  const win = renderDesktopSettings({}, {}, { platform: 'win32' });
+  const win = renderDesktopSettings({}, { platform: 'win32' });
   assert.ok(win.includes('value="acrylic"'), 'Windows offers acrylic');
   assert.ok(win.includes('value="mica"'), 'Windows offers mica');
   for (const platform of ['darwin', 'linux']) {
-    const html = renderDesktopSettings({}, {}, { platform });
+    const html = renderDesktopSettings({}, { platform });
     assert.ok(!html.includes('value="acrylic"'), `${platform} does not offer acrylic`);
     assert.ok(!html.includes('value="mica"'), `${platform} does not offer mica`);
   }
@@ -107,14 +107,14 @@ test('acrylic and mica are offered only on Windows', () => {
 
 test('start at login is hidden when the platform has no login item', () => {
   const { renderDesktopSettings } = loadView();
-  const unsupported = renderDesktopSettings({}, {}, { platform: 'linux', loginItemSupported: false });
+  const unsupported = renderDesktopSettings({}, { platform: 'linux', loginItemSupported: false });
   assert.ok(!unsupported.includes('name="startAtLogin"'), 'a control that cannot work must not be offered');
   assert.ok(!unsupported.includes('name="startHidden"'), 'silent start presupposes a login item');
 });
 
 test('reading the form back produces the right value types', () => {
   const { renderDesktopSettings, readDesktopSettingsPatch } = loadView();
-  const html = renderDesktopSettings({ hubMode: 'client', deviceId: 'box' }, {}, { platform: 'linux', loginItemSupported: true });
+  const html = renderDesktopSettings({ hubMode: 'client', deviceId: 'box' }, { platform: 'linux', loginItemSupported: true });
   assert.ok(html.length > 0);
 
   const fields = [
@@ -165,7 +165,7 @@ test('the update controls are always reachable; the reason text explains a block
       downloaded: false, installSupported: true
     }
   });
-  const html = renderDesktopSettings({}, {}, { platform: 'win32' });
+  const html = renderDesktopSettings({}, { platform: 'win32' });
   assert.match(html, /data-desktop-action="check-updates"/);
   assert.match(html, /data-desktop-action="download-install-update"/);
 
@@ -174,7 +174,7 @@ test('the update controls are always reachable; the reason text explains a block
       currentVersion: '1.0.0', latest: { version: '1.1.0' }, hasUpdate: true,
       downloaded: true, installSupported: false, installSupportReason: 'portable build'
     }
-  }).renderDesktopSettings({}, {}, { platform: 'linux' });
+  }).renderDesktopSettings({}, { platform: 'linux' });
   assert.match(unsupported, /data-desktop-action="download-install-update"/, 'the install button stays reachable');
   assert.match(unsupported, /portable build/, 'the reason is shown rather than the button hidden silently');
 });

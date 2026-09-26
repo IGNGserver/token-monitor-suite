@@ -390,7 +390,6 @@ const state = {
   pwaDismissed: readFlag('token-monitor.hub.pwaDismissed') === '1',
   // Desktop-only settings, loaded from the main process when the host has them.
   desktopSettings: null,
-  desktopCatalog: null,
   desktopInfo: null,
   desktopAppUpdate: null,
   desktopTokscale: null,
@@ -3312,15 +3311,14 @@ function bindEvents() {
 }
 
 // Desktop-only settings live in the main process: the collector cadence, the
-// tracked clients, the window surface and the update channel are all owned
-// there, and the shared UI only renders their current values.
+// window surface and the update channel are all owned there, and the shared UI
+// only renders their current values.
 async function loadDesktopSettings() {
   const desktop = getTransport().desktop;
   if (!desktop) return;
   try {
-    const [settings, catalog, info, syncHealth, snapshotMeta, appUpdateState, tokscaleState] = await Promise.all([
+    const [settings, info, syncHealth, snapshotMeta, appUpdateState, tokscaleState] = await Promise.all([
       desktop.getSettings(),
-      desktop.getCatalog ? desktop.getCatalog() : Promise.resolve({}),
       desktop.getAppInfo ? desktop.getAppInfo() : Promise.resolve({}),
       desktop.getSyncHealth ? desktop.getSyncHealth() : Promise.resolve(null),
       desktop.getSnapshotMeta ? desktop.getSnapshotMeta() : Promise.resolve(null),
@@ -3328,7 +3326,6 @@ async function loadDesktopSettings() {
       desktop.getTokscaleStatus ? desktop.getTokscaleStatus() : Promise.resolve(null)
     ]);
     state.desktopSettings = settings || {};
-    state.desktopCatalog = catalog || {};
     state.desktopInfo = info || {};
     state.desktopAppUpdate = appUpdateState || null;
     state.desktopTokscale = tokscaleState || null;
@@ -3339,7 +3336,6 @@ async function loadDesktopSettings() {
     // A settings read failure must not blank the whole dashboard; the section
     // simply renders with defaults until the next successful read.
     state.desktopSettings = {};
-    state.desktopCatalog = {};
     state.desktopInfo = {};
     state.desktopSyncHealth = null;
     state.desktopSnapshotMeta = null;

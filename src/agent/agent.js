@@ -13,10 +13,6 @@ const {
 const { appVersion } = require('../shared/appVersion');
 const { usageConfigFromSource } = require('../shared/collectorConfig');
 const {
-  readClientUsageArchive,
-  writeClientUsageArchive: persistClientUsageArchive
-} = require('../shared/clientUsageArchive');
-const {
   readDeviceIdentity,
   renameDeviceOnHub,
   writeDeviceIdentity
@@ -42,8 +38,14 @@ const deviceId = String(args.device || args.deviceId || process.env.TOKEN_MONITO
 const once = Boolean(args.once);
 const dryRun = Boolean(args['dry-run'] || args.dryRun);
 
+// Every supported tool is always tracked; the old per-agent selection is gone.
+// Warn instead of failing so an existing service file or shell script keeps
+// working through the upgrade.
+if (args.clients !== undefined || process.env.TOKEN_MONITOR_CLIENTS !== undefined) {
+  console.warn('[config] TOKEN_MONITOR_CLIENTS/--clients is no longer supported; all supported tools are tracked.');
+}
+
 const usageSource = {
-  clients: args.clients ?? process.env.TOKEN_MONITOR_CLIENTS,
   allTimeSince: args.since ?? args.allTimeSince ?? process.env.TOKEN_MONITOR_ALL_TIME_SINCE,
   commandTimeoutMs: args.timeoutMs ?? process.env.TOKEN_MONITOR_TOKSCALE_TIMEOUT_MS,
   deviceId,
@@ -70,21 +72,7 @@ const usageOptions = usageConfigFromSource(usageSource, {
   logger: (message) => (dryRun ? console.error(message) : console.log(message))
 });
 
-const archivedClientUsage = (() => {
-  try { return readClientUsageArchive(); }
-  catch (error) {
-    console.error(`[client-archive] read failed: ${error.message}`);
-    return { version: 1, clients: {} };
-  }
-})();
 const syncSummaryTransformer = createSyncSummaryTransformer({
-  initialClientUsageArchive: archivedClientUsage,
-  activeClients: usageOptions.clients,
-  captureClientUsage: true,
-  writeClientUsageArchive: (archive) => {
-    if (!dryRun) persistClientUsageArchive(archive);
-  },
-  canWriteClientUsageArchive: !dryRun,
   sessionUsageArchiveEnabled: usageOptions.dailyHistoryArchiveEnabled,
   canWriteSessionUsageArchive: !dryRun,
   onArchiveError: (error, operation) => console.error(`[session-archive] ${operation} failed: ${error.message}`)

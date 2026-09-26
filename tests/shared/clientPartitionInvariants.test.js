@@ -13,7 +13,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { DEFAULT_CLIENTS } = require('../../src/shared/clientTracking');
+const { TRACKED_CLIENTS } = require('../../src/shared/clientTracking');
 const {
   clientWatchCandidates,
   tokscaleClientFilter,
@@ -21,7 +21,7 @@ const {
 } = require('../../src/shared/collector');
 const { normalizeClientName } = require('../../src/shared/usage');
 
-const trackedClients = DEFAULT_CLIENTS.split(',').map((value) => value.trim()).filter(Boolean);
+const trackedClients = TRACKED_CLIENTS.split(',').map((value) => value.trim()).filter(Boolean);
 
 test('every tracked client id is a fixed point of normalizeClientName', () => {
   for (const client of trackedClients) {
@@ -37,12 +37,12 @@ test('every watch-mapped client id is a tracked client id', () => {
   // A watch root that maps to an id outside the tracked set produces a target
   // canTargetTodayPartitions() can never satisfy, silently degrading every
   // watch tick to a full scan (or worse, targeting a partition nothing fills).
-  const watched = Object.keys(clientWatchCandidates(DEFAULT_CLIENTS));
-  assert.ok(watched.length > 0, 'expected the default client list to produce watch candidates');
+  const watched = Object.keys(clientWatchCandidates(TRACKED_CLIENTS));
+  assert.ok(watched.length > 0, 'expected the tracked list to produce watch candidates');
   for (const client of watched) {
     assert.ok(
       trackedClients.includes(client),
-      `clientWatchCandidates() emitted "${client}", which is not in DEFAULT_CLIENTS`
+      `clientWatchCandidates() emitted "${client}", which is not in TRACKED_CLIENTS`
     );
   }
 });
@@ -83,7 +83,7 @@ test('tokscaleClientFilter never emits the synthetic pseudo-client', () => {
   // client" (include_synthetic in scanner.rs), which re-enables all scan roots
   // and turns a targeted scan back into a full one with no visible symptom
   // beyond the CPU the targeting was supposed to save.
-  const full = tokscaleClientFilter(DEFAULT_CLIENTS).split(',');
+  const full = tokscaleClientFilter(TRACKED_CLIENTS).split(',');
   assert.ok(!full.includes('synthetic'), 'the full client filter leaked the synthetic pseudo-client');
   for (const client of trackedClients) {
     assert.ok(

@@ -4,78 +4,55 @@ const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
-let trackingApi = {};
-try {
-  trackingApi = require('../../src/shared/clientTracking');
-} catch (_) {}
-
 const {
-  DEFAULT_CLIENTS,
-  KNOWN_CLIENTS,
-  NEW_DEFAULT_CLIENTS,
-  clientsCsvForSetting,
-  applyNewDefaultClientMigration,
-  shouldMigrateNewDefaultClients
-} = trackingApi;
+  TRACKED_CLIENTS,
+  normalizeClientsCsv
+} = require('../../src/shared/clientTracking');
 
-test('clientsCsvForSetting uses defaults only for missing settings', () => {
-  assert.equal(typeof DEFAULT_CLIENTS, 'string');
-  assert.equal(typeof clientsCsvForSetting, 'function');
-  assert.equal(clientsCsvForSetting(undefined), DEFAULT_CLIENTS);
-  assert.equal(clientsCsvForSetting(null), DEFAULT_CLIENTS);
+test('the tracked set is one non-empty, normalized csv', () => {
+  assert.equal(typeof TRACKED_CLIENTS, 'string');
+  const clients = TRACKED_CLIENTS.split(',');
+  assert.ok(clients.length >= 50, `expected the wired client set, saw ${clients.length}`);
+  assert.equal(normalizeClientsCsv(TRACKED_CLIENTS), TRACKED_CLIENTS);
+  assert.equal(new Set(clients).size, clients.length, 'a client id must not repeat');
 });
 
-test('default tracked clients include current tokscale-supported tools', () => {
-  const clients = DEFAULT_CLIENTS.split(',');
+test('the tracked set still covers every current tokscale-supported tool', () => {
+  const clients = TRACKED_CLIENTS.split(',');
   for (const client of ['cline', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilocode', 'zcode', 'kiro', 'codebuddy', 'workbuddy']) {
-    assert.ok(clients.includes(client), `${client} should be tracked by default`);
+    assert.ok(clients.includes(client), `${client} should be tracked`);
+  }
+  for (const client of ['claude-desktop', 'deepseek-harness']) {
+    assert.ok(clients.includes(client), `${client} should be tracked`);
   }
 });
 
-test('default tracked clients include claude-desktop local agent', () => {
-  assert.ok(DEFAULT_CLIENTS.split(',').includes('claude-desktop'));
-  assert.ok(NEW_DEFAULT_CLIENTS.includes('claude-desktop'));
-});
-
-test('default tracked clients include DeepSeek Harness local sessions', () => {
-  assert.ok(DEFAULT_CLIENTS.split(',').includes('deepseek-harness'));
-  assert.ok(NEW_DEFAULT_CLIENTS.includes('deepseek-harness'));
-});
-
-test('micode is intentionally NOT default-tracked (mimocode.db double-counts Claude imports)', () => {
-  assert.ok(!DEFAULT_CLIENTS.split(',').includes('micode'),
-    'micode must stay opt-in until tokscale dedups claude-import sessions');
-});
-
-test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes every opt-in client', () => {
-  // Display-preference normalization (hide/pin/reorder) keys off the KNOWN list, not
-  // the default-tracked list — so an opt-in client must stay here or its prefs get
-  // silently dropped on save/read. Both Qoder sites are opt-in for the same reason
-  // micode is: a local adapter whose totals are estimates, not provider billing.
-  const known = KNOWN_CLIENTS.split(',');
+test('micode and both Qoder sites are tracked (the selection surface is gone)', () => {
+  // micode double-counts claude-import sessions in mimocode.db until tokscale
+  // dedups them, and the Qoder sites are estimate-marked local adapters. They
+  // used to be opt-in through Settings → Tracked tools; with that UI removed,
+  // excluding them would make the data unreachable, so they are locked in like
+  // every other wired client.
+  const clients = TRACKED_CLIENTS.split(',');
   for (const client of ['micode', 'qoder', 'qodercn']) {
-    assert.ok(known.includes(client), `${client} must remain a known client`);
-    assert.ok(!DEFAULT_CLIENTS.split(',').includes(client), `${client} must stay opt-in`);
-  }
-  for (const client of DEFAULT_CLIENTS.split(',')) {
-    assert.ok(known.includes(client), `${client} (default-tracked) must also be known`);
+    assert.ok(clients.includes(client), `${client} must be tracked`);
   }
 });
 
-test('the two Qoder sites sit adjacent in KNOWN_CLIENTS', () => {
-  // Cosmetic but load-bearing for the settings list: the tracked-tools UI renders
-  // in KNOWN_CLIENTS order, so the two editions of one product belong next to each
-  // other rather than scattered by insertion history.
-  const known = KNOWN_CLIENTS.split(',');
-  assert.equal(known.indexOf('qoder'), known.indexOf('qodercn') - 1);
+test('the two Qoder sites sit adjacent', () => {
+  // Cosmetic but load-bearing for every client list a view renders: the two
+  // editions of one product belong next to each other rather than scattered by
+  // insertion history.
+  const clients = TRACKED_CLIENTS.split(',');
+  assert.equal(clients.indexOf('qoder'), clients.indexOf('qodercn') - 1);
 });
 
-test('default tracked clients are accepted by bundled tokscale', () => {
+test('every tracked client is accepted by bundled tokscale', () => {
   const locallyParsedClients = new Set(['proma', 'claude-desktop', 'qoder', 'qodercn']);
-  // Ids our settings persist but tokscale spells differently. The collector
-  // renames them before building `--client`, so the upstream spelling is what
-  // has to exist in the enum. A wrong id is a hard usage error (exit 2), not a
-  // silently dropped filter — which is why this test checks the rename.
+  // Ids we track but tokscale spells differently. The collector renames them
+  // before building `--client`, so the upstream spelling is what has to exist in
+  // the enum. A wrong id is a hard usage error (exit 2), not a silently dropped
+  // filter — which is why this test checks the rename.
   const tokscaleSpellings = { 'deepseek-harness': 'dsh' };
   const result = spawnSync(process.execPath, [require.resolve('tokscale/bin.js'), '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -83,7 +60,7 @@ test('default tracked clients are accepted by bundled tokscale', () => {
   const possibleValues = help.match(/\[possible values: ([^\]]+)\]/);
   assert.ok(possibleValues, 'tokscale --help should list --client possible values');
   const supported = new Set(possibleValues[1].split(',').map((client) => client.trim()).filter(Boolean));
-  const unsupported = DEFAULT_CLIENTS.split(',').filter((client) => {
+  const unsupported = TRACKED_CLIENTS.split(',').filter((client) => {
     if (locallyParsedClients.has(client)) return false;
     return !supported.has(tokscaleSpellings[client] || client);
   });
@@ -98,47 +75,8 @@ test('default tracked clients are accepted by bundled tokscale', () => {
   }
 });
 
-test('clientsCsvForSetting preserves explicit empty tracked-tool selection', () => {
-  assert.equal(clientsCsvForSetting(''), '');
-  assert.equal(clientsCsvForSetting('  '), '');
-});
-
-test('clientsCsvForSetting normalizes saved client csv values', () => {
-  assert.equal(clientsCsvForSetting(' Claude , Codex,,hermes '), 'claude,codex,hermes');
-});
-
-test('explicit environment client selection is not broadened by default migration', () => {
-  assert.equal(typeof shouldMigrateNewDefaultClients, 'function');
-  assert.equal(shouldMigrateNewDefaultClients({
-    hasExplicitEnvClients: true,
-    hasPersistedClientSelection: false
-  }), false);
-  assert.equal(shouldMigrateNewDefaultClients({
-    hasExplicitEnvClients: true,
-    hasPersistedClientSelection: true
-  }), false);
-  assert.equal(shouldMigrateNewDefaultClients(), true);
-});
-
-test('applyNewDefaultClientMigration appends newly introduced local clients once', () => {
-  const old = DEFAULT_CLIENTS.split(',').filter((c) => !['claude-desktop', 'deepseek-harness'].includes(c)).join(',');
-  const first = applyNewDefaultClientMigration(old, '');
-  assert.ok(first.clients.split(',').includes('claude-desktop'));
-  assert.ok(first.clients.split(',').includes('deepseek-harness'));
-  assert.equal(first.migratedDefaultClients, 'claude-desktop,deepseek-harness');
-  assert.equal(first.changed, true);
-
-  const afterDisable = first.clients.split(',').filter((c) => !['claude-desktop', 'deepseek-harness'].includes(c)).join(',');
-  const second = applyNewDefaultClientMigration(afterDisable, first.migratedDefaultClients);
-  // User disabled after migration — do not re-add.
-  assert.ok(!second.clients.split(',').filter(Boolean).includes('claude-desktop'));
-  assert.ok(!second.clients.split(',').filter(Boolean).includes('deepseek-harness'));
-  assert.equal(second.changed, false);
-});
-
-test('applyNewDefaultClientMigration leaves empty tracked list empty', () => {
-  const result = applyNewDefaultClientMigration('', '');
-  assert.equal(result.clients, '');
-  assert.ok(result.migratedDefaultClients.includes('claude-desktop'));
-  assert.ok(result.migratedDefaultClients.includes('deepseek-harness'));
+test('normalizeClientsCsv trims, lowercases, and drops empty entries', () => {
+  assert.equal(normalizeClientsCsv(' Claude , Codex,,hermes '), 'claude,codex,hermes');
+  assert.equal(normalizeClientsCsv(undefined), '');
+  assert.equal(normalizeClientsCsv(''), '');
 });

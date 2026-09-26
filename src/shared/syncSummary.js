@@ -1,11 +1,6 @@
 'use strict';
 
 const {
-  applyArchivedClientUsage,
-  captureArchivedClientUsage,
-  normalizeArchivedClientUsage
-} = require('./clientUsageArchive');
-const {
   applySessionUsageArchive,
   captureSessionUsageArchive,
   normalizeSessionUsageArchive,
@@ -24,12 +19,6 @@ function applySyncSummaryTransform(summary, options = {}) {
   const now = options.now || sessionUsageArchiveDate(summary);
   let visibleSummary = summary;
 
-  if (options.archivedClientUsage !== undefined) {
-    visibleSummary = applyArchivedClientUsage(visibleSummary, options.archivedClientUsage, {
-      activeClients: options.activeClients,
-      now
-    });
-  }
   if (options.sessionUsageArchiveEnabled !== false) {
     visibleSummary = applySessionUsageArchive(
       visibleSummary,
@@ -47,29 +36,10 @@ function applySyncSummaryTransform(summary, options = {}) {
  * deliberately shared so an entry point cannot accidentally omit an archive.
  */
 function createSyncSummaryTransformer(options = {}) {
-  let clientArchive = options.initialClientUsageArchive === undefined
-    ? null
-    : normalizeArchivedClientUsage(options.initialClientUsageArchive);
-  let clientArchiveLoaded = clientArchive !== null;
   let sessionArchive = options.initialSessionUsageArchive === undefined
     ? null
     : normalizeSessionUsageArchive(options.initialSessionUsageArchive);
   let sessionArchiveLoaded = sessionArchive !== null;
-
-  function loadClientArchive() {
-    if (clientArchiveLoaded) return clientArchive;
-    clientArchiveLoaded = true;
-    try {
-      const loaded = typeof options.readClientUsageArchive === 'function'
-        ? options.readClientUsageArchive()
-        : resolveOption(options.archivedClientUsage);
-      clientArchive = normalizeArchivedClientUsage(loaded);
-    } catch (error) {
-      clientArchive = normalizeArchivedClientUsage({});
-      try { options.onArchiveError?.(error, 'client-read'); } catch (_) {}
-    }
-    return clientArchive;
-  }
 
   function loadSessionArchive() {
     if (sessionArchiveLoaded) return sessionArchive;
@@ -89,22 +59,6 @@ function createSyncSummaryTransformer(options = {}) {
   function transform(summary, reason = 'usage', meta = {}) {
     if (!summary || typeof summary !== 'object') return summary;
     const now = sessionUsageArchiveDate(summary);
-    let nextClientArchive = loadClientArchive();
-    const activeClients = resolveOption(options.activeClients, summary, reason, meta);
-    if (options.captureClientUsage === true && meta.preview !== true) {
-      const captured = captureArchivedClientUsage(nextClientArchive, summary, activeClients, now);
-      const changed = JSON.stringify(captured) !== JSON.stringify(nextClientArchive);
-      nextClientArchive = captured;
-      clientArchive = captured;
-      const writeAllowed = resolveOption(options.canWriteClientUsageArchive, summary, reason, meta) !== false;
-      if (changed && writeAllowed) {
-        try {
-          if (typeof options.writeClientUsageArchive === 'function') options.writeClientUsageArchive(captured);
-        } catch (error) {
-          try { options.onArchiveError?.(error, 'client-write'); } catch (_) {}
-        }
-      }
-    }
     let nextArchive = loadSessionArchive();
     const archiveEnabled = resolveOption(options.sessionUsageArchiveEnabled, summary, reason, meta) !== false;
     if (archiveEnabled) {
@@ -126,8 +80,6 @@ function createSyncSummaryTransformer(options = {}) {
     }
 
     return applySyncSummaryTransform(summary, {
-      archivedClientUsage: nextClientArchive,
-      activeClients,
       sessionUsageArchiveEnabled: archiveEnabled,
       sessionUsageArchive: nextArchive,
       projectsEnabled: resolveOption(options.projectsEnabled, summary, reason, meta),
@@ -136,16 +88,7 @@ function createSyncSummaryTransformer(options = {}) {
   }
 
   return {
-    getClientUsageArchive: () => clientArchive,
     getSessionUsageArchive: () => sessionArchive,
-    reloadClientUsageArchive() {
-      clientArchive = null;
-      clientArchiveLoaded = false;
-    },
-    setClientUsageArchive(value = {}) {
-      clientArchive = normalizeArchivedClientUsage(value);
-      clientArchiveLoaded = true;
-    },
     resetSessionUsageArchive(value = {}) {
       sessionArchive = normalizeSessionUsageArchive(value);
       sessionArchiveLoaded = true;

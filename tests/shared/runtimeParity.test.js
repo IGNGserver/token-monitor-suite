@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const { usageConfigFromSource } = require('../../src/shared/collectorConfig');
 const { usageConfigFromSettings } = require('../../src/electron/runtimeConfig');
+const { TRACKED_CLIENTS } = require('../../src/shared/clientTracking');
 const {
   applySyncSummaryTransform,
   createSyncSummaryTransformer
@@ -22,6 +23,8 @@ function comparableUsageConfig(value) {
 test('Electron and headless usage configuration is built by one shared contract', () => {
   const source = {
     deviceId: 'device-1',
+    // A stale/source-provided client subset must be ignored: the tracked set is
+    // fixed for both runtimes.
     clients: 'claude,codex',
     allTimeSince: '2025-01-01',
     collectionMode: 'smart',
@@ -50,6 +53,8 @@ test('Electron and headless usage configuration is built by one shared contract'
     comparableUsageConfig(usageConfigFromSource(source, context)),
     comparableUsageConfig(usageConfigFromSettings(source, context))
   );
+  assert.equal(usageConfigFromSource(source, context).clients, TRACKED_CLIENTS);
+  assert.equal(usageConfigFromSettings(source, context).clients, TRACKED_CLIENTS);
 });
 
 test('smart mode uses the configured shared collection interval in both runtimes', () => {
@@ -91,8 +96,6 @@ test('both modes serialize the same transformed detection snapshot', () => {
     }
   };
   const options = {
-    activeClients: 'codex',
-    archivedClientUsage: { version: 1, clients: {} },
     sessionUsageArchive: { version: 1, days: {} },
     sessionUsageArchiveEnabled: true,
     projectsEnabled: true,
@@ -100,16 +103,12 @@ test('both modes serialize the same transformed detection snapshot', () => {
   };
 
   const electronTransform = createSyncSummaryTransformer({
-    initialClientUsageArchive: options.archivedClientUsage,
     initialSessionUsageArchive: options.sessionUsageArchive,
-    activeClients: options.activeClients,
     sessionUsageArchiveEnabled: options.sessionUsageArchiveEnabled,
     projectsEnabled: options.projectsEnabled
   });
   const headlessTransform = createSyncSummaryTransformer({
-    initialClientUsageArchive: options.archivedClientUsage,
     initialSessionUsageArchive: options.sessionUsageArchive,
-    activeClients: options.activeClients,
     sessionUsageArchiveEnabled: options.sessionUsageArchiveEnabled,
     projectsEnabled: options.projectsEnabled
   });

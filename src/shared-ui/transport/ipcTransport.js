@@ -203,7 +203,6 @@ function createIpcTransport(bridge) {
     desktop: {
       getSettings: () => bridge.getSettings(),
       updateSettings: (patch) => bridge.updateSettings(patch),
-      getCatalog: () => bridge.getCatalog?.() ?? Promise.resolve({}),
       getAppInfo: () => bridge.getAppInfo(),
       openUserData: () => bridge.openUserData(),
       clearSessionUsageArchive: () => bridge.clearSessionUsageArchive(),

@@ -97,7 +97,7 @@ const WSL_DATA_MARKERS = [
 // Maps every WSL_DATA_MARKERS entry to the tracked-client id that owns it, so a
 // matched marker can be attributed back to a client (alt roots collapse to one
 // id, e.g. .kimi/.kimi-code -> kimi; the OpenClaw bot dirs -> openclaw; the two
-// Cline globalStorage paths -> cline). Ids must match DEFAULT_CLIENTS.
+// Cline globalStorage paths -> cline). Ids must match TRACKED_CLIENTS.
 const MARKER_CLIENTS = {
   '.claude/projects': 'claude',
   '.claude/transcripts': 'claude',
@@ -280,8 +280,8 @@ async function collectWslUsage(options = {}, deps = {}) {
   const bundle = emptyWslBundle();
   const detected = new Set();
   if (!trackedClients) return { bundle, detected: [] };
-  // Only attribute markers for clients the user is actually tracking — a marker
-  // for an untracked client must not surface in the panel.
+  // Marker-based attribution is checked against the tracked set: a marker for a
+  // client outside it must not surface in the panel.
   // Reasonix aggregate usage is supported on the host, but remains excluded
   // from WSL scans: Tokscale's Windows PathRoot::ReasonixHome conflicts with
   // the Linux-default `.reasonix/stats` path inside WSL. Native session files

@@ -10,7 +10,6 @@ const MODE_STRUCTURAL_KEYS = Object.freeze([
   'deviceId'
 ]);
 const USAGE_STRUCTURAL_KEYS = Object.freeze([
-  'clients',
   'allTimeSince',
   'collectionIntervalMs',
   'collectionMode',

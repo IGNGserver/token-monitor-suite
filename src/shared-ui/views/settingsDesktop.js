@@ -87,11 +87,9 @@ function actionButton(action, labelKey, appearance = 'transparent') {
 
 /**
  * @param {object} settings  Current settings (redacted) from the main process.
- * @param {object} catalog   Lists owned by the shared modules (unused, kept for
- *                           call-site compatibility).
  * @param {object} info      Platform facts, e.g. whether a login item exists.
  */
-export function renderDesktopSettings(settings = {}, _catalog = {}, info = {}) {
+export function renderDesktopSettings(settings = {}, info = {}) {
   const isWindows = info.platform === 'win32';
 
   const groups = [];

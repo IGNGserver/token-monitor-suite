@@ -26,11 +26,7 @@ const motionPreferenceApi = require('./motionPreference');
 // event and Electron pops a "JavaScript error in the main process" dialog.
 installSafeStdout();
 const {
-  DEFAULT_CLIENTS,
-  KNOWN_CLIENTS,
-  clientsCsvForSetting,
-  applyNewDefaultClientMigration,
-  shouldMigrateNewDefaultClients
+  TRACKED_CLIENTS
 } = require('../shared/clientTracking');
 const { collectCustomRangeOnce, lookupModelPricing, normalizeHistoryIntervalMs } = require('../shared/collector');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
@@ -47,11 +43,6 @@ const { requireSafeHubTransport } = require('../shared/hubTransport');
 const { parseLimitProviders } = require('../shared/limitCollector');
 const { isAllowedCodexLoginUrl } = require('../shared/codexLogin');
 const { isAllowedVerificationUrl } = require('../shared/copilotDeviceFlow');
-const {
-  normalizeClientDisplayOrder,
-  normalizeHiddenClients,
-  normalizePinnedClients
-} = require('./preferences/clientDisplayPreferences');
 // The native menu, tray and dialogs localize from the same catalog the shared UI
 // renders. The main process used to keep its own copy, which silently lost every
 // `menu.*`/`nav.*` string the redesign added. The catalog is an ES module; Node
@@ -92,13 +83,6 @@ const semver = require('semver');
 const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
 const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
 const {
-  captureArchivedClientUsage,
-  readClientUsageArchive,
-  normalizeArchivedClientUsage,
-  pruneArchivedClientUsage,
-  writeClientUsageArchive
-} = require('../shared/clientUsageArchive');
-const {
   clearSessionUsageArchive
 } = require('../shared/sessionUsageArchive');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
@@ -107,7 +91,6 @@ const { fetchBufferedWithTimeout, fetchWithTimeout } = require('../shared/http')
 const { postSyncPayload } = require('../shared/syncPayload');
 const { renameDeviceOnHub, readDeviceIdentity, writeDeviceIdentity } = require('../shared/deviceIdentity');
 const {
-  COLLECTION_INTERVAL_OPTIONS: SHARED_COLLECTION_INTERVAL_OPTIONS,
   DEFAULT_COLLECTION_INTERVAL_MS: SHARED_DEFAULT_COLLECTION_INTERVAL_MS,
   DEFAULT_SMART_COLLECTION_INTERVAL_MS: SHARED_DEFAULT_SMART_COLLECTION_INTERVAL_MS,
   normalizeCollectionIntervalMs: normalizeSharedCollectionIntervalMs,
@@ -220,7 +203,6 @@ const SSE_RETRY_BASE_MS = 1000;
 const SSE_RETRY_MAX_MS = 30 * 1000;
 const SYNC_REST_POLL_MS = 60 * 1000;
 const SYNC_RECOVERY_TIMEOUT_MS = 20 * 1000;
-const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
 // The shared UI exposes eight views. The widget-era client had nine breakdown-oriented ids,
 // so an upgraded profile's saved order/hidden set is translated rather than
 // dropped: tool/model/project/session are now tabs of `usage`, and status is the
@@ -288,7 +270,6 @@ let settings = null;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
-let clientUsageArchive = null;
 let deviceIdentity = null;
 let rendererViewState = normalizeInitialRendererViewState();
 let initialWindowCreated = false;
@@ -302,11 +283,10 @@ if (!gotLock) app.exit(0);
 const HOME_LIMIT_ACCOUNT_COUNT_DEFAULT = 3;
 const HOME_LIMIT_ACCOUNT_COUNT_MAX = 12;
 // Runtime state the main process owns. The renderer neither reads them nor may
-// write them: a stray write would silently discard a restored window, an archive,
-// or an update decision. tests/electron/settingsMigration.test.js pins both halves.
+// write them: a stray write would silently discard a restored window or an
+// update decision. tests/electron/settingsMigration.test.js pins both halves.
 const INTERNAL_ONLY_SETTING_KEYS = Object.freeze([
-  'windowBounds', 'lastViewState', 'archivedClientUsage',
-  'migratedDefaultClients', 'lastPostedDeviceId', 'appUpdate'
+  'windowBounds', 'lastViewState', 'lastPostedDeviceId', 'appUpdate'
 ]);
 
 const LEGACY_LOCAL_LIMIT_SETTING_KEYS = Object.freeze([
@@ -390,11 +370,6 @@ function defaultSettings() {
     discordRpcEnabled: false,
     deviceId: normalizeDeviceIdValue(process.env.TOKEN_MONITOR_DEVICE_ID, defaultDeviceId()),
     lastPostedDeviceId: '',
-    clients: clientsCsvForSetting(process.env.TOKEN_MONITOR_CLIENTS),
-    migratedDefaultClients: '',
-    clientDisplayOrder: '',
-    hiddenClients: '',
-    pinnedClients: '',
     viewDisplayOrder: '',
     hiddenViews: defaultViewDisplayPreferences().hiddenViews,
     homeModuleOrder: defaultHomeModulePreferences().homeModuleOrder,
@@ -424,7 +399,6 @@ function defaultSettings() {
     watchEnabled: parseBoolean(process.env.TOKEN_MONITOR_WATCH, true),
     watchDebounceMs: normalizeSharedWatchDebounceMs(process.env.TOKEN_MONITOR_WATCH_DEBOUNCE_MS),
     syncUploadIntervalMs: normalizeSyncUploadIntervalMs(process.env.TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS),
-    archivedClientUsage: { version: 1, clients: {} },
     allTimeSince: normalizeAllTimeSince(process.env.TOKEN_MONITOR_ALL_TIME_SINCE),
     customModelPricing: [],
     limitProviderOrder: defaultLimitProviderOrder(),
@@ -568,13 +542,6 @@ function normalizeHiddenLimitProviders(value) {
   return hidden.join(',');
 }
 
-function migrateClientDisplayOrder(value) {
-  const known = new Set(KNOWN_CLIENTS.split(','));
-  const raw = Array.isArray(value) ? value : String(value || '').split(',');
-  const hasKnownClient = raw.some((item) => known.has(String(item || '').trim().toLowerCase()));
-  return hasKnownClient ? normalizeClientDisplayOrder(value, KNOWN_CLIENT_LIST).join(',') : '';
-}
-
 function migrateViewDisplayOrder(value) {
   const known = new Set(DEFAULT_VIEW_LIST.map((view) => view.id));
   const raw = Array.isArray(value) ? value : String(value || '').split(',');
@@ -642,21 +609,7 @@ function ensureSettingsLoaded() {
   if (settings) return settings;
   settings = readSettings();
   ensureDesktopSnapshotCacheLoaded();
-  ensureClientUsageArchiveLoaded();
   ensureDeviceIdentityLoaded();
-  // Auto-enable newly introduced default clients (e.g. claude-desktop) once for existing installs.
-  // An explicit environment selection is a complete selection, including an
-  // empty one. Persisted values still retain their normal read precedence, but
-  // this compatibility migration must not broaden an explicit env selection.
-  const hasExplicitEnvClients = Object.prototype.hasOwnProperty.call(process.env, 'TOKEN_MONITOR_CLIENTS');
-  if (shouldMigrateNewDefaultClients({ hasExplicitEnvClients })) {
-    const migration = applyNewDefaultClientMigration(settings.clients, settings.migratedDefaultClients);
-    if (migration.changed) {
-      settings.clients = migration.clients;
-      settings.migratedDefaultClients = migration.migratedDefaultClients;
-      saveSettings();
-    }
-  }
   // Bare hub host/IP defaults to http://
   {
     const normalizedHubUrl = normalizeHubUrl(settings.hubUrl);
@@ -870,15 +823,6 @@ function readSettings() {
     if (saved.limitProviderOrder !== undefined) {
       merged.limitProviderOrder = migrateLimitProviderOrder(saved.limitProviderOrder);
     }
-    if (saved.clientDisplayOrder !== undefined) {
-      merged.clientDisplayOrder = migrateClientDisplayOrder(saved.clientDisplayOrder);
-    }
-    if (saved.hiddenClients !== undefined) {
-      merged.hiddenClients = normalizeHiddenClients(saved.hiddenClients, KNOWN_CLIENT_LIST);
-    }
-    if (saved.pinnedClients !== undefined) {
-      merged.pinnedClients = normalizePinnedClients(saved.pinnedClients, KNOWN_CLIENT_LIST);
-    }
     if (saved.viewDisplayOrder !== undefined) {
       merged.viewDisplayOrder = migrateViewDisplayOrder(saved.viewDisplayOrder);
     }
@@ -950,10 +894,12 @@ function readSettings() {
     merged.currencyRates = normalizeCurrencyOverrides(merged.currencyRates);
     delete merged.hubAdminSecret;
     merged.allowInsecureHubHttp = parseBoolean(merged.allowInsecureHubHttp, false);
-    merged.archivedClientUsage = normalizeArchivedClientUsage(merged.archivedClientUsage);
     delete merged.edgeDrawerEnabled;
     // Widget-era keys are dropped rather than migrated: nothing reads them now,
     // and leaving them in settings.json would imply they still do something.
+    // The client-selection keys are the same story: tracked tools are fixed, the
+    // settings surface that chose them is gone, and the tool-list display
+    // preferences left with it.
     for (const key of ['windowBehavior', 'alwaysOnTop', 'floatingBubbleEnabled', 'floatingBubbleTrigger',
       'floatingBubbleContent', 'floatingBubbleCustomLayout', 'floatingBubbleBounds', 'showTrayIcon',
       'trayMode', 'startInTray', 'trayContent', 'trayCustomLayout',
@@ -966,7 +912,16 @@ function readSettings() {
       'serviceProviderDisplayOrder', 'hiddenServiceProviders', 'serviceStatusRefreshMs',
       // Retired with the borderless widget window: nothing has read the glass
       // geometry or the old local poll cadence since the shell moved to SSE/IPC.
-      'refreshMs', 'glassOpacity', 'glassBlur']) {
+      'refreshMs', 'glassOpacity', 'glassBlur',
+      // Client selection: every wired harness is tracked, so a persisted subset
+      // (and its migration marker) must not linger.
+      'clients', 'migratedDefaultClients',
+      // Tool-list display preferences: no view reads them since the settings
+      // rebuild, and the remove/hide/pin UI is gone.
+      'clientDisplayOrder', 'hiddenClients', 'pinnedClients',
+      // The untracked-client usage archive only existed to keep usage of
+      // deselected clients on screen; with nothing deselectable it has no job.
+      'archivedClientUsage']) {
       delete merged[key];
     }
     invalidateLegacyLocalLimitData();
@@ -1068,62 +1023,6 @@ function syncLoginItemSettingFromOs() {
   saveSettings();
 }
 
-function trackedClientSet(value) {
-  return new Set(String(value || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean));
-}
-
-function removedTrackedClients(previousClients, nextClients) {
-  const previous = trackedClientSet(previousClients);
-  const next = trackedClientSet(nextClients);
-  return Array.from(previous).filter((client) => !next.has(client));
-}
-
-function localArchiveSourceDevice() {
-  const deviceId = settings?.deviceId || defaultDeviceId();
-  if (lastCollectedDevice?.deviceId === deviceId) return lastCollectedDevice;
-  if (localDevice?.deviceId === deviceId) return localDevice;
-  return (latestStats?.devices || []).find((device) => device?.deviceId === deviceId) || null;
-}
-
-function updateArchivedClientUsage(previousClients, nextClients) {
-  const removedClients = removedTrackedClients(previousClients, nextClients);
-  let archive = pruneArchivedClientUsage(ensureClientUsageArchiveLoaded(), nextClients);
-  if (removedClients.length > 0) {
-    archive = captureArchivedClientUsage(archive, localArchiveSourceDevice(), removedClients);
-  }
-  clientUsageArchive = archive;
-  settings.archivedClientUsage = archive;
-  syncSummaryTransformer.setClientUsageArchive(archive);
-  try {
-    writeClientUsageArchive(archive);
-  } catch (error) {
-    console.log(`[client-archive] write failed: ${error.message}`);
-  }
-}
-
-function ensureClientUsageArchiveLoaded() {
-  if (clientUsageArchive) return clientUsageArchive;
-  const legacy = normalizeArchivedClientUsage(settings?.archivedClientUsage);
-  let shared;
-  try {
-    shared = readClientUsageArchive();
-  } catch (error) {
-    console.log(`[client-archive] read failed: ${error.message}`);
-    shared = { version: 1, clients: {} };
-  }
-  const merged = normalizeArchivedClientUsage({
-    ...shared,
-    clients: { ...(legacy.clients || {}), ...(shared.clients || {}) }
-  });
-  clientUsageArchive = merged;
-  if (settings) settings.archivedClientUsage = merged;
-  if (JSON.stringify(merged) !== JSON.stringify(shared)) {
-    try { writeClientUsageArchive(merged); }
-    catch (error) { console.log(`[client-archive] migration write failed: ${error.message}`); }
-  }
-  return clientUsageArchive;
-}
-
 function ensureDeviceIdentityLoaded() {
   if (deviceIdentity) return deviceIdentity;
   const shared = readDeviceIdentity();
@@ -1141,22 +1040,13 @@ function ensureDeviceIdentityLoaded() {
 }
 
 const syncSummaryTransformer = createSyncSummaryTransformer({
-  archivedClientUsage: () => ensureClientUsageArchiveLoaded(),
-  activeClients: () => settings?.clients,
-  captureClientUsage: true,
-  writeClientUsageArchive: (archive) => {
-    clientUsageArchive = archive;
-    if (settings) settings.archivedClientUsage = archive;
-    writeClientUsageArchive(archive);
-  },
-  canWriteClientUsageArchive: () => !isExternalAgentActive(),
   sessionUsageArchiveEnabled: () => settings?.sessionUsageArchiveEnabled !== false,
   projectsEnabled: () => settings?.projectsEnabled !== false,
   canWriteSessionUsageArchive: () => !isExternalAgentActive(),
   onArchiveError: (error, operation) => console.log(`[session-archive] ${operation} failed: ${error.message}`)
 });
 
-function summaryWithArchivedClientUsage(summary, reason, meta) {
+function summaryForSync(summary, reason, meta) {
   return syncSummaryTransformer.transform(summary, reason, meta);
 }
 
@@ -1714,9 +1604,7 @@ function startSyncCollector() {
     onError: (error) => console.log(`[sync-collector] post failed (${stableSyncFailureCode(error)}): ${error.message}`),
     beforeEnqueue: (visibleSummary) => {
       if (isExternalAgentActive()) {
-        syncSummaryTransformer.reloadClientUsageArchive();
         syncSummaryTransformer.reloadSessionUsageArchive();
-        clientUsageArchive = null;
         return false;
       }
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
@@ -1738,7 +1626,7 @@ function startSyncCollector() {
   syncUploadSchedulerHandle = syncUploadSink;
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
-    transformUsage: summaryWithArchivedClientUsage,
+    transformUsage: summaryForSync,
     usageOptions: electronUsageConfig('sync-collector'),
     sink: syncUploadSink,
     onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
@@ -1974,7 +1862,7 @@ function startLocalCollector() {
   sendStatus(false, { reason: 'collecting' });
   deviceRuntimeHandle = createDeviceRuntime({
     envelope: electronDeviceEnvelope(),
-    transformUsage: summaryWithArchivedClientUsage,
+    transformUsage: summaryForSync,
     usageOptions: electronUsageConfig('collector'),
     progressive: true,
     onRecord: (summary, meta) => {
@@ -3565,7 +3453,7 @@ async function fetchCustomRangeStats(rangeInput) {
     };
 
     const collectLocalCustomRange = async () => {
-      const clients = clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS);
+      const clients = TRACKED_CLIENTS;
       const commandTimeoutMs = Number(process.env.TOKEN_MONITOR_COMMAND_TIMEOUT_MS) || 120000;
       const result = await collectCustomRangeOnce({
         clients,
@@ -3886,7 +3774,6 @@ app.whenReady().then(() => {
     const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
     const previousNativeMaterial = nativeBlurEnabled();
     const previousWindowsSurface = windowsSurfaceFor({ systemGlass: previousNativeMaterial }).kind;
-    const previousClients = settings.clients;
     const previousDiscordRpcEnabled = settings.discordRpcEnabled;
     const previousCurrency = settings.currency;
     const previousStartAtLogin = settings.startAtLogin;
@@ -3895,7 +3782,12 @@ app.whenReady().then(() => {
     const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
     const normalizedPatch = { ...withoutInternalOnlyKeys(stripLegacyLocalLimitSettings(patch)), currency: normalizedCurrency };
     delete normalizedPatch.customModelPricing;
-    if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
+    // Client selection and the tool-list preferences it fed are gone. A renderer
+    // (or an old preload) that still sends them must not resurrect the keys.
+    for (const key of ['clients', 'migratedDefaultClients', 'clientDisplayOrder',
+      'hiddenClients', 'pinnedClients', 'archivedClientUsage']) {
+      delete normalizedPatch[key];
+    }
     if (patch.hubUrl !== undefined) normalizedPatch.hubUrl = normalizeHubUrl(patch.hubUrl);
     delete normalizedPatch.hubAdminSecret;
     if (patch.allowInsecureHubHttp !== undefined) {
@@ -3927,7 +3819,6 @@ app.whenReady().then(() => {
       deviceId: normalizeDeviceIdValue(patch.deviceId !== undefined ? patch.deviceId : settings.deviceId, defaultDeviceId()),
       theme: normalizeThemeChoice(patch.theme !== undefined ? patch.theme : settings.theme),
       allTimeSince: normalizeAllTimeSince(patch.allTimeSince !== undefined ? patch.allTimeSince : settings.allTimeSince),
-      clients: patch.clients !== undefined ? clientsCsvForSetting(patch.clients, '') : clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS),
       systemGlass: parseBoolean(patch.systemGlass ?? settings.systemGlass, true),
       collectionPaused: parseBoolean(patch.collectionPaused ?? settings.collectionPaused, false),
       closeToTray: parseBoolean(patch.closeToTray ?? settings.closeToTray, true),
@@ -3941,9 +3832,6 @@ app.whenReady().then(() => {
       showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, true),
       discordRpcEnabled: patch.discordRpcEnabled ?? settings.discordRpcEnabled ?? false,
       limitProviderOrder: patch.limitProviderOrder !== undefined ? migrateLimitProviderOrder(patch.limitProviderOrder) : settings.limitProviderOrder,
-      clientDisplayOrder: patch.clientDisplayOrder !== undefined ? migrateClientDisplayOrder(patch.clientDisplayOrder) : (settings.clientDisplayOrder || ''),
-      hiddenClients: patch.hiddenClients !== undefined ? normalizeHiddenClients(patch.hiddenClients, KNOWN_CLIENT_LIST) : normalizeHiddenClients(settings.hiddenClients, KNOWN_CLIENT_LIST),
-      pinnedClients: patch.pinnedClients !== undefined ? normalizePinnedClients(patch.pinnedClients, KNOWN_CLIENT_LIST) : normalizePinnedClients(settings.pinnedClients, KNOWN_CLIENT_LIST),
       viewDisplayOrder: patch.viewDisplayOrder !== undefined ? migrateViewOrderToShared(patch.viewDisplayOrder) : (settings.viewDisplayOrder || ''),
       hiddenViews: patch.hiddenViews !== undefined ? normalizeHiddenViews(patch.hiddenViews, DEFAULT_VIEW_LIST) : normalizeHiddenViews(settings.hiddenViews, DEFAULT_VIEW_LIST),
       homeModuleOrder: patch.homeModuleOrder !== undefined ? normalizeHomeModuleOrder(patch.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',') : normalizeHomeModuleOrder(settings.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(','),
@@ -3976,8 +3864,6 @@ app.whenReady().then(() => {
         ? normalizeCustomPricingSetting(patch.customModelPricing)
         : normalizeCustomPricingSetting(settings.customModelPricing)
     };
-    settings.archivedClientUsage = normalizeArchivedClientUsage(settings.archivedClientUsage);
-    if (settings.clients !== previousClients) updateArchivedClientUsage(previousClients, settings.clients);
     delete settings.edgeDrawerEnabled;
     try {
       saveSettings({ throwOnError: true });
@@ -4158,23 +4044,6 @@ app.whenReady().then(() => {
       };
     }
   });
-  // Catalogs the desktop settings view needs. They come from the shared modules
-  // that already own these lists, so the UI cannot drift from the collector.
-  ipcMain.handle('desktop:catalog', () => ({
-    clients: KNOWN_CLIENTS.split(',').map((id) => id.trim()).filter(Boolean),
-    defaultClients: DEFAULT_CLIENTS.split(',').map((id) => id.trim()).filter(Boolean),
-    limitProviders: require('../shared/limitProviders').LIMIT_PROVIDER_IDS.slice(),
-    collectionModes: ['live', 'interval', 'smart'],
-    exportIntervals: [60 * 1000, 5 * 60 * 1000, 15 * 60 * 1000, 60 * 60 * 1000],
-    syncUploadIntervals: [0, 600000, 1200000, 1800000],
-    historyIntervals: [5 * 60 * 1000, 10 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000],
-    // Lists the ordering/visibility preferences are chosen from. They come from
-    // the modules that own them so a new view or provider cannot be missing here.
-    views: SHARED_VIEW_LIST.map((view) => view.id),
-    homeModules: ['limits', 'tool', 'device', 'model', 'trends'],
-    // The collector owns the sanctioned tick cadence, so the UI cannot drift from it.
-    collectionModeIntervals: Array.from(SHARED_COLLECTION_INTERVAL_OPTIONS)
-  }));
   ipcMain.handle('transport:flag:read', (_event, key) => {
     if (!isUiFlagKey(key)) return null;
     const value = settings?.[String(key)];

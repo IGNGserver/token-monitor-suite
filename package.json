@@ -1,7 +1,7 @@
 {
   "name": "token-monitor",
   "productName": "Token Monitor",
-  "version": "0.47.0-rev.11",
+  "version": "0.47.0-rev.12",
   "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
   "main": "src/electron/main.js",
   "scripts": {
@@ -26,13 +26,16 @@
     "verify:release-version": "node scripts/verify-release-version.js",
     "package:headless": "node scripts/package-headless.js",
     "package:hub-compose": "node scripts/package-hub-compose.js",
-    "lint": "eslint .",
-    "verify": "npm run verify:product-scope && npm run verify:shared-ui && npm run verify:css-vars && npm run lint && npm test",
+    "lint": "node node_modules/eslint/bin/eslint.js .",
+    "verify": "npm run verify:product-scope && npm run verify:shared-ui && npm run verify:css-vars && npm run verify:android-fluent-contrast && npm run verify:android-fluent-boundary && npm run lint && npm test",
     "dist:win:dir": "electron-builder --config scripts/electron-builder.config.js --win dir --x64 --publish never",
     "dist:win:prepackaged": "electron-builder --config scripts/electron-builder.config.js --prepackaged dist/win-unpacked --win nsis portable --x64 --publish never",
     "verify:product-scope": "node scripts/verify-product-scope.js",
     "verify:shared-ui": "node scripts/verify-shared-ui-boundary.js",
     "verify:css-vars": "node scripts/verify-renderer-css-vars.js",
+    "verify:android-fluent-contrast": "node scripts/verify-android-fluent-contrast.js",
+    "verify:android-fluent-boundary": "node scripts/verify-android-fluent-boundary.js",
+    "verify:android": "npm run verify:android-fluent-contrast && npm run verify:android-fluent-boundary",
     "update:fluent-assets": "node scripts/update-fluent-assets.js"
   },
   "build": {
@@ -188,6 +191,7 @@
     "@electron/osx-sign": "1.3.3",
     "@eslint/compat": "^2.1.0",
     "@eslint/js": "^10.0.1",
+    "@fluentui/svg-icons": "^1.1.343",
     "@fluentui/web-components": "3.1.3",
     "electron": "43.4.0",
     "electron-builder": "26.15.3",

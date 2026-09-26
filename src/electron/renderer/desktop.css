@@ -223,9 +223,12 @@ body.is-mac .period-tabs {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 44px;
-  min-height: 44px;
+  width: 40px;
+  height: 20px;
+  min-width: 40px;
+  min-height: 20px;
   flex: 0 0 auto;
+  align-self: center;
 }
 
 .settings-desktop-stack {

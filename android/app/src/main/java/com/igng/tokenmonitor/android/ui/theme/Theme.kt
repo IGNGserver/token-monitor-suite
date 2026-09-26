@@ -4,267 +4,267 @@ import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.igng.tokenmonitor.android.data.local.ThemeMode
 import com.igng.tokenmonitor.android.data.local.ThemeSeedId
 
-private data class SeedPalette(
-  val lightPrimary: Color,
-  val lightOnPrimary: Color,
-  val lightPrimaryContainer: Color,
-  val lightOnPrimaryContainer: Color,
-  val lightSecondary: Color,
-  val lightSecondaryContainer: Color,
-  val lightOnSecondaryContainer: Color,
-  val lightTertiary: Color,
-  val lightTertiaryContainer: Color,
-  val darkPrimary: Color,
-  val darkOnPrimary: Color,
-  val darkPrimaryContainer: Color,
-  val darkOnPrimaryContainer: Color,
-  val darkSecondary: Color,
-  val darkSecondaryContainer: Color,
-  val darkOnSecondaryContainer: Color,
-  val darkTertiary: Color,
-  val darkTertiaryContainer: Color
-)
+// ─── Fluent 2 → Material 3 bridge ──────────────────────────────────────────
+//
+// We keep MaterialTheme as the Compose plumbing layer (the handful of M3
+// primitives still used here read from it) but feed it Fluent 2 token values,
+// and *only* values that already exist in `FluentColorTokens`:
+//   • MaterialTheme.colorScheme.* → Fluent alias colours
+//   • MaterialTheme.typography.*  → Fluent type-ramp styles
+//   • MaterialTheme.shapes.*      → Fluent corner radii
+//
+// Nothing in this file may carry a colour literal.  `FluentColorTokens` is the
+// single place hex lives, because that is the place
+// `npm run verify:android-fluent-contrast` measures; a hex here would be an
+// unmeasured colour shipping to users.
+//
+// Components that need Fluent-specific tokens (e.g. brandBackgroundHover,
+// neutralStroke3, focus rings) read LocalFluentColors.current directly, and that
+// is the path every first-party component is expected to use.
 
-private val BlueSeed = SeedPalette(
-  lightPrimary = Color(0xFF0F6CBD),
-  lightOnPrimary = Color(0xFFFFFFFF),
-  lightPrimaryContainer = Color(0xFFD6EBFF),
-  lightOnPrimaryContainer = Color(0xFF0C3B5E),
-  lightSecondary = Color(0xFF424242),
-  lightSecondaryContainer = Color(0xFFF0F0F0),
-  lightOnSecondaryContainer = Color(0xFF242424),
-  lightTertiary = Color(0xFF6E5676),
-  lightTertiaryContainer = Color(0xFFF7D8FF),
-  darkPrimary = Color(0xFF479EF5),
-  darkOnPrimary = Color(0xFF003258),
-  darkPrimaryContainer = Color(0xFF004578),
-  darkOnPrimaryContainer = Color(0xFFD6EBFF),
-  darkSecondary = Color(0xFFD6D6D6),
-  darkSecondaryContainer = Color(0xFF3D3D3D),
-  darkOnSecondaryContainer = Color(0xFFF0F0F0),
-  darkTertiary = Color(0xFFDABCE2),
-  darkTertiaryContainer = Color(0xFF553F5D)
-)
+// ─── Colour mapping ─────────────────────────────────────────────────────────
 
-private val GreenSeed = SeedPalette(
-  lightPrimary = Color(0xFF0F7B4A),
-  lightOnPrimary = Color(0xFFFFFFFF),
-  lightPrimaryContainer = Color(0xFFA7F3C8),
-  lightOnPrimaryContainer = Color(0xFF002112),
-  lightSecondary = Color(0xFF4F6354),
-  lightSecondaryContainer = Color(0xFFD1E8D5),
-  lightOnSecondaryContainer = Color(0xFF0C1F14),
-  lightTertiary = Color(0xFF3B6470),
-  lightTertiaryContainer = Color(0xFFBFE9F7),
-  darkPrimary = Color(0xFF8BD8AD),
-  darkOnPrimary = Color(0xFF003920),
-  darkPrimaryContainer = Color(0xFF005231),
-  darkOnPrimaryContainer = Color(0xFFA7F3C8),
-  darkSecondary = Color(0xFFB5CCBA),
-  darkSecondaryContainer = Color(0xFF374B3D),
-  darkOnSecondaryContainer = Color(0xFFD1E8D5),
-  darkTertiary = Color(0xFFA3CDDB),
-  darkTertiaryContainer = Color(0xFF214C58)
-)
-
-private val PurpleSeed = SeedPalette(
-  lightPrimary = Color(0xFF6B4EFF),
-  lightOnPrimary = Color(0xFFFFFFFF),
-  lightPrimaryContainer = Color(0xFFE6DEFF),
-  lightOnPrimaryContainer = Color(0xFF1C0062),
-  lightSecondary = Color(0xFF615B71),
-  lightSecondaryContainer = Color(0xFFE7DEF8),
-  lightOnSecondaryContainer = Color(0xFF1D192B),
-  lightTertiary = Color(0xFF7D5260),
-  lightTertiaryContainer = Color(0xFFFFD8E4),
-  darkPrimary = Color(0xFFCABEFF),
-  darkOnPrimary = Color(0xFF32009A),
-  darkPrimaryContainer = Color(0xFF4A27E0),
-  darkOnPrimaryContainer = Color(0xFFE6DEFF),
-  darkSecondary = Color(0xFFCBC3DC),
-  darkSecondaryContainer = Color(0xFF494458),
-  darkOnSecondaryContainer = Color(0xFFE7DEF8),
-  darkTertiary = Color(0xFFEFB8C8),
-  darkTertiaryContainer = Color(0xFF633B48)
-)
-
-private val TealSeed = SeedPalette(
-  lightPrimary = Color(0xFF006A6A),
-  lightOnPrimary = Color(0xFFFFFFFF),
-  lightPrimaryContainer = Color(0xFF6FF7F6),
-  lightOnPrimaryContainer = Color(0xFF002020),
-  lightSecondary = Color(0xFF4A6363),
-  lightSecondaryContainer = Color(0xFFCCE8E7),
-  lightOnSecondaryContainer = Color(0xFF051F1F),
-  lightTertiary = Color(0xFF4B607C),
-  lightTertiaryContainer = Color(0xFFD3E4FF),
-  darkPrimary = Color(0xFF4CDADA),
-  darkOnPrimary = Color(0xFF003737),
-  darkPrimaryContainer = Color(0xFF004F4F),
-  darkOnPrimaryContainer = Color(0xFF6FF7F6),
-  darkSecondary = Color(0xFFB0CCCB),
-  darkSecondaryContainer = Color(0xFF324B4B),
-  darkOnSecondaryContainer = Color(0xFFCCE8E7),
-  darkTertiary = Color(0xFFB3C8E8),
-  darkTertiaryContainer = Color(0xFF334863)
-)
-
-private val OrangeSeed = SeedPalette(
-  lightPrimary = Color(0xFF9A4600),
-  lightOnPrimary = Color(0xFFFFFFFF),
-  lightPrimaryContainer = Color(0xFFFFDCC6),
-  lightOnPrimaryContainer = Color(0xFF311300),
-  lightSecondary = Color(0xFF755846),
-  lightSecondaryContainer = Color(0xFFFFDCC6),
-  lightOnSecondaryContainer = Color(0xFF2B1708),
-  lightTertiary = Color(0xFF5F6135),
-  lightTertiaryContainer = Color(0xFFE4E6AE),
-  darkPrimary = Color(0xFFFFB786),
-  darkOnPrimary = Color(0xFF522300),
-  darkPrimaryContainer = Color(0xFF753400),
-  darkOnPrimaryContainer = Color(0xFFFFDCC6),
-  darkSecondary = Color(0xFFE5BFA8),
-  darkSecondaryContainer = Color(0xFF5B4130),
-  darkOnSecondaryContainer = Color(0xFFFFDCC6),
-  darkTertiary = Color(0xFFC8CA94),
-  darkTertiaryContainer = Color(0xFF47491F)
-)
-
-private val RoseSeed = SeedPalette(
-  lightPrimary = Color(0xFFB01363),
-  lightOnPrimary = Color(0xFFFFFFFF),
-  lightPrimaryContainer = Color(0xFFFFD9E2),
-  lightOnPrimaryContainer = Color(0xFF3E001D),
-  lightSecondary = Color(0xFF74565F),
-  lightSecondaryContainer = Color(0xFFFFD9E2),
-  lightOnSecondaryContainer = Color(0xFF2B151C),
-  lightTertiary = Color(0xFF7C5635),
-  lightTertiaryContainer = Color(0xFFFFDCC2),
-  darkPrimary = Color(0xFFFFB1C8),
-  darkOnPrimary = Color(0xFF650033),
-  darkPrimaryContainer = Color(0xFF8E004A),
-  darkOnPrimaryContainer = Color(0xFFFFD9E2),
-  darkSecondary = Color(0xFFE3BDC6),
-  darkSecondaryContainer = Color(0xFF5A3F47),
-  darkOnSecondaryContainer = Color(0xFFFFD9E2),
-  darkTertiary = Color(0xFFEFBD94),
-  darkTertiaryContainer = Color(0xFF613F20)
-)
-
-private fun SeedPalette.toLightScheme(): ColorScheme = lightColorScheme(
-  primary = lightPrimary,
-  onPrimary = lightOnPrimary,
-  primaryContainer = lightPrimaryContainer,
-  onPrimaryContainer = lightOnPrimaryContainer,
-  secondary = lightSecondary,
-  onSecondary = Color(0xFFFFFFFF),
-  secondaryContainer = lightSecondaryContainer,
-  onSecondaryContainer = lightOnSecondaryContainer,
-  tertiary = lightTertiary,
-  onTertiary = Color(0xFFFFFFFF),
-  tertiaryContainer = lightTertiaryContainer,
-  onTertiaryContainer = Color(0xFF1A1C1E),
-  error = md_theme_light_error,
-  onError = md_theme_light_onError,
-  errorContainer = md_theme_light_errorContainer,
-  onErrorContainer = md_theme_light_onErrorContainer,
-  background = md_theme_light_background,
-  onBackground = md_theme_light_onBackground,
-  surface = md_theme_light_surface,
-  onSurface = md_theme_light_onSurface,
-  surfaceVariant = md_theme_light_surfaceVariant,
-  onSurfaceVariant = md_theme_light_onSurfaceVariant,
-  outline = md_theme_light_outline,
-  outlineVariant = md_theme_light_outlineVariant,
-  inverseSurface = md_theme_light_inverseSurface,
-  inverseOnSurface = md_theme_light_inverseOnSurface,
-  inversePrimary = darkPrimary,
-  surfaceTint = lightPrimary,
-  scrim = md_theme_light_scrim
-)
-
-private fun SeedPalette.toDarkScheme(): ColorScheme = darkColorScheme(
-  primary = darkPrimary,
-  onPrimary = darkOnPrimary,
-  primaryContainer = darkPrimaryContainer,
-  onPrimaryContainer = darkOnPrimaryContainer,
-  secondary = darkSecondary,
-  onSecondary = Color(0xFF1A1C1E),
-  secondaryContainer = darkSecondaryContainer,
-  onSecondaryContainer = darkOnSecondaryContainer,
-  tertiary = darkTertiary,
-  onTertiary = Color(0xFF1A1C1E),
-  tertiaryContainer = darkTertiaryContainer,
-  onTertiaryContainer = Color(0xFFE2E2E9),
-  error = md_theme_dark_error,
-  onError = md_theme_dark_onError,
-  errorContainer = md_theme_dark_errorContainer,
-  onErrorContainer = md_theme_dark_onErrorContainer,
-  background = md_theme_dark_background,
-  onBackground = md_theme_dark_onBackground,
-  surface = md_theme_dark_surface,
-  onSurface = md_theme_dark_onSurface,
-  surfaceVariant = md_theme_dark_surfaceVariant,
-  onSurfaceVariant = md_theme_dark_onSurfaceVariant,
-  outline = md_theme_dark_outline,
-  outlineVariant = md_theme_dark_outlineVariant,
-  inverseSurface = md_theme_dark_inverseSurface,
-  inverseOnSurface = md_theme_dark_inverseOnSurface,
-  inversePrimary = lightPrimary,
-  surfaceTint = darkPrimary,
-  scrim = md_theme_dark_scrim
-)
-
-private fun seedPalette(id: ThemeSeedId): SeedPalette = when (id) {
-  ThemeSeedId.System, ThemeSeedId.Blue -> BlueSeed
-  ThemeSeedId.Green -> GreenSeed
-  ThemeSeedId.Purple -> PurpleSeed
-  ThemeSeedId.Teal -> TealSeed
-  ThemeSeedId.Orange -> OrangeSeed
-  ThemeSeedId.Rose -> RoseSeed
+/**
+ * Map Fluent aliases onto the M3 roles that library components still consume.
+ *
+ * Material's tonal `secondaryContainer`/`tertiaryContainer` have no Fluent
+ * counterpart (Fluent layers by elevation, not by tint), so they take the
+ * accent container — a real Fluent pair whose contrast the guard measures —
+ * rather than an invented one.  Roles Fluent genuinely has no answer for
+ * (`surfaceBright`/`surfaceDim`/`*Fixed`) are intentionally left at their M3
+ * defaults: no first-party component reads them, and inventing a value would
+ * put an unmeasured colour in front of users.
+ */
+private fun FluentColorTokens.toMaterialScheme(isDark: Boolean): ColorScheme {
+  val neutral = if (isDark) {
+    darkColorScheme(
+      primary = brandBackground,
+      onPrimary = foregroundOnAccent,
+      primaryContainer = brandContainer,
+      onPrimaryContainer = brandContainerForeground,
+      secondary = brandForeground1,
+      onSecondary = neutralBackground1,
+      secondaryContainer = brandContainer,
+      onSecondaryContainer = brandContainerForeground,
+      tertiary = brandForeground2,
+      onTertiary = neutralBackground1,
+      tertiaryContainer = brandContainer,
+      onTertiaryContainer = brandContainerForeground,
+      error = errorForeground,
+      onError = neutralBackground1,
+      errorContainer = errorBackground,
+      onErrorContainer = errorForegroundOnSubtle,
+      background = neutralBackground1,
+      onBackground = neutralForeground1,
+      surface = neutralBackground1,
+      onSurface = neutralForeground1,
+      surfaceVariant = neutralLayerInner,
+      onSurfaceVariant = neutralForeground2,
+      surfaceContainerLowest = neutralBackground2,
+      surfaceContainerLow = surfaceCard,
+      surfaceContainer = surfaceCardContainer,
+      surfaceContainerHigh = neutralLayerInner,
+      surfaceContainerHighest = neutralBackground2,
+      outline = neutralStroke1,
+      outlineVariant = neutralStroke3,
+      scrim = scrim,
+      surfaceTint = brandBackground
+    )
+  } else {
+    lightColorScheme(
+      primary = brandBackground,
+      onPrimary = foregroundOnAccent,
+      primaryContainer = brandContainer,
+      onPrimaryContainer = brandContainerForeground,
+      secondary = brandForeground1,
+      onSecondary = neutralBackground1,
+      secondaryContainer = brandContainer,
+      onSecondaryContainer = brandContainerForeground,
+      tertiary = brandForeground2,
+      onTertiary = neutralBackground1,
+      tertiaryContainer = brandContainer,
+      onTertiaryContainer = brandContainerForeground,
+      error = errorForeground,
+      onError = neutralBackground1,
+      errorContainer = errorBackground,
+      onErrorContainer = errorForegroundOnSubtle,
+      background = neutralBackground1,
+      onBackground = neutralForeground1,
+      surface = neutralBackground1,
+      onSurface = neutralForeground1,
+      surfaceVariant = neutralLayerInner,
+      onSurfaceVariant = neutralForeground2,
+      surfaceContainerLowest = neutralBackground2,
+      surfaceContainerLow = surfaceCard,
+      surfaceContainer = surfaceCardContainer,
+      surfaceContainerHigh = neutralLayerInner,
+      surfaceContainerHighest = neutralBackground2,
+      outline = neutralStroke1,
+      outlineVariant = neutralStroke3,
+      scrim = scrim,
+      surfaceTint = brandBackground
+    )
+  }
+  return neutral.copy(inverseSurface = inverseBackground, inverseOnSurface = inverseForeground)
 }
 
-/** Swatch color shown on the theme picker chip. */
-fun themeSeedSwatch(id: ThemeSeedId): Color = when (id) {
-  ThemeSeedId.System -> Color(0xFF607D8B)
-  ThemeSeedId.Blue -> BlueSeed.lightPrimary
-  ThemeSeedId.Green -> GreenSeed.lightPrimary
-  ThemeSeedId.Purple -> PurpleSeed.lightPrimary
-  ThemeSeedId.Teal -> TealSeed.lightPrimary
-  ThemeSeedId.Orange -> OrangeSeed.lightPrimary
-  ThemeSeedId.Rose -> RoseSeed.lightPrimary
+// ─── Typography mapping ─────────────────────────────────────────────────────
+
+/**
+ * Map the Fluent ramp onto M3's type roles.
+ *
+ * The two systems are not 1:1, so this table is a *ceiling*, not an equivalence:
+ * M3 role names must never be used as design guidance in screens.  `body1` and
+ * `body2` are the same 14/20 style, and both `subtitle` and `title3` are 16/22
+ * differing only in weight — so `bodyLarge` vs `bodyMedium` carries no meaning
+ * here while `FluentTypeRamp.body1` vs `body2` does.  Screens read the Fluent
+ * ramp directly (asserted by `npm run verify:android-fluent-boundary`).
+ */
+private fun FluentTypography.toMaterialTypography(): Typography {
+  return Typography(
+    displayLarge = display,
+    displayMedium = largeTitle,
+    displaySmall = title1,
+    headlineLarge = title1,
+    headlineMedium = title2,
+    headlineSmall = title3,
+    titleLarge = title2,
+    titleMedium = subtitle,
+    titleSmall = title3,
+    bodyLarge = body1,
+    bodyMedium = body2,
+    bodySmall = caption1,
+    labelLarge = subtitle,
+    labelMedium = caption1,
+    labelSmall = caption2
+  )
 }
+
+// ─── Shape mapping ──────────────────────────────────────────────────────────
+
+/**
+ * M3 exposes five shape slots and no `full`; note that Material's own
+ * `ButtonDefaults.shape` resolves through a shape *token* path
+ * (`FilledButtonTokens.ContainerShape`) that this table cannot override.  That
+ * is one more reason no first-party button may be an M3 button — see
+ * `FluentFilledButton` / `FluentSubtleButton`.
+ */
+private fun FluentShapes.toMaterialShapes(): androidx.compose.material3.Shapes {
+  return androidx.compose.material3.Shapes(
+    extraSmall = smallCorner,
+    small = controlCorner,
+    medium = cardCorner,
+    large = largeCorner,
+    extraLarge = largeCorner
+  )
+}
+
+// ─── Brand seed resolution ──────────────────────────────────────────────────
+
+private fun resolveBrandSeed(themeSeed: ThemeSeedId): FluentBrandSeed? {
+  val id = when (themeSeed) {
+    ThemeSeedId.System -> null   // system = default blue, or wallpaper accent on 12+
+    ThemeSeedId.Blue -> "blue"
+    ThemeSeedId.Green -> "green"
+    ThemeSeedId.Purple -> "purple"
+    ThemeSeedId.Teal -> "teal"
+    ThemeSeedId.Orange -> "orange"
+    ThemeSeedId.Rose -> "rose"
+  }
+  return id?.let { FluentBrandSeeds.firstOrNull { s -> s.id == it } }
+}
+
+/**
+ * Swatch shown on the theme picker.  Every non-`System` entry is read back out of
+ * [FluentBrandSeeds] so the picker cannot advertise a hue the theme does not
+ * apply; `System` is a neutral, because it means "follow the platform" rather
+ * than a colour of its own.
+ */
+fun themeSeedSwatch(id: ThemeSeedId): Color {
+  if (id == ThemeSeedId.System) return FluentPalette.neutral40
+  val seed = FluentBrandSeeds.firstOrNull { it.id == id.name.lowercase() }
+  return seed?.swatch ?: FluentPalette.brand100
+}
+
+// ─── Theme entry point ──────────────────────────────────────────────────────
 
 @Composable
 fun TokenMonitorTheme(
   themeSeed: ThemeSeedId = ThemeSeedId.System,
+  themeMode: ThemeMode = ThemeMode.System,
   content: @Composable () -> Unit
 ) {
-  val dark = isSystemInDarkTheme()
+  val dark = when (themeMode) {
+    ThemeMode.Light -> false
+    ThemeMode.Dark -> true
+    ThemeMode.System -> isSystemInDarkTheme()
+  }
   val context = LocalContext.current
-  val colorScheme = when {
-    themeSeed == ThemeSeedId.System && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-      if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-    }
-    else -> {
-      val palette = seedPalette(if (themeSeed == ThemeSeedId.System) ThemeSeedId.Blue else themeSeed)
-      if (dark) palette.toDarkScheme() else palette.toLightScheme()
+
+  // Resolve the Fluent alias set first, because it — not MaterialTheme — is what
+  // every first-party component paints with.  Under `System` on Android 12+ the
+  // wallpaper colour is allowed to move the *accent only*: the dynamic primary
+  // contributes its hue and saturation, and each accent role keeps the luminance
+  // the guard measured.  MaterialTheme is then derived from the same alias set,
+  // so the two layers can never disagree about what the accent is.
+  val dynamicSeedColor = if (
+    themeSeed == ThemeSeedId.System && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+  ) {
+    (if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)).primary
+  } else {
+    null
+  }
+
+  val fluentColors = remember(themeSeed, dark, dynamicSeedColor) {
+    val seeded = resolveBrandSeed(themeSeed)
+      ?.let { brandTokensForSeed(it, dark) }
+      ?: if (dark) FluentDarkColors else FluentLightColors
+    if (dynamicSeedColor != null) {
+      dynamicAccentTokens(seeded, dynamicSeedColor, dark)
+    } else {
+      seeded
     }
   }
 
-  MaterialTheme(
-    colorScheme = colorScheme,
-    typography = TokenMonitorTypography,
-    shapes = TokenMonitorShapes,
-    content = content
-  )
+  val materialScheme = remember(fluentColors, dark) {
+    fluentColors.toMaterialScheme(dark)
+  }
+
+  val typography = remember { FluentTypeRamp.toMaterialTypography() }
+  val shapes = remember { FluentShapeDefaults.toMaterialShapes() }
+
+  val adaptation = rememberFluentAdaptation()
+  CompositionLocalProvider(
+    LocalFluentColors provides fluentColors,
+    LocalFluentAdaptation provides adaptation,
+    // M3 primitives resolve `LocalContentColor` from `colorScheme.onSurface`;
+    // pin it to the Fluent alias so the inherited text colour is identical to
+    // the one first-party components set explicitly.
+    androidx.compose.material3.LocalContentColor provides fluentColors.neutralForeground1
+  ) {
+    MaterialTheme(
+      colorScheme = materialScheme,
+      typography = typography,
+      shapes = shapes,
+      content = content
+    )
+  }
 }

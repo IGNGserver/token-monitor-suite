@@ -1,0 +1,15 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+  <!--
+    Night counterpart.  This file did not exist before: the client asked Compose for
+    a dark palette while the platform kept handing out a light window background and
+    dark-on-light status-bar glyphs.
+  -->
+  <style name="Theme.TokenMonitor" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+    <item name="android:windowBackground">@color/window_background</item>
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:navigationBarColor">@android:color/transparent</item>
+    <item name="android:windowLightStatusBar">false</item>
+    <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
+    <item name="android:navigationBarDividerColor" tools:targetApi="28">@android:color/transparent</item>
+  </style>
+</resources>

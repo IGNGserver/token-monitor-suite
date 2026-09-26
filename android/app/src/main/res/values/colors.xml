@@ -1,0 +1,6 @@
+<resources>
+  <!-- Fluent 2 `colorNeutralBackground1`, light. Keep in step with FluentLightColors
+       in ui/theme/Color.kt; the contrast guard measures that file, this one only has
+       to not flash the wrong colour for a frame. -->
+  <color name="window_background">#FFFFFF</color>
+</resources>

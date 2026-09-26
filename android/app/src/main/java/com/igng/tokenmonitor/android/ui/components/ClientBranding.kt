@@ -4,7 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.MaterialTheme
+import com.igng.tokenmonitor.android.ui.theme.FluentShapeDefaults
+import com.igng.tokenmonitor.android.ui.theme.FluentTypeRamp
+import androidx.compose.ui.draw.clip
+import androidx.compose.material3.Icon
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -139,6 +143,18 @@ object ClientBranding {
     return fallbacks[abs(hash) % fallbacks.size]
   }
 
+  /**
+   * Brand colour usable as a *foreground* on this client's own quiet tile.
+   * Several marks are near-black by brand (Kimi, Grok, Copilot, Cursor); on the dark
+   * theme that is invisible, so the same lift the monogram path uses applies here too.
+   */
+  @Composable
+  fun liftDarkTinted(clientId: String): Color {
+    val base = color(clientId)
+    val dark = androidx.compose.foundation.isSystemInDarkTheme()
+    return if (dark) liftDark(base) else base
+  }
+
   /** Slightly lighten near-black brand colors so they stay visible on dark surfaces. */
   private fun liftDark(c: Color): Color {
     val lum = 0.2126f * c.red + 0.7152f * c.green + 0.0722f * c.blue
@@ -169,6 +185,28 @@ fun ClientMonogram(
   } else {
     Color.White
   }
+  val mark = ClientIcons.drawable(clientId)
+  if (mark != 0) {
+    // The brand mark the web and desktop render, tinted with the same brand colour
+    // the monogram used.  `ClientBranding.liftDark` already keeps near-black marks
+    // legible on a dark surface.  4 dp corners, matching every other tile in the
+    // client, rather than the circular Material avatar.
+    Box(
+      modifier = modifier
+        .size(size)
+        .clip(FluentShapeDefaults.controlCorner)
+        .background(bg.copy(alpha = 0.14f)),
+      contentAlignment = Alignment.Center
+    ) {
+      Icon(
+        painter = painterResource(mark),
+        contentDescription = ClientBranding.label(clientId),
+        tint = ClientBranding.liftDarkTinted(clientId),
+        modifier = Modifier.size(size * 0.68f)
+      )
+    }
+    return
+  }
   Box(
     modifier = modifier
       .size(size)
@@ -180,7 +218,11 @@ fun ClientMonogram(
       color = fg,
       fontSize = (size.value * 0.36f).sp,
       fontWeight = FontWeight.Bold,
-      style = MaterialTheme.typography.labelSmall
+      // The last `MaterialTheme.typography` read in the client used M3's
+      // `labelSmall`, whose mapped value is Fluent `caption2` — i.e. the role name
+      // was pointing at a different level than the hand-set 0.36× font size.  The
+      // Fluent ramp is the honest source; the size is optical, not a ramp level.
+      style = FluentTypeRamp.caption2.copy(fontSize = (size.value * 0.36f).sp)
     )
   }
 }

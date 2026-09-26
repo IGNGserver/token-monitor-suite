@@ -26,7 +26,13 @@ data class HubCapabilitiesDto(
   val pricing: Boolean = false,
   val deviceDelete: Boolean = false,
   val deviceRename: Boolean = false,
-  val publicStats: Boolean = false
+  val publicStats: Boolean = false,
+  /**
+   * Whether this Hub owns quota accounts (`/api/accounts`).  Defaults to true on
+   * purpose: an older Hub that omits the field still has the endpoint, and hiding
+   * account management on a missing key would be a regression, not a safety win.
+   */
+  val hubAccounts: Boolean? = true
 )
 
 @Serializable
@@ -43,6 +49,20 @@ data class StatsDto(
   val periods: PeriodsDto = PeriodsDto(),
   val devices: List<DeviceDto> = emptyList(),
   val projectsIncomplete: Boolean? = null,
+  /**
+   * Session rows one or more synchronized devices dropped to stay inside the ingest
+   * limit.  Without it the sessions screen's own 200-row cap looked like the whole
+   * story, while the Hub had already silently omitted detail.
+   */
+  val sessionDetailsOmitted: Boolean? = null,
+  /** A project rollup was itself too large to fit the ingest limit. */
+  val periodProjectsOmitted: Boolean? = null,
+  /**
+   * Whose quota numbers these are: `hub` for the account service, absent when no
+   * authority exists.  Surfaced so 限额 can say where it came from instead of
+   * implying every device carries its own quota.
+   */
+  val limitsAuthority: String? = null,
   val historyPreview: HistoryDto? = null,
   val limits: LimitsDto? = null
 )
@@ -162,6 +182,12 @@ data class LimitWindowDto(
 )
 
 @Serializable
+data class PeriodWindowDto(
+  val from: String? = null,
+  val to: String? = null
+)
+
+@Serializable
 data class PeriodsDto(
   val today: PeriodDto = PeriodDto(),
   val month: PeriodDto = PeriodDto(),
@@ -179,7 +205,27 @@ data class PeriodDto(
   val clientModels: Map<String, Map<String, Long>> = emptyMap(),
   val clientModelCosts: Map<String, Map<String, Double>> = emptyMap(),
   val projects: Map<String, ProjectDto> = emptyMap(),
-  val sessions: Map<String, SessionDto> = emptyMap()
+  val sessions: Map<String, SessionDto> = emptyMap(),
+  /**
+   * Sparse provenance map: a client is present only when *some* of its tokens were
+   * estimated from message content rather than an exact meter.  `null`/absent means
+   * "not estimated", which is not the same as `false` from a client that reported
+   * nothing.  `docs/API.md` is the authority; the web UI renders these with a `~`
+   * prefix, and without the field the client showed a guess with the same weight as
+   * a measurement.
+   */
+  val clientEstimated: Map<String, Boolean> = emptyMap(),
+  /**
+   * Credits consumed in the provider's own metered unit.  Only Qoder publishes this,
+   * and for Qoder it is the *only* exact figure: Qoder bills in credits and leaves
+   * every token field of its usage block at zero, so a client that ignores this map
+   * shows Qoder as using nothing at all.
+   */
+  val clientCredits: Map<String, Double> = emptyMap(),
+  /** Client×model grain of [clientCredits]; forwarded for the same reason. */
+  val clientModelCredits: Map<String, Map<String, Double>> = emptyMap(),
+  /** Period-level "at least one row here was estimated". */
+  val estimated: Boolean = false
 )
 
 @Serializable
@@ -206,7 +252,10 @@ data class SessionDto(
   val reasoningTokens: Long = 0,
   val startedAt: String? = null,
   val lastUsedAt: String? = null,
-  val models: Map<String, Long> = emptyMap()
+  val models: Map<String, Long> = emptyMap(),
+  /** Credits for this session; see [PeriodDto.clientCredits]. */
+  val credits: Double? = null,
+  val modelCredits: Map<String, Double> = emptyMap()
 )
 
 @Serializable
@@ -223,7 +272,19 @@ data class DeviceDto(
   val clientStatus: Map<String, String> = emptyMap(),
   val wslStatus: WslStatusDto? = null,
   val periods: PeriodsDto = PeriodsDto(),
-  val limits: LimitsDto? = null
+  /**
+   * Never populated.  The Hub deletes `limits` from every device record before it
+   * answers (`src/hub/server.js`: `delete device.limits`), because quota is
+   * Hub-owned account state, not per-device state — see `stats.limitsAuthority`.
+   * Kept so the shape still round-trips a device record read straight off the wire,
+   * and the client must not build UI on it.
+   */
+  val limits: LimitsDto? = null,
+  /** Real calendar boundaries behind `today` / `month` / `allTime`. */
+  val periodWindows: Map<String, PeriodWindowDto> = emptyMap(),
+  val agentVersion: String? = null,
+  val trackedClients: List<String> = emptyList(),
+  val projectsEnabled: Boolean? = null
 )
 
 @Serializable
@@ -292,7 +353,27 @@ data class UsageRangeDto(
   val clientModels: Map<String, Map<String, Long>> = emptyMap(),
   val clientModelCosts: Map<String, Map<String, Double>> = emptyMap(),
   val projects: Map<String, ProjectDto> = emptyMap(),
-  val sessions: Map<String, SessionDto> = emptyMap()
+  val sessions: Map<String, SessionDto> = emptyMap(),
+  /**
+   * Sparse provenance map: a client is present only when *some* of its tokens were
+   * estimated from message content rather than an exact meter.  `null`/absent means
+   * "not estimated", which is not the same as `false` from a client that reported
+   * nothing.  `docs/API.md` is the authority; the web UI renders these with a `~`
+   * prefix, and without the field the client showed a guess with the same weight as
+   * a measurement.
+   */
+  val clientEstimated: Map<String, Boolean> = emptyMap(),
+  /**
+   * Credits consumed in the provider's own metered unit.  Only Qoder publishes this,
+   * and for Qoder it is the *only* exact figure: Qoder bills in credits and leaves
+   * every token field of its usage block at zero, so a client that ignores this map
+   * shows Qoder as using nothing at all.
+   */
+  val clientCredits: Map<String, Double> = emptyMap(),
+  /** Client×model grain of [clientCredits]; forwarded for the same reason. */
+  val clientModelCredits: Map<String, Map<String, Double>> = emptyMap(),
+  /** Period-level "at least one row here was estimated". */
+  val estimated: Boolean = false
 )
 
 @Serializable
@@ -301,4 +382,120 @@ data class SseStatsDto(
   val reason: String? = null,
   val stats: StatsDto? = null,
   val at: String? = null
+)
+
+// ─── Hub-owned accounts, subscriptions and rates ────────────────────────────
+//
+// These three payloads are the reason the client used to be a read-only mirror:
+// quota was displayed but never managed, cost was shown only in USD, and a plan
+// ledger the Hub already stores had no surface at all.  Field names follow
+// `docs/API.md`; a credential is *never* present in a response, so no DTO here can
+// hold one — the request type below is the only place a credential exists, and it
+// is written and forgotten.
+
+@Serializable
+data class HubAccountDto(
+  val id: String = "",
+  val provider: String = "",
+  val name: String? = null,
+  val label: String? = null,
+  val accountEmail: String? = null,
+  val accountName: String? = null,
+  val plan: String? = null,
+  val enabled: Boolean = true,
+  val status: String? = null,
+  val lastSuccessAt: String? = null,
+  val lastAttemptAt: String? = null,
+  val lastError: String? = null,
+  val limits: LimitsDto? = null
+)
+
+@Serializable
+data class AccountsResponseDto(
+  val ok: Boolean = false,
+  val authority: String? = null,
+  val providers: List<LimitProviderDto> = emptyList(),
+  val accounts: List<HubAccountDto> = emptyList()
+)
+
+/**
+ * Create/update body.  [credential] is a provider-shaped object the caller assembles
+ * and never reads back: the Hub stores it encrypted and does not echo it.
+ */
+@Serializable
+data class AccountRequestDto(
+  val provider: String = "",
+  val name: String? = null,
+  val label: String? = null,
+  val enabled: Boolean? = null,
+  val credential: kotlinx.serialization.json.JsonObject? = null
+)
+
+@Serializable
+data class OAuthStartDto(
+  val ok: Boolean = false,
+  val sessionId: String? = null,
+  val authUrl: String? = null,
+  val provider: String? = null,
+  val error: String? = null
+)
+
+/**
+ * Exchange body.  `redirectUrl` is deliberately permissive — a provider may hand back
+ * a full callback URL, a bare query string, or just a code (`docs/API.md`); the client
+ * forwards whatever the user pasted without trying to parse it.
+ */
+@Serializable
+data class OAuthExchangeRequestDto(
+  val sessionId: String = "",
+  val redirectUrl: String = "",
+  val name: String? = null,
+  val label: String? = null
+)
+
+@Serializable
+data class SubscriptionDto(
+  val id: String = "",
+  val provider: String? = null,
+  val plan: String? = null,
+  val amount: Double? = null,
+  val currency: String? = null,
+  val interval: String? = null,
+  val intervalCount: Int? = null,
+  val startDate: String? = null,
+  val endDate: String? = null,
+  val nextRenewalOverride: String? = null,
+  val autoRenew: Boolean? = null,
+  val recordType: String? = null,
+  val accountEmail: String? = null,
+  val profileName: String? = null,
+  val note: String? = null
+)
+
+@Serializable
+data class SubscriptionsResponseDto(
+  val ok: Boolean = false,
+  val version: Int? = null,
+  val subscriptions: List<SubscriptionDto> = emptyList(),
+  val updatedAt: String? = null,
+  val error: String? = null
+)
+
+/**
+ * Write body for the ledger.  [baseUpdatedAt] is the compare-and-swap token: the Hub
+ * rejects a `PUT` whose base is not the stored `updatedAt`, so a stale edit fails
+ * instead of silently overwriting someone else's change.
+ */
+@Serializable
+data class SubscriptionsRequestDto(
+  val subscriptions: List<SubscriptionDto> = emptyList(),
+  val baseUpdatedAt: String? = null
+)
+
+@Serializable
+data class RatesResponseDto(
+  val ok: Boolean = false,
+  val rates: Map<String, Double> = emptyMap(),
+  val date: String? = null,
+  val source: String? = null
 )

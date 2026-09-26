@@ -36,6 +36,8 @@ function addTokenCost(mapTokens, mapCosts, key, tokens, cost) {
 class MemoryRepository {
   constructor() {
     this.devices = new Map();
+    this.baselines = new Map();
+    this.transferredDevices = new Set();
     this.hiddenDevices = new Set();
     this.events = [];
     this.pricing = new Map();
@@ -66,6 +68,48 @@ class MemoryRepository {
     delete stored.limitsOnly;
     this.devices.set(record.deviceId, clone(stored));
     this.hiddenDevices.delete(record.deviceId);
+    // Mirror the MySQL repository: the regular write path refreshes the ingest
+    // baseline together with the display snapshot.
+    this.baselines.set(record.deviceId, clone(stored));
+  }
+
+  async getIngestBaseline(deviceId) {
+    const snapshot = this.baselines.get(deviceId) || this.devices.get(deviceId) || null;
+    return { snapshot: clone(snapshot), transferred: this.transferredDevices.has(deviceId) };
+  }
+
+  async saveIngestBaseline(deviceId, snapshot, { transferred = undefined } = {}) {
+    this.baselines.set(deviceId, clone(snapshot));
+    // Tri-state, matching the MySQL repository: undefined keeps the flag.
+    if (transferred === true) this.transferredDevices.add(deviceId);
+    if (transferred === false) this.transferredDevices.delete(deviceId);
+  }
+
+  async moveDeviceUsageEvents(previousDeviceId, nextDeviceId) {
+    for (const event of this.events) {
+      if (event.deviceId === previousDeviceId) event.deviceId = nextDeviceId;
+    }
+  }
+
+  async mergeDeviceSessions(fromDeviceId, toDeviceId) {
+    const fromPrefix = `${fromDeviceId}\u0000`;
+    for (const [key, value] of [...this.sessions.entries()]) {
+      if (!key.startsWith(fromPrefix)) continue;
+      const summary = clone(value);
+      const targetKey = `${toDeviceId}\u0000${summary.client}\u0000${summary.sessionId}`;
+      const existing = this.sessions.get(targetKey);
+      if (existing) {
+        for (const field of ['totalTokens', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens', 'messageCount', 'costUsd']) {
+          existing[field] = (Number(existing[field]) || 0) + (Number(summary[field]) || 0);
+        }
+        existing.startedAt = [existing.startedAt, summary.startedAt].filter(Boolean).sort()[0] || existing.startedAt || summary.startedAt;
+        existing.lastUsedAt = [existing.lastUsedAt, summary.lastUsedAt].filter(Boolean).sort().pop() || existing.lastUsedAt || summary.lastUsedAt;
+        this.sessions.set(targetKey, existing);
+      } else {
+        this.sessions.set(targetKey, summary);
+      }
+      this.sessions.delete(key);
+    }
   }
 
   async countDevices() { return this.devices.size - this.hiddenDevices.size; }
@@ -202,6 +246,10 @@ class MemoryRepository {
     const record = this.devices.get(previousDeviceId);
     this.devices.set(nextDeviceId, { ...clone(record), deviceId: nextDeviceId });
     this.devices.delete(previousDeviceId);
+    if (this.baselines.has(previousDeviceId)) {
+      this.baselines.set(nextDeviceId, clone(this.baselines.get(previousDeviceId)));
+      this.baselines.delete(previousDeviceId);
+    }
     if (this.hiddenDevices.delete(previousDeviceId)) this.hiddenDevices.add(nextDeviceId);
     for (const event of this.events) if (event.deviceId === previousDeviceId) event.deviceId = nextDeviceId;
     const moved = [];

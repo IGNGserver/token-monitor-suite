@@ -1040,10 +1040,26 @@ function captureRenderState() {
     const draft = state.formDrafts.get(key);
     if (draft?.dirty) draft.fields = { ...draft.fields, ...formFieldSnapshot(form) };
   });
+  const openDetails = [];
+  els.content.querySelectorAll('details[open]').forEach((detail) => {
+    const rowKey = detail.dataset.rowKey;
+    const focusKey = detail.querySelector(':scope > summary[data-management-focus]')?.dataset?.managementFocus;
+    const className = detail.className;
+    if (rowKey) {
+      openDetails.push({ type: 'rowKey', value: rowKey });
+    } else if (focusKey) {
+      openDetails.push({ type: 'focus', value: focusKey });
+    } else if (className) {
+      openDetails.push({ type: 'class', value: className });
+    }
+  });
   const active = document.activeElement;
+  const mainEl = document.querySelector('.main');
   return {
     active: describeActiveElement(active),
-    scrollY: active && (active === els.content || els.content.contains(active)) ? window.scrollY : null
+    openDetails,
+    scrollY: active && (active === els.content || els.content.contains(active)) ? window.scrollY : null,
+    mainScrollTop: mainEl ? mainEl.scrollTop : null
   };
 }
 
@@ -1051,6 +1067,19 @@ function restoreRenderState(snapshot) {
   finishFluentRender(els.content, state.prefs.view);
   restoreFormDrafts();
   els.content.querySelectorAll('[data-web-settings-form]').forEach(syncWebSettingsFormState);
+  if (Array.isArray(snapshot?.openDetails)) {
+    snapshot.openDetails.forEach((entry) => {
+      let match = null;
+      if (entry.type === 'rowKey') {
+        match = els.content.querySelector(`details[data-row-key="${CSS.escape(entry.value)}"]`);
+      } else if (entry.type === 'focus') {
+        match = els.content.querySelector(`details:has(> summary[data-management-focus="${CSS.escape(entry.value)}"])`);
+      } else if (entry.type === 'class') {
+        match = els.content.querySelector(`details.${entry.value.trim().split(/\s+/).join('.')}`);
+      }
+      if (match) match.open = true;
+    });
+  }
   const active = findActiveElement(snapshot?.active);
   if (active && !active.disabled) {
     active.focus({ preventScroll: true });
@@ -1067,6 +1096,10 @@ function restoreRenderState(snapshot) {
   }
   if (typeof snapshot?.scrollY === 'number' && typeof window.scrollTo === 'function') {
     window.scrollTo({ top: snapshot.scrollY, behavior: 'auto' });
+  }
+  if (typeof snapshot?.mainScrollTop === 'number') {
+    const mainEl = document.querySelector('.main');
+    if (mainEl) mainEl.scrollTop = snapshot.mainScrollTop;
   }
   const managementDialog = els.content.querySelector('.management-drawer:not(.hidden) [role="dialog"]');
   if (managementDialog && !managementDialog.contains(document.activeElement)) {
@@ -1148,6 +1181,23 @@ function loadingHtml() {
 }
 
 function managementError(title, error, retryAction) {
+  const isHubUnconfigured = error?.code === 'hub_not_configured'
+    || error?.code === 'hub_secret_not_configured'
+    || String(error?.message || '').toLowerCase().includes('hub is not configured');
+
+  if (isHubUnconfigured) {
+    return `
+      <section class="panel empty-card" style="text-align:center;padding:48px 24px;display:flex;flex-direction:column;align-items:center;gap:12px;">
+        <div class="empty-kicker muted tiny" style="text-transform:uppercase;letter-spacing:0.05em;font-weight:600;">${escapeHtml(title)}</div>
+        <h2 style="margin:0;font-size:18px;">${escapeHtml(tr('desktop.settings.hubClient'))}</h2>
+        <p class="muted" style="max-width:440px;margin:0;font-size:13px;line-height:1.5;">${escapeHtml(tr('desktop.settings.hubSecretHint'))}</p>
+        <div style="margin-top:8px;">
+          <fluent-button appearance="primary" type="button" class="primary-btn" data-jump-view="settings">${escapeHtml(tr('nav.settings'))}</fluent-button>
+        </div>
+      </section>
+    `;
+  }
+
   return `<section class="error-card"><div class="error-kicker">${escapeHtml(title)}</div><h2>${escapeHtml(tr('error.title'))}</h2><p>${escapeHtml(error?.message || tr('error.generic'))}</p><fluent-button appearance="primary" type="button" class="primary-btn" data-management-retry="${retryAction}">${tr('actions.retry')}</fluent-button></section>`;
 }
 

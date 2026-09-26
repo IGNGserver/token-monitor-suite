@@ -61,7 +61,11 @@ a { color: inherit; }
 :where(button, input, fluent-dropdown, textarea, a, fluent-button, fluent-radio-group, fluent-text-input, fluent-switch, fluent-tab):focus-visible {
   outline: 2px solid var(--colorStrokeFocus2);
   outline-offset: 2px;
-  box-shadow: 0 0 0 4px var(--colorStrokeFocus1);
+}
+
+:where(button, input, fluent-dropdown, textarea, a, fluent-button, fluent-radio-group, fluent-text-input, fluent-switch, fluent-tab, .choice-option, .tool-select-row):focus:not(:focus-visible) {
+  outline: none;
+  box-shadow: none;
 }
 
 .skip-link {
@@ -1465,6 +1469,9 @@ html, body { font-size: var(--fontSizeBase300); line-height: var(--lineHeightBas
 :where(button, fluent-button, fluent-tab, fluent-radio-group, fluent-dropdown, fluent-text-input, fluent-switch, input, textarea, a, summary):focus-visible {
   outline: 2px solid var(--colorStrokeFocus2); outline-offset: 2px;
 }
+:where(button, fluent-button, fluent-tab, fluent-radio-group, fluent-dropdown, fluent-text-input, fluent-switch, input, textarea, a, summary, .choice-option, .tool-select-row):focus:not(:focus-visible) {
+  outline: none; outline-offset: 0; box-shadow: none;
+}
 fluent-dropdown > button[slot="control"]:focus-visible { outline: none; outline-offset: 0; box-shadow: none; }
 [hidden] { display: none !important; }
 .main { min-width: 0; padding: 24px 32px 32px; }
@@ -1499,6 +1506,7 @@ fluent-button { vertical-align: middle; max-width: 100%; }
 fluent-button[icon-only] { flex-shrink: 0; }
 fluent-button[disabled] { cursor: default; }
 fluent-button .ui-icon { width: 20px; height: 20px; }
+fluent-switch { display: inline-flex; width: 40px; height: 20px; flex-shrink: 0; vertical-align: middle; }
 .seg { display: flex; flex-wrap: wrap; gap: var(--spacingVerticalXS); min-width: 0; background: transparent; padding: 0; }
 .choice-option { display: inline-flex; align-items: center; gap: var(--spacingHorizontalS); min-height: 36px; padding: var(--spacingVerticalXS) var(--spacingHorizontalS); border: 1px solid transparent; border-radius: var(--borderRadiusMedium); color: var(--colorNeutralForeground2); background: transparent; cursor: pointer; transition: background-color var(--durationFaster) var(--curveEasyEase), border-color var(--durationFaster) var(--curveEasyEase), color var(--durationFaster) var(--curveEasyEase); }
 .choice-option:hover { background: var(--colorNeutralBackground1Hover); color: var(--colorNeutralForeground1); }
@@ -1966,7 +1974,39 @@ html:not([data-motion="full"]) fluent-spinner { visibility: hidden; }
 .field > span, .field > label { color: var(--text); font-size: 12px; font-weight: 600; }
 .field input, .field textarea { border-radius: var(--borderRadiusMedium); }
 .notice, fluent-message-bar.notice { border-radius: var(--borderRadiusMedium); }
-.chart-wrap { scrollbar-color: var(--line-strong) transparent; }
+/* Fluent 2 Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--colorScrollbarOverlay) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background-color: transparent;
+}
+
+::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--colorScrollbarOverlay);
+  border-radius: var(--borderRadiusCircular);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background-color var(--durationFaster) var(--curveEasyEase);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--colorNeutralForeground3Hover);
+}
+
+::-webkit-scrollbar-corner {
+  background-color: transparent;
+}
+
+.chart-wrap { scrollbar-color: var(--colorScrollbarOverlay) transparent; }
 .chart-svg { height: 270px; }
 .axis-base { stroke: var(--line-strong); }
 .chart-hit:focus { outline: 2px solid var(--colorStrokeFocus2); }

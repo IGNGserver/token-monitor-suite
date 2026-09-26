@@ -37,6 +37,39 @@ fun formatTokensShort(value: Long): String {
   }
 }
 
+/**
+ * A cost figure in the user's display currency.
+ *
+ * `formatUsd` hard-codes `US$`, which was the only currency the client could speak
+ * even though the Hub serves display rates for four.  [convert] is the USD→display
+ * multiplier and 1.0 when the target is USD or no rate block has arrived yet — a
+ * missing rate must not silently print a converted-looking number, so callers pass
+ * `null` and get USD back with the symbol to match.
+ */
+fun formatMoney(
+  value: Double,
+  currency: String = "USD",
+  rate: Double? = null,
+  compact: Boolean = false
+): String {
+  if (currency == "USD" || rate == null || rate <= 0.0) return formatUsd(value, compact)
+  val symbol = currencySymbols[currency] ?: "$currency "
+  val converted = value * rate
+  val magnitude = abs(converted)
+  if (compact && magnitude >= 1_000) {
+    return symbol + String.format(Locale.US, "%,.0f", converted)
+  }
+  val decimals = if (magnitude < 1 && currency != "TWD" && currency != "HKD") 4 else 2
+  return symbol + String.format(Locale.US, "%,.${decimals}f", converted)
+}
+
+private val currencySymbols = mapOf(
+  "USD" to "US$",
+  "CNY" to "¥",
+  "TWD" to "NT$",
+  "HKD" to "HK$"
+)
+
 fun formatUsd(value: Double, compact: Boolean = false): String {
   if (compact && abs(value) >= 1000) {
     return "US$" + String.format(Locale.US, "%.1fK", value / 1000.0)
@@ -48,6 +81,22 @@ fun formatUsd(value: Double, compact: Boolean = false): String {
   }
   return "US$" + String.format(Locale.US, "%.${decimals}f", value)
 }
+
+/**
+ * Prefix a measured figure with `~` when it is an estimate.  Same rule and same
+ * character as the shared web UI's `estimatedValue()`, because the two render the
+ * same number and a different convention would read as two different facts.
+ */
+fun estimatedValue(text: String, estimated: Boolean): String = if (estimated) "~$text" else text
+
+/**
+ * Credits in the provider's own unit — no currency symbol and no conversion.
+ * Qoder has never published a credit-to-USD or credit-to-token rate, so folding
+ * credits into a cost would invent one.
+ */
+fun formatCredits(value: Double): String =
+  if (value >= 100) String.format(Locale.US, "%.0f 积分", value)
+  else String.format(Locale.US, "%.1f 积分", value)
 
 fun formatPercent(part: Long, total: Long): String {
   if (total <= 0L) return "0%"
@@ -105,25 +154,65 @@ fun formatIsoCompact(raw: String?): String {
 data class ShareEntry(
   val key: String,
   val tokens: Long,
-  val costUsd: Double = 0.0
-)
+  val costUsd: Double = 0.0,
+  /**
+   * Some or all of [tokens] were estimated from message content rather than an exact
+   * meter.  [valueLabel] prefixes `~`, matching the web's `estimatedValue()` — without
+   * it a guess and a measurement render identically, which is the one thing a usage
+   * tool must not do.
+   */
+  val estimated: Boolean = false,
+  /**
+   * Credits in the provider's own unit.  Qoder bills in credits and leaves every token
+   * field at zero, so for Qoder this is the only real number and [tokens] is 0 by
+   * design rather than by absence of usage.
+   */
+  val credits: Double? = null
+) {
+  /** True when this row has nothing to show in tokens but does have credits. */
+  val creditsOnly: Boolean
+    get() = credits != null && credits > 0.0 && tokens == 0L
+}
 
 fun topShareEntries(
   tokens: Map<String, Long>,
   costs: Map<String, Double> = emptyMap(),
+  estimated: Map<String, Boolean> = emptyMap(),
+  credits: Map<String, Double> = emptyMap(),
   limit: Int = 6
 ): List<ShareEntry> {
-  if (tokens.isEmpty()) return emptyList()
-  val sorted = tokens.entries.sortedByDescending { it.value }
-  if (sorted.size <= limit) {
-    return sorted.map { ShareEntry(it.key, it.value, costs[it.key] ?: 0.0) }
+  // Qoder is in `credits` and not in `tokens`, so a tokens-only map is not empty
+  // usage — it is usage the old code threw away.  Seed the key set from both.
+  val keys = (tokens.keys + credits.keys).toSet()
+  if (keys.isEmpty()) return emptyList()
+  val sorted = keys.sortedByDescending { key ->
+    // A credits-only row sorts by its credit magnitude converted to nothing useful
+    // against tokens, so rank credits-only rows behind every counted row rather than
+    // pretending 0 tokens means "least used" in the middle of the list.
+    tokens[key] ?: 0L
   }
+  fun entryFor(key: String) = ShareEntry(
+    key = key,
+    tokens = tokens[key] ?: 0L,
+    costUsd = costs[key] ?: 0.0,
+    estimated = estimated[key] == true,
+    credits = credits[key]
+  )
+  if (sorted.size <= limit) return sorted.map(::entryFor)
   val head = sorted.take(limit - 1)
   val rest = sorted.drop(limit - 1)
-  val otherTokens = rest.sumOf { it.value }
-  val otherCost = rest.sumOf { costs[it.key] ?: 0.0 }
-  return head.map { ShareEntry(it.key, it.value, costs[it.key] ?: 0.0) } +
-    ShareEntry("其他", otherTokens, otherCost)
+  val otherTokens = rest.sumOf { tokens[it] ?: 0L }
+  val otherCost = rest.sumOf { costs[it] ?: 0.0 }
+  val otherCredits = rest.mapNotNull { credits[it] }.takeIf { it.isNotEmpty() }?.sum()
+  return head.map(::entryFor) +
+    ShareEntry(
+      key = "其他",
+      tokens = otherTokens,
+      costUsd = otherCost,
+      // The aggregate of a mixed set is never presented as exact.
+      estimated = rest.any { estimated[it] == true },
+      credits = otherCredits
+    )
 }
 
 
@@ -259,5 +348,23 @@ fun deviceConnectionLabel(stale: Boolean, clientStatus: Map<String, String>?): S
 }
 
 /** True when a device should count as online in the fleet summary. */
+/**
+ * The one definition of "this fleet row counts as online".
+ *
+ * The overview previously used `!stale` while the device page used
+ * [deviceCountsAsOnline], so two screens on the same data could print different
+ * online counts, and a device that is reporting but has every tracked client missing
+ * was "online" in one place and not in the other.  There is now one predicate.
+ */
+fun fleetOnlineCount(devices: List<com.igng.tokenmonitor.android.data.model.DeviceDto>): Int =
+  devices.count { deviceCountsAsOnline(it.stale, it.clientStatus) }
+
+/** Stale last, then busiest first — shared so both fleet lists order identically. */
+fun fleetSorted(devices: List<com.igng.tokenmonitor.android.data.model.DeviceDto>): List<com.igng.tokenmonitor.android.data.model.DeviceDto> =
+  devices.sortedWith(
+    compareBy<com.igng.tokenmonitor.android.data.model.DeviceDto> { it.stale }
+      .thenByDescending { it.periods.today.totalTokens }
+  )
+
 fun deviceCountsAsOnline(stale: Boolean, clientStatus: Map<String, String>?): Boolean =
   !stale && deviceConnectionLabel(stale, clientStatus) == "在线"

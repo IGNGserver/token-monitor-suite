@@ -11,10 +11,22 @@ npm run agent:once # one-shot collect+post, then exit (useful for cron/launchd)
 npm test           # run the node:test suite (node --test "tests/**/*.test.js")
 npm run lint       # ESLint flat config (eslint.config.js)
 npm run verify:product-scope # enforce the approved two-mode / Compose-only product boundary
-npm run verify     # product-scope + shared-UI boundary + css-var guards, lint, test
+npm run verify:android       # Android Fluent colour + component-boundary guards
+npm run verify     # product-scope + shared-UI boundary + css-var + Android guards, lint, test
 ```
 
-Automated verification is `npm run verify` (= `npm run verify:product-scope && npm run verify:shared-ui && npm run verify:css-vars && npm run lint && npm test`); CI (`.github/workflows/ci.yml`) runs lint + test on push/PR across Node 22 & 24. The toolchain (ESLint 10 + the node:test glob) needs Node 22.13+, which is why `engines.node` is `>=22.13.0` (Node 18 & 20 are both EOL as of 2026-06).
+Automated verification is `npm run verify` (= `npm run verify:product-scope && npm run verify:shared-ui && npm run verify:css-vars && npm run verify:android-fluent-contrast && npm run verify:android-fluent-boundary && npm run lint && npm test`); CI (`.github/workflows/ci.yml`) runs lint + test on push/PR across Node 22 & 24, and a separate `android` job compiles the client and runs `:app:testDebugUnitTest` — the Android toolchain is not reachable from the Node matrix. The toolchain (ESLint 10 + the node:test glob) needs Node 22.13+, which is why `engines.node` is `>=22.13.0` (Node 18 & 20 are both EOL as of 2026-06).
+
+```bash
+cd android && ./gradlew :app:testDebugUnitTest   # Android JVM tests (Compose runtime is NOT loadable here)
+cd android && ./gradlew :app:assembleDebug       # compile-only check
+```
+
+Android JVM tests cannot load `androidx.compose.*` runtime classes, so anything a JVM test must
+reach stays free of Compose types and keeps its `CompositionLocal` in a separate file
+(`DisplayFx.kt` is the precedent); behaviour that only exists inside a composable is asserted by
+the Node guards or by hand instead.
+
 
 ### Version and release policy
 
@@ -36,6 +48,7 @@ The desktop app, Docker Compose Hub, and headless agent share `src/shared/`, and
 - **`src/electron/renderer/`** — a shell (`index.html`, `desktop.css`) plus `boot.js`, which installs the IPC transport before importing the shared UI.
 - **`src/hub/server.js`** — Node/MySQL HTTP Hub, used only by the root `docker-compose.yml`. It exposes `/api/ingest`, `/api/stats`, `/api/stats/stream` (SSE), and serves the same-port web dashboard / PWA from `src/hub/web/` via `src/hub/static.js`; the shared UI is served under `/ui/`. The Hub source is intentionally excluded from Electron packages.
 - **`src/agent/agent.js`** — headless collector for machines without the desktop app. It is a sync client and posts to the Docker Compose Hub.
+- **`android/`** — a native Kotlin/Compose read client for the Docker Compose Hub (`/api/*` + SSE, no collector, no `POST /api/ingest`). It shares Fluent 2 tokens and semantics with the shared renderer but is a separate UI: its component contract is `docs/design/android-fluent2-contract.md`, and it enforces that contract with ratchet guards rather than review, because it is the one surface with no shared code to keep it honest. It consumes the same `clientStatus` / `wslStatus` / `limits` / accounts records the Hub serves, and it renders the *same* provenance rules (`clientEstimated` → `~`, `clientCredits` as a separate unit) — a client that drops provenance is reporting an estimate as a measurement.
 
 The product boundary is recorded in `product-scope.json`: no embedded widget Hub, no standalone `npm run hub` entry point, and no secondary Worker deployment. Run `npm run verify:product-scope` before changing any deployment or sync code.
 
@@ -86,6 +99,7 @@ The default client CSV lives in **one** place: `DEFAULT_CLIENTS` in `src/shared/
 | WSL discovery | marker(s) in `WSL_DATA_MARKERS` **and** the marker→id mapping in `MARKER_CLIENTS` (`src/shared/wslUsage.js`) — use the exact roots tokscale reads, including alternate roots. A marker without a `MARKER_CLIENTS` entry attributes to nothing, so a WSL home holding only that client's data would be skipped |
 | Docs & env examples | the supported-tools table in `README.md` and its translations (`README.*.md`) + the client CSV in `.env.example`. Every locale's prose tool/provider counts must match its own table — `tests/docs/readmeConsistency.test.js` fails on a stale count or a table that drifts between locales |
 | Guard tests | the expected-client lists in `tests/shared/clientTracking.test.js` |
+| Android client | `CLIENT_LABELS` / `CLIENT_COLORS` in `ClientBranding.kt`, plus the brand SVG in `src/shared-ui/icons/clients/<id>.svg` — `npm run update:fluent-assets` converts it to `res/drawable/client_<id>.xml` and regenerates `ClientIcons.kt`. An SVG that needs filters, gradients or transforms is skipped *by design* and falls back to the letter monogram; nothing breaks, the mark just does not appear |
 
 Two caveats on top of the table:
 

@@ -5,9 +5,11 @@ const https = require('node:https');
 const fs = require('node:fs');
 const { URL } = require('node:url');
 const {
+  PERIODS,
   aggregateDevices,
   aggregateHistory,
   mergeDeviceRecord,
+  mergePeriods,
   normalizeDeviceRecord
 } = require('../shared/usage');
 const { normalizeLimitsSummary } = require('../shared/limits');
@@ -909,7 +911,21 @@ function createHub({
         await store.saveDevice(merged, connection);
         return merged;
       }
-      const { candidates, events } = calculateUsageEventDeltas(existing, merged);
+      // Deltas come from the ingest baseline, not the display snapshot: a
+      // transfer rewrites the display snapshot but pins the baseline, so the
+      // next upload after a transfer books only genuinely new usage.
+      const baselineState = typeof store.getIngestBaseline === 'function'
+        ? await store.getIngestBaseline(deviceId, connection)
+        : { snapshot: existing, transferred: false };
+      const baseline = baselineState?.snapshot || existing;
+      const { candidates, events } = calculateUsageEventDeltas(baseline, merged);
+      // A transferred device's display snapshot is re-derived, not replaced:
+      // previous display + (fresh cumulative - baseline). Without this the
+      // device's next full cumulative report would put the transferred history
+      // back into the aggregate even though the ledger booked none of it.
+      if (baselineState?.transferred) {
+        merged.periods = reanchorTransferredPeriods(merged.periods, baseline.periods || {});
+      }
       const pricingByModel = await store.getPricing(events.map((event) => event.model), connection);
       const pricedEvents = events.map((event) => priceSnapshot(event, pricingByModel.get(event.model)));
       await store.saveDevice(merged, connection);
@@ -935,6 +951,227 @@ function createHub({
     }
     if (!includeStats || !stats) return record;
     return { record, stats };
+  }
+
+  // A transferred device re-reports cumulative counters that still include the
+  // moved history. Its display periods must show only what is left: for every
+  // counter, previous display + (fresh - baseline). The same arithmetic the
+  // collector's watch ticks use (applyPeriodDelta), applied against the transfer
+  // anchor instead of a scan anchor. Never negative — a counter reset simply
+  // re-anchors.
+  function reanchorTransferredPeriods(periods, anchorPeriods) {
+    const reanchored = {};
+    for (const periodName of PERIODS) {
+      reanchored[periodName] = reanchorPeriodAgainstAnchor(
+        periods?.[periodName] || {},
+        anchorPeriods?.[periodName] || {}
+      );
+    }
+    return reanchored;
+  }
+
+  function reanchorPeriodAgainstAnchor(period, anchor) {
+    // Own-null handling: keys the anchor knows were moved to the target and must
+    // not reappear in the display, even though the fresh cumulative report still
+    // lists them.
+    const result = {};
+    for (const [key, value] of Object.entries(period)) {
+      if (Object.prototype.hasOwnProperty.call(anchor, key) && key !== 'capabilities') continue;
+      result[key] = value;
+    }
+    for (const [key, value] of Object.entries(period)) {
+      if (key === 'capabilities' || key === 'estimated' || key === 'sessions' || key === 'projects') continue;
+      const anchorValue = anchor[key];
+      if (typeof value === 'number') {
+        result[key] = Math.max(0, value - (typeof anchorValue === 'number' ? anchorValue : 0));
+        continue;
+      }
+      if (value && typeof value === 'object') {
+        result[key] = reanchorPeriodAgainstAnchor(value, anchorValue && typeof anchorValue === 'object' ? anchorValue : {});
+      }
+    }
+    // Sessions/projects keep only entries the anchor did not cover; those are
+    // genuinely new and stay as reported.
+    for (const mapKey of ['sessions', 'projects']) {
+      if (!period[mapKey] || typeof period[mapKey] !== 'object') continue;
+      const anchorMap = anchor[mapKey] && typeof anchor[mapKey] === 'object' ? anchor[mapKey] : {};
+      const kept = {};
+      for (const [key, value] of Object.entries(period[mapKey])) {
+        if (Object.prototype.hasOwnProperty.call(anchorMap, key)) continue;
+        kept[key] = value;
+      }
+      result[mapKey] = kept;
+    }
+    return result;
+  }
+
+  // Move a source device's entire recorded history to a target device that
+  // already exists. The source keeps its identity and keeps reporting: its
+  // display snapshot is cleared and its ingest baseline is pinned to the
+  // pre-transfer cumulative counters and flagged `transferred`, so the next
+  // upload books only genuinely new usage — in the ledger AND in the display
+  // aggregate. Target periods are additively merged (mergePeriods) and target
+  // sessions are summed per (client, session) — the ledger rows move wholesale,
+  // which is what keeps the custom-range answers unchanged.
+  async function transferDeviceData(sourceDeviceId, targetDeviceId) {
+    const sourceId = String(sourceDeviceId || '').trim();
+    const targetId = String(targetDeviceId || '').trim();
+    if (!sourceId) { const e = new Error('source device id required'); e.code = 'device_id_required'; throw e; }
+    if (!targetId) { const e = new Error('target device id required'); e.code = 'target_device_id_required'; throw e; }
+    if (sourceId === targetId) { const e = new Error('source and target devices must differ'); e.code = 'same_device'; throw e; }
+    validateDeviceRecordPayload({ deviceId: sourceId });
+    validateDeviceRecordPayload({ deviceId: targetId });
+
+    return withDeviceIngestLock(sourceId, () => withDeviceIngestLock(targetId, () => store.transaction(async (connection) => {
+      if (typeof store.lockDevice === 'function') {
+        await store.lockDevice(sourceId, connection);
+        await store.lockDevice(targetId, connection);
+      }
+      const sourceRecord = await store.getDeviceRecord(sourceId, connection);
+      if (!sourceRecord) { const e = new Error('source device not found'); e.code = 'not_found'; throw e; }
+      const targetRecord = await store.getDeviceRecord(targetId, connection);
+      if (!targetRecord) { const e = new Error('target device not found'); e.code = 'target_not_found'; throw e; }
+
+      const sourceNormalized = normalizeDeviceRecord(sourceRecord);
+      const targetNormalized = normalizeDeviceRecord(targetRecord);
+
+      // 1. The append-only ledger moves wholesale.
+      if (typeof store.moveDeviceUsageEvents === 'function') {
+        await store.moveDeviceUsageEvents(sourceId, targetId, connection);
+      }
+
+      // 2. Sessions merge additively per (client, session) so a session present
+      // on both sides sums instead of colliding or overwriting.
+      if (typeof store.mergeDeviceSessions === 'function') {
+        await store.mergeDeviceSessions(sourceId, targetId, connection);
+      }
+
+      // 3. Display periods merge additively; history documents fold together.
+      const now = new Date().toISOString();
+      const periods = {};
+      for (const periodName of PERIODS) {
+        periods[periodName] = mergePeriods(
+          targetNormalized.periods?.[periodName],
+          sourceNormalized.periods?.[periodName]
+        );
+      }
+      const mergedRecord = {
+        ...targetNormalized,
+        updatedAt: now,
+        receivedAt: now,
+        periods,
+        history: mergeHistoryDocuments(targetNormalized.history, sourceNormalized.history)
+      };
+      mergedRecord.limits = normalizeLimitsSummary({});
+      await store.saveDevice(mergedRecord, connection);
+
+      // 4. The source keeps its identity but loses its recorded usage; the
+      // baseline pins the pre-transfer snapshot and flags the device, so its
+      // next upload books only the delta — in the ledger and in the display
+      // aggregate.
+      const clearedSource = {
+        ...sourceNormalized,
+        updatedAt: now,
+        receivedAt: now,
+        periods: {},
+        history: null
+      };
+      clearedSource.limits = normalizeLimitsSummary({});
+      await store.saveDevice(clearedSource, connection);
+      if (typeof store.saveIngestBaseline === 'function') {
+        // Pin the baseline to the pre-transfer snapshot: exactly what the source
+        // device will re-report next tick, producing a zero delta.
+        await store.saveIngestBaseline(sourceId, sourceNormalized, { transferred: true }, connection);
+      }
+      return { source: sourceNormalized, target: targetNormalized, merged: mergedRecord };
+    })));
+  }
+
+  // History documents around a transfer.
+  //
+  // Target side (mergeHistoryDocuments): the source's rows fold into the
+  // target's additively — same day keys sum, new day keys append. Summary maps
+  // add; non-numeric summary entries (favourite model, streaks) take the
+  // target's.
+  //
+  // Source side: the transfer writes an explicit empty document so the device
+  // stops displaying moved history. Its next upload re-derives what is left
+  // through reanchorTransferredPeriods, which drops anchor-covered daily rows
+  // and keeps genuinely new ones.
+  function _emptyHistoryDocument() {
+    return { daily: [], monthly: [], summary: {} };
+  }
+
+  function mergeHistoryDocuments(a, b) {
+    if (!a || (!a.daily?.length && !a.monthly?.length && !Object.keys(a.summary || {}).length)) {
+      return b ? coerceHistoryDocument(b) : null;
+    }
+    if (!b || (!b.daily?.length && !b.monthly?.length && !Object.keys(b.summary || {}).length)) {
+      return coerceHistoryDocument(a);
+    }
+    const target = coerceHistoryDocument(a);
+    const incoming = coerceHistoryDocument(b);
+    return {
+      daily: mergeHistoryRows(target.daily, incoming.daily, 'date'),
+      monthly: mergeHistoryRows(target.monthly, incoming.monthly, 'month'),
+      summary: mergeHistorySummaries(target.summary, incoming.summary)
+    };
+  }
+
+  function coerceHistoryDocument(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    return {
+      daily: Array.isArray(source.daily) ? source.daily.map((row) => ({ ...row })) : [],
+      monthly: Array.isArray(source.monthly) ? source.monthly.map((row) => ({ ...row })) : [],
+      summary: source.summary && typeof source.summary === 'object' ? { ...source.summary } : {}
+    };
+  }
+
+  function mergeHistoryRows(targetRows, incomingRows, keyField) {
+    const byKey = new Map();
+    const numeric = new Set(['tokens', 'cost', 'messages', 'activeTimeMs', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens', 'unclassifiedTokens']);
+    for (const row of targetRows) {
+      const key = String(row?.[keyField] || '');
+      if (!key) continue;
+      byKey.set(key, { ...row });
+    }
+    for (const row of incomingRows) {
+      const key = String(row?.[keyField] || '');
+      if (!key) continue;
+      const existing = byKey.get(key);
+      if (!existing) {
+        byKey.set(key, { ...row });
+        continue;
+      }
+      for (const field of numeric) {
+        if (row[field] !== undefined || existing[field] !== undefined) {
+          existing[field] = (Number(existing[field]) || 0) + (Number(row[field]) || 0);
+        }
+      }
+      for (const mapField of ['perClient', 'perModel']) {
+        const targetMap = existing[mapField] && typeof existing[mapField] === 'object' ? existing[mapField] : {};
+        const incomingMap = row[mapField] && typeof row[mapField] === 'object' ? row[mapField] : {};
+        for (const [name, value] of Object.entries(incomingMap)) {
+          const current = targetMap[name] && typeof targetMap[name] === 'object' ? targetMap[name] : {};
+          targetMap[name] = {
+            ...current,
+            tokens: (Number(current.tokens) || 0) + (Number(value?.tokens) || 0),
+            cost: (Number(current.cost) || 0) + (Number(value?.cost) || 0)
+          };
+        }
+        existing[mapField] = targetMap;
+      }
+    }
+    return [...byKey.values()].sort((x, y) => String(x[keyField] || '').localeCompare(String(y[keyField] || '')));
+  }
+
+  function mergeHistorySummaries(targetSummary, incomingSummary) {
+    const merged = { ...targetSummary };
+    for (const [key, value] of Object.entries(incomingSummary)) {
+      if (typeof value !== 'number' && typeof merged[key] !== 'number') continue;
+      merged[key] = (Number(merged[key]) || 0) + (Number(value) || 0);
+    }
+    return merged;
   }
 
   async function recordAccountAudit(principal, action, accountId = '', details = null) {
@@ -1482,6 +1719,36 @@ function createHub({
         }
         if (error.code === 'payload_too_large') return sendJson(res, 413, { error: error.code, message: error.message });
         return sendJson(res, 400, { error: error.code || 'bad_request', message: error.message });
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname.startsWith('/api/devices/') && url.pathname.endsWith('/transfer')) {
+      const admin = authorize(ADMIN_SCOPE);
+      if (!admin) return;
+      const sourceDeviceId = decodeURIComponent(url.pathname.slice('/api/devices/'.length, -'/transfer'.length));
+      try {
+        const body = await readJsonBody(req);
+        const targetDeviceId = String(body?.targetDeviceId || '').trim();
+        await transferDeviceData(sourceDeviceId, targetDeviceId);
+        audit(admin.principal, 'device.transfer', `${sourceDeviceId}->${targetDeviceId}`);
+        invalidateStatsCache();
+        try {
+          const stats = await getStats();
+          await broadcastStats('transfer', stats);
+        } catch (error) {
+          logger.warn?.(`[hub-transfer] post-commit stats/broadcast failed: ${error?.message || error}`);
+        }
+        return sendJson(res, 200, { ok: true, sourceDeviceId, targetDeviceId });
+      } catch (error) {
+        if (error.code === 'device_id_required') return sendJson(res, 400, { error: 'device_id_required' });
+        if (error.code === 'target_device_id_required') return sendJson(res, 400, { error: 'target_device_id_required' });
+        if (error.code === 'same_device') return sendJson(res, 400, { error: 'same_device' });
+        if (error.code === 'not_found') return sendJson(res, 404, { error: 'not_found' });
+        if (error.code === 'target_not_found') return sendJson(res, 404, { error: 'target_not_found' });
+        if (error.code === 'field_too_long') {
+          return sendJson(res, 400, { error: error.code, message: error.message, field: error.field, maxLength: error.maxLength });
+        }
+        return sendJson(res, 500, { error: 'transfer_failed', message: 'Device data transfer failed.' });
       }
     }
 

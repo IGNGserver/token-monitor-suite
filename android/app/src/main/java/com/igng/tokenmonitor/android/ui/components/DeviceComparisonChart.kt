@@ -1,6 +1,6 @@
 package com.igng.tokenmonitor.android.ui.components
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,20 +9,23 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.igng.tokenmonitor.android.data.model.DeviceDto
-import com.igng.tokenmonitor.android.ui.theme.ChartPalette
+import com.igng.tokenmonitor.android.ui.theme.FluentChartPalette
+import com.igng.tokenmonitor.android.ui.theme.FluentMotion
+import com.igng.tokenmonitor.android.ui.theme.FluentShapeDefaults
+import com.igng.tokenmonitor.android.ui.theme.FluentSpacingDefaults
+import com.igng.tokenmonitor.android.ui.theme.FluentTypeRamp
+import com.igng.tokenmonitor.android.ui.theme.LocalFluentColors
 
 data class DeviceShare(
   val id: String,
@@ -47,6 +50,15 @@ fun devicesToShares(devices: List<DeviceDto>, limit: Int = 8): List<DeviceShare>
     }
 }
 
+/**
+ * Cross-device comparison.
+ *
+ * Fluent ranks by *ordering and weight* rather than by colouring each bar
+ * differently: the leader is emphasised with `title3`/SemiBold and the accent
+ * fill, and the rest recede to a single neutral-series hue.  Giving every device
+ * its own colour (as the previous version did) spent the colour budget on
+ * identity that the label already carries.
+ */
 @Composable
 fun DeviceComparisonChart(
   devices: List<DeviceDto>,
@@ -54,70 +66,89 @@ fun DeviceComparisonChart(
   limit: Int = 8,
   showCost: Boolean = true
 ) {
+  val colors = LocalFluentColors.current
   val shares = devicesToShares(devices, limit)
   if (shares.isEmpty()) return
   val maxTokens = shares.maxOf { it.tokens }.coerceAtLeast(1L)
-  val primary = MaterialTheme.colorScheme.primary
-  val staleColor = MaterialTheme.colorScheme.outline
-  val track = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
+  val leaderColor = colors.brandForeground1
+  val followerColor = FluentChartPalette[0].copy(alpha = 0.55f)
+  val staleColor = colors.neutralStroke2
 
-  Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+  Column(
+    modifier = modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.m)
+  ) {
     shares.forEachIndexed { index, share ->
       val targetFraction = (share.tokens.toFloat() / maxTokens.toFloat()).coerceIn(0.02f, 1f)
-      val fraction = animateGrowFraction(targetFraction, durationMillis = 900)
-      val barColor = if (share.stale) staleColor else ChartPalette[index % ChartPalette.size].let {
-        // Prefer brand primary for top device for clearer hierarchy
-        if (index == 0 && !share.stale) primary else it
+      val fraction = animateGrowFraction(targetFraction, durationMillis = FluentMotion.slow)
+      val isLeader = index == 0 && !share.stale
+      val barColor = when {
+        share.stale -> staleColor
+        isLeader -> leaderColor
+        else -> followerColor
       }
-      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(
-          Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
+      Row(
+        Modifier
+          .fillMaxWidth()
+          .semantics {
+            contentDescription =
+              "${share.name}，今日 ${formatTokensShort(share.tokens)} token" +
+                if (share.stale) "，已离线" else ""
+          },
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        StatusDot(active = !share.stale, size = 6.dp)
+        Spacer(Modifier.width(FluentSpacingDefaults.s))
+        Column(Modifier.weight(1f)) {
           Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
           ) {
-            StatusDot(active = !share.stale)
-            Spacer(Modifier.width(8.dp))
             Text(
               share.name,
-              style = MaterialTheme.typography.bodyMedium,
-              fontWeight = if (index == 0) FontWeight.SemiBold else FontWeight.Normal,
+              style = if (isLeader) FluentTypeRamp.title3 else FluentTypeRamp.body2,
+              fontWeight = if (isLeader) FontWeight.SemiBold else FontWeight.Normal,
+              color = if (share.stale) colors.neutralForeground3 else colors.neutralForeground1,
               maxLines = 1,
               overflow = TextOverflow.Ellipsis,
               modifier = Modifier.weight(1f, fill = false)
             )
-          }
-          Spacer(Modifier.width(8.dp))
-          Text(
-            formatTokensShort(share.tokens),
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Medium
-          )
-          if (showCost) {
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(FluentSpacingDefaults.s))
             Text(
-              formatUsd(share.costUsd, compact = true),
-              style = MaterialTheme.typography.labelMedium,
-              color = MaterialTheme.colorScheme.onSurfaceVariant
+              formatTokensShort(share.tokens),
+              style = FluentTypeRamp.caption1,
+              fontWeight = FontWeight.SemiBold,
+              color = if (share.stale) colors.neutralForeground3 else colors.neutralForeground2
+            )
+            if (showCost) {
+              Spacer(Modifier.width(FluentSpacingDefaults.s))
+              Text(
+                formatUsd(share.costUsd, compact = true),
+                style = FluentTypeRamp.caption2,
+                color = colors.neutralForeground3
+              )
+            }
+          }
+          Spacer(Modifier.height(FluentSpacingDefaults.xs))
+          // Inline track so the comparison bar is directly under its label.
+          androidx.compose.foundation.Canvas(
+            Modifier
+              .fillMaxWidth()
+              .height(4.dp)
+          ) {
+            val h = size.height
+            val r = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx(), 2.dp.toPx())
+            drawRoundRect(color = colors.neutralForeground3.copy(alpha = 0.18f), cornerRadius = r)
+            drawRoundRect(
+              color = barColor,
+              size = androidx.compose.ui.geometry.Size(
+                (size.width * fraction).coerceAtLeast(h),
+                h
+              ),
+              cornerRadius = r
             )
           }
-        }
-        Canvas(
-          Modifier
-            .fillMaxWidth()
-            .height(12.dp)
-        ) {
-          val h = size.height
-          val radius = CornerRadius(h / 2f, h / 2f)
-          drawRoundRect(color = track, cornerRadius = radius)
-          drawRoundRect(
-            color = barColor,
-            size = Size(size.width * fraction, h),
-            cornerRadius = radius
-          )
         }
       }
     }

@@ -1,409 +1,267 @@
 package com.igng.tokenmonitor.android.ui.more
-
+import com.igng.tokenmonitor.android.ui.components.FluentIcons
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.semantics.Role
+import com.igng.tokenmonitor.android.ui.components.FluentButton
+import com.igng.tokenmonitor.android.ui.components.FluentButtonVariant
+import com.igng.tokenmonitor.android.ui.components.FluentCardList
+import com.igng.tokenmonitor.android.ui.components.FluentDialog
+import com.igng.tokenmonitor.android.ui.components.FluentIconButton
+import com.igng.tokenmonitor.android.ui.components.FluentTextField
+import com.igng.tokenmonitor.android.ui.components.FluentToggle
+import com.igng.tokenmonitor.android.ui.components.fluentFocusRing
+import com.igng.tokenmonitor.android.ui.components.FluentListRow
+import com.igng.tokenmonitor.android.ui.components.FluentPageHeader
+import com.igng.tokenmonitor.android.ui.components.FluentTabStrip
+import com.igng.tokenmonitor.android.ui.components.FluentTopBar
+import com.igng.tokenmonitor.android.ui.components.rememberScrolledFlag
+import com.igng.tokenmonitor.android.ui.theme.FluentElevationDefaults
+import com.igng.tokenmonitor.android.ui.theme.FluentMotion
+import com.igng.tokenmonitor.android.ui.theme.FluentShapeDefaults
+import com.igng.tokenmonitor.android.ui.theme.FluentSpacingDefaults
+import com.igng.tokenmonitor.android.ui.theme.FluentTypeRamp
+import com.igng.tokenmonitor.android.ui.theme.LocalFluentColors
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.text.font.FontWeight
-
 import com.igng.tokenmonitor.android.ui.components.LimitsSection
 import com.igng.tokenmonitor.android.ui.components.formatRelativeTime
 import com.igng.tokenmonitor.android.ui.components.wslStatusLabel
 import com.igng.tokenmonitor.android.ui.components.devicePlatformLabel
 import com.igng.tokenmonitor.android.ui.components.agentRuntimeLabel
-
-import androidx.compose.material.icons.outlined.MonitorHeart
-
-
-
 import android.net.Uri
-
 import androidx.compose.foundation.background
-
 import androidx.compose.foundation.border
-
 import androidx.compose.foundation.clickable
-
 import androidx.compose.foundation.layout.size
-
 import androidx.compose.foundation.shape.CircleShape
-
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Switch
-
 import androidx.compose.ui.draw.clip
-
 import androidx.hilt.navigation.compose.hiltViewModel
-
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-
+import com.igng.tokenmonitor.android.data.local.DisplayCurrency
 import com.igng.tokenmonitor.android.data.local.HapticsMode
-
+import com.igng.tokenmonitor.android.data.local.ThemeMode
 import com.igng.tokenmonitor.android.data.local.ThemeSeedId
-
 import com.igng.tokenmonitor.android.ui.PreferencesViewModel
-
 import com.igng.tokenmonitor.android.ui.haptics.HapticEvent
-
 import com.igng.tokenmonitor.android.ui.haptics.rememberAppHaptics
-
 import com.igng.tokenmonitor.android.ui.theme.themeSeedSwatch
-
 import androidx.compose.foundation.layout.Box
-
 import androidx.compose.foundation.layout.Arrangement
-
 import androidx.compose.foundation.layout.Column
-
 import androidx.compose.foundation.layout.PaddingValues
-
 import androidx.compose.foundation.layout.Row
-
 import androidx.compose.foundation.layout.Spacer
-
 import androidx.compose.foundation.layout.fillMaxSize
-
 import androidx.compose.foundation.layout.fillMaxWidth
-
 import androidx.compose.foundation.layout.height
-
 import androidx.compose.foundation.layout.padding
-
 import androidx.compose.foundation.layout.width
-
 import androidx.compose.foundation.lazy.LazyColumn
-
 import androidx.compose.foundation.lazy.items
-
 import androidx.compose.foundation.rememberScrollState
-
 import androidx.compose.foundation.verticalScroll
-
-import androidx.compose.material.icons.Icons
-
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Home
-
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-
-import androidx.compose.material.icons.filled.Add
-
-import androidx.compose.material.icons.filled.Refresh
-
-import androidx.compose.material.icons.outlined.AttachMoney
-
-import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.Folder
-
-import androidx.compose.material.icons.outlined.Info
-
-import androidx.compose.material.icons.outlined.Settings
-
-import androidx.compose.material3.AlertDialog
-
-import androidx.compose.material3.Button
-
-import androidx.compose.material3.ExperimentalMaterial3Api
-
-import androidx.compose.material3.FloatingActionButton
-
 import androidx.compose.material3.Icon
-
-import androidx.compose.material3.IconButton
-
-import androidx.compose.material3.MaterialTheme
-
-import androidx.compose.material3.OutlinedButton
-
-import androidx.compose.material3.OutlinedTextField
-
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.Text
-
-import androidx.compose.material3.TextButton
-
-import androidx.compose.material3.TopAppBar
-
 import androidx.compose.runtime.Composable
-
 import androidx.compose.runtime.getValue
-
 import androidx.compose.runtime.mutableStateOf
-
 import androidx.compose.runtime.remember
-
 import androidx.compose.runtime.setValue
-
 import androidx.compose.ui.Alignment
-
 import androidx.compose.ui.Modifier
-
-import androidx.compose.ui.graphics.vector.ImageVector
-
+import androidx.annotation.DrawableRes
 import androidx.compose.ui.platform.LocalUriHandler
-
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-
 import androidx.compose.ui.text.input.VisualTransformation
-
 import androidx.compose.ui.text.style.TextOverflow
-
 import androidx.compose.ui.unit.dp
-
 import androidx.navigation.NavHostController
-
 import com.igng.tokenmonitor.android.BuildConfig
-
 import com.igng.tokenmonitor.android.data.model.BatchPricingResultDto
-
 import com.igng.tokenmonitor.android.data.model.PeriodDto
 import com.igng.tokenmonitor.android.data.model.ProjectDto
-
 import com.igng.tokenmonitor.android.data.model.PricingDto
-
 import com.igng.tokenmonitor.android.data.model.PricingRequestDto
-
 import com.igng.tokenmonitor.android.data.model.SessionDto
-
 import com.igng.tokenmonitor.android.data.model.StatsDto
-
 import com.igng.tokenmonitor.android.ui.ConnectionUiState
-
 import com.igng.tokenmonitor.android.ui.ConnectionViewModel
-
 import com.igng.tokenmonitor.android.ui.HubUiState
-
 import com.igng.tokenmonitor.android.ui.HubViewModel
-
 import com.igng.tokenmonitor.android.ui.components.AppCard
-
 import com.igng.tokenmonitor.android.ui.components.ShareEntry
-
 import com.igng.tokenmonitor.android.ui.components.ShareBarList
-
 import com.igng.tokenmonitor.android.ui.components.SectionHeader
-
 import com.igng.tokenmonitor.android.ui.components.ClientMonogram
-
 import com.igng.tokenmonitor.android.ui.components.ClientBranding
-
 import com.igng.tokenmonitor.android.ui.components.EmptyState
-
 import com.igng.tokenmonitor.android.ui.components.MetricHeroCard
-
 import com.igng.tokenmonitor.android.ui.components.SegmentedTokenBar
-
 import com.igng.tokenmonitor.android.ui.components.formatTokens
-
 import com.igng.tokenmonitor.android.ui.components.formatTokensShort
-
 import com.igng.tokenmonitor.android.ui.components.formatUsd
 
-
-
 @Composable
-
-fun MoreHubScreen(navController: NavHostController, state: HubUiState) {
-
-  Column(Modifier.fillMaxSize()) {
-
-    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-
-      Text("更多", style = MaterialTheme.typography.headlineSmall)
-
-      Text(
-
-        "对话、项目、定价与连接设置",
-
-        style = MaterialTheme.typography.bodySmall,
-
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-
-      )
-
-    }
-
-    LazyColumn(
-
-      contentPadding = PaddingValues(16.dp),
-
-      verticalArrangement = Arrangement.spacedBy(10.dp)
-
-    ) {
-
-      item {
-
-        MoreNavCard(
-
-          title = "对话",
-
-          subtitle = "查看会话快照与 token 拆解",
-
-          icon = Icons.Outlined.ChatBubbleOutline,
-
-          onClick = { navController.navigate("sessions") }
-
-        )
-
-      }
-
-      item {
-        MoreNavCard(
-          title = "项目",
-          subtitle = "按工作区汇总 token / 费用",
-          icon = Icons.Outlined.Folder,
-          onClick = { navController.navigate("projects") }
-        )
-      }
-      item {
-        MoreNavCard(
-          title = "服务状态",
-          subtitle = "各账号额度与健康状态",
-          icon = Icons.Outlined.MonitorHeart,
-          onClick = { navController.navigate("status") }
-        )
-      }
-      if (state.authorization?.capabilities?.pricing == true && state.authorization.scopes.contains("admin")) item {
-
-        MoreNavCard(
-
-          title = "定价",
-
-          subtitle = "管理模型单价与上游同步",
-
-          icon = Icons.Outlined.AttachMoney,
-
-          onClick = { navController.navigate("pricing") }
-
-        )
-
-      }
-
-      item {
-
-        MoreNavCard(
-
-          title = "设置",
-
-          subtitle = "主题色、触感与 Hub 连接",
-
-          icon = Icons.Outlined.Settings,
-
-          onClick = { navController.navigate("settings") }
-
-        )
-
-      }
-
-    }
-
-  }
-
-}
-
-
-
-@Composable
-
-private fun MoreNavCard(
-
-  title: String,
-
-  subtitle: String,
-
-  icon: ImageVector,
-
-  onClick: () -> Unit
-
+fun MoreHubScreen(
+  navController: NavHostController,
+  state: HubUiState,
+  viewModel: HubViewModel = hiltViewModel()
 ) {
-
   val haptics = rememberAppHaptics()
-
-  AppCard(onClick = {
-
-    haptics.perform(HapticEvent.Tap)
-
-    onClick()
-
-  }) {
-
-    Row(
-
-      Modifier.fillMaxWidth(),
-
-      verticalAlignment = Alignment.CenterVertically
-
-    ) {
-
-      Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-
-      Spacer(Modifier.width(14.dp))
-
-      Column(Modifier.weight(1f)) {
-
-        Text(title, style = MaterialTheme.typography.titleMedium)
-
-        Text(
-
-          subtitle,
-
-          style = MaterialTheme.typography.bodySmall,
-
-          color = MaterialTheme.colorScheme.onSurfaceVariant
-
-        )
-
-      }
-
-      Icon(
-
-        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-
-        contentDescription = null,
-
-        tint = MaterialTheme.colorScheme.onSurfaceVariant
-
+  Column(Modifier.fillMaxSize()) {
+    FluentPageHeader(
+      title = "更多",
+      subtitle = "会话、项目、配额账号、订阅、定价与连接设置"
+    )
+    // One grouped surface with hairline separators: these destinations are a
+    // single set of peers, so giving each its own elevated card overstates them.
+    // The `index` is the stagger position, and it is counted rather than literal
+    // because the capability-gated rows below make a hand-written sequence wrong on
+    // some Hubs and right on others — which is how the entrance order ended up
+    // disagreeing with the visual order.
+    var row by remember { mutableStateOf(0) }
+    FluentCardList(modifier = Modifier.padding(horizontal = FluentSpacingDefaults.l)) {
+      MoreNavRow(
+        index = row++,
+        title = "对话",
+        subtitle = "查看会话快照与 token 拆解",
+        icon = FluentIcons.Chat,
+        onClick = {
+          haptics.perform(HapticEvent.Tap)
+          navController.navigate("sessions")
+        }
       )
-
+      MoreNavRow(
+        index = row++,
+        title = "项目",
+        subtitle = "按工作区汇总 token / 费用",
+        icon = FluentIcons.Folder,
+        onClick = {
+          haptics.perform(HapticEvent.Tap)
+          navController.navigate("projects")
+        }
+      )
+      MoreNavRow(
+        index = row++,
+        title = "配额账号",
+        subtitle = "Hub 托管的凭据、启用状态与立即刷新",
+        icon = FluentIcons.Wallet,
+        onClick = {
+          haptics.perform(HapticEvent.Tap)
+          navController.navigate("accounts")
+        }
+      )
+      if (state.authorization?.capabilities?.subscriptions != false) {
+        MoreNavRow(
+          index = row++,
+          title = "订阅",
+          subtitle = "手工记账的计划价与月度折算",
+          icon = FluentIcons.Timeline,
+          onClick = {
+            haptics.perform(HapticEvent.Tap)
+            viewModel.refreshSubscriptions()
+            navController.navigate("subscriptions")
+          }
+        )
+      }
+      MoreNavRow(
+        index = row++,
+        title = "服务状态",
+        subtitle = "各账号额度与健康状态",
+        icon = FluentIcons.Heart,
+        onClick = {
+          haptics.perform(HapticEvent.Tap)
+          navController.navigate("status")
+        }
+      )
+      if (state.authorization?.capabilities?.pricing == true &&
+        state.authorization.scopes.contains("admin")
+      ) {
+        MoreNavRow(
+          index = row++,
+          title = "定价",
+          subtitle = "管理模型单价与上游同步",
+          icon = FluentIcons.ArrowExport,
+          onClick = {
+            haptics.perform(HapticEvent.Tap)
+            navController.navigate("pricing")
+          }
+        )
+      }
+      MoreNavRow(
+        index = row,
+        title = "设置",
+        subtitle = "外观、触感、币种与 Hub 连接",
+        icon = FluentIcons.Settings,
+        onClick = {
+          haptics.perform(HapticEvent.Tap)
+          navController.navigate("settings")
+        }
+      )
     }
-
   }
-
 }
 
+@Composable
+private fun MoreNavRow(
+  index: Int,
+  title: String,
+  subtitle: String,
+  @DrawableRes icon: Int,
+  onClick: () -> Unit
+) {
+  val colors = LocalFluentColors.current
+  FluentListRow(
+    primary = title,
+    secondary = subtitle,
+    leading = {
+      Box(
+        Modifier
+          .size(32.dp)
+          .clip(FluentShapeDefaults.controlCorner)
+          .background(colors.neutralLayerInner),
+        contentAlignment = Alignment.Center
+      ) {
+        Icon(
+          painter = painterResource(icon),
+          contentDescription = null,
+          modifier = Modifier.size(18.dp),
+          tint = colors.brandForeground1
+        )
+      }
+    },
+    disclosure = true,
+    dividerAbove = index > 0,
+    onClick = onClick
+  )
+}
 
 
 private const val MAX_SESSION_ROWS = 200
-
-@OptIn(ExperimentalMaterial3Api::class)
-
-
-@Composable
-fun NavigateHomeAction(onHome: (() -> Unit)?) {
-  if (onHome == null) return
-  val haptics = rememberAppHaptics()
-  IconButton(onClick = {
-    haptics.perform(HapticEvent.Tap)
-    onHome()
-  }) {
-    Icon(Icons.Filled.Home, contentDescription = "首页")
-  }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionsScreen(stats: StatsDto?, navController: NavHostController, onHome: (() -> Unit)? = null) {
-
   val haptics = rememberAppHaptics()
-
+  val listState = rememberLazyListState()
+  val scrolled = rememberScrolledFlag(listState)
   val allSessions = availableSessions(stats)
   val totalSessions = allSessions.size
   val sessions = allSessions.take(MAX_SESSION_ROWS)
   val sessionsTruncated = totalSessions > sessions.size
-
   val costRank = allSessions
-
     .sortedByDescending { it.second.costUsd }
-
     .take(8)
-
     .map { (key, session) ->
-
       val label = buildString {
         val client = session.client?.let { ClientBranding.label(it) }.orEmpty()
         if (client.isNotBlank()) append(client)
@@ -416,407 +274,207 @@ fun SessionsScreen(stats: StatsDto?, navController: NavHostController, onHome: (
         if (isNotEmpty()) append(" · ")
         append(short)
       }
-
       ShareEntry(
-
         key = label,
-
         tokens = session.totalTokens.coerceAtLeast(0L),
-
         costUsd = session.costUsd
-
       )
-
     }
-
   Column(Modifier.fillMaxSize()) {
-
-    TopAppBar(
-
-      title = { Text("对话") },
-
-      navigationIcon = {
-
-        IconButton(onClick = {
-          haptics.perform(HapticEvent.Tap)
-          navController.popBackStack()
-        }) {
-
-          Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-
-        }
-
-      },
-      actions = { NavigateHomeAction(onHome) }
+    FluentTopBar(
+      title = "对话",
+      onBack = { haptics.perform(HapticEvent.Tap); navController.popBackStack() },
+      onHome = onHome,
+      scrolled = scrolled
     )
-
     if (sessions.isEmpty()) {
-
       EmptyState(title = "暂无对话", text = "Hub 当前没有可用的会话快照。")
-
     } else {
-
       LazyColumn(
-
         contentPadding = PaddingValues(16.dp),
-
         verticalArrangement = Arrangement.spacedBy(10.dp)
-
       ) {
-
         if (sessionsTruncated) {
           item {
             AppCard {
               Text(
                 "显示 ${sessions.size}/$totalSessions 个会话（已截断以提升性能）。",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                style = FluentTypeRamp.body2,
+                color = LocalFluentColors.current.neutralForeground2
               )
             }
           }
         }
-
         if (costRank.isNotEmpty()) {
-
           item {
-
             AppCard {
-
               SectionHeader(
-
                 title = "费用排行",
-
                 subtitle = "按会话费用 Top ${costRank.size}"
-
               )
-
               Spacer(Modifier.height(12.dp))
-
               ShareBarList(entries = costRank, brandClients = false, showCost = true)
-
             }
-
           }
-
         }
-
         items(sessions, key = { it.first }) { (key, session) ->
-
           val clientId = session.client.orEmpty()
-
           AppCard(onClick = {
           haptics.perform(HapticEvent.Tap)
           navController.navigate("session/${Uri.encode(key)}")
         }) {
-
             Row(verticalAlignment = Alignment.CenterVertically) {
-
               if (clientId.isNotBlank()) {
-
                 ClientMonogram(clientId, size = 28.dp)
-
-                Spacer(Modifier.width(10.dp))
-
+                Spacer(Modifier.width(FluentSpacingDefaults.m))
               }
-
               Column(Modifier.weight(1f)) {
-
                 Text(
-
                   if (clientId.isBlank()) "未知客户端" else ClientBranding.label(clientId),
-
-                  style = MaterialTheme.typography.labelLarge,
-
-                  color = MaterialTheme.colorScheme.primary
-
+                  style = FluentTypeRamp.caption1,
+                  color = LocalFluentColors.current.brandForeground1
                 )
-
                 Text(
-
                   session.sessionId.orEmpty().ifBlank { key },
-
-                  style = MaterialTheme.typography.titleMedium,
-
+                  style = FluentTypeRamp.title3,
                   maxLines = 1,
-
                   overflow = TextOverflow.Ellipsis
-
                 )
-
               }
-
             }
-
             Spacer(Modifier.height(8.dp))
-
             Row(
-
               Modifier.fillMaxWidth(),
-
               horizontalArrangement = Arrangement.SpaceBetween
-
             ) {
-
-              Text(formatTokensShort(session.totalTokens), style = MaterialTheme.typography.titleSmall)
-
+              Text(formatTokensShort(session.totalTokens), style = FluentTypeRamp.subtitle)
               Text(
-
                 formatUsd(session.costUsd, compact = true),
-
-                style = MaterialTheme.typography.titleSmall,
-
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-
+                style = FluentTypeRamp.subtitle,
+                color = LocalFluentColors.current.neutralForeground2
               )
-
             }
-
             Spacer(Modifier.height(4.dp))
-
             Text(
-
               "消息 ${session.messageCount} · 最后使用 ${session.lastUsedAt ?: "未知"}",
-
-              style = MaterialTheme.typography.bodySmall,
-
-              color = MaterialTheme.colorScheme.onSurfaceVariant
-
+              style = FluentTypeRamp.caption1,
+              color = LocalFluentColors.current.neutralForeground2
             )
-
           }
-
         }
-
       }
-
     }
-
   }
-
 }
-
-
-
-@OptIn(ExperimentalMaterial3Api::class)
-
 @Composable
-
 fun SessionDetailScreen(stats: StatsDto?, key: String, onBack: () -> Unit, onHome: (() -> Unit)? = null) {
-
   val haptics = rememberAppHaptics()
-
+  val scrollState = rememberScrollState()
+  val scrolled = rememberScrolledFlag(scrollState)
   val session = availableSessions(stats).firstOrNull { it.first == key }?.second
-
   Column(Modifier.fillMaxSize()) {
-
-    TopAppBar(
-
-      title = { Text("对话详情") },
-
-      navigationIcon = {
-
-        IconButton(onClick = {
-          haptics.perform(HapticEvent.Tap)
-          onBack()
-        }) {
-
-          Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-
-        }
-
-      },
-      actions = { NavigateHomeAction(onHome) }
+    FluentTopBar(
+      title = "对话详情",
+      onBack = { haptics.perform(HapticEvent.Tap); onBack() },
+      onHome = onHome,
+      scrolled = scrolled
     )
-
     if (session == null) {
-
       EmptyState(text = "会话不在当前 Hub 快照中。")
-
       return
-
     }
-
     Column(
-
       Modifier
-
         .fillMaxSize()
-
-        .verticalScroll(rememberScrollState())
-
+        .verticalScroll(scrollState)
         .padding(16.dp),
-
       verticalArrangement = Arrangement.spacedBy(14.dp)
-
     ) {
-
       Row(verticalAlignment = Alignment.CenterVertically) {
-
         val clientId = session.client.orEmpty()
-
         if (clientId.isNotBlank()) {
-
           ClientMonogram(clientId, size = 36.dp)
-
           Spacer(Modifier.width(12.dp))
-
         }
-
         Column {
-
           Text(
-
             if (clientId.isBlank()) "未知客户端" else ClientBranding.label(clientId),
-
-            style = MaterialTheme.typography.labelLarge,
-
-            color = MaterialTheme.colorScheme.primary
-
+            style = FluentTypeRamp.caption1,
+            color = LocalFluentColors.current.brandForeground1
           )
-
           Text(
-
             session.sessionId.orEmpty().ifBlank { key },
-
-            style = MaterialTheme.typography.headlineSmall
-
+            style = FluentTypeRamp.title1
           )
-
         }
-
       }
-
       session.projectLabel?.takeIf { it.isNotBlank() }?.let { projectLabel ->
-
         Text(
-
           "项目 " + projectLabel,
-
-          style = MaterialTheme.typography.bodyMedium,
-
-          color = MaterialTheme.colorScheme.onSurfaceVariant
-
+          style = FluentTypeRamp.body2,
+          color = LocalFluentColors.current.neutralForeground2
         )
-
       }
-
       MetricHeroCard(
-
         title = "累计用量",
-
         period = PeriodDto(totalTokens = session.totalTokens, costUsd = session.costUsd)
-
       )
-
       AppCard {
-
-        Text("Token 类型", style = MaterialTheme.typography.titleMedium)
-
+        Text("Token 类型", style = FluentTypeRamp.title3)
         Spacer(Modifier.height(12.dp))
-
         SegmentedTokenBar(
-
           listOf(
-
             "输入" to session.inputTokens,
-
             "输出" to session.outputTokens,
-
             "缓存读取" to session.cacheReadTokens,
-
             "缓存写入" to session.cacheWriteTokens,
-
             "推理" to session.reasoningTokens
-
           )
-
         )
-
-        Spacer(Modifier.height(10.dp))
-
+        Spacer(Modifier.height(FluentSpacingDefaults.m))
         Text(
-
           "消息 ${session.messageCount} · 开始 ${session.startedAt ?: "未知"} · 最后使用 ${session.lastUsedAt ?: "未知"}",
-
-          style = MaterialTheme.typography.bodySmall,
-
-          color = MaterialTheme.colorScheme.onSurfaceVariant
-
+          style = FluentTypeRamp.caption1,
+          color = LocalFluentColors.current.neutralForeground2
         )
-
       }
-
       if (session.models.isNotEmpty()) {
-
         AppCard {
-
-          Text("模型", style = MaterialTheme.typography.titleMedium)
-
+          Text("模型", style = FluentTypeRamp.title3)
           Spacer(Modifier.height(8.dp))
-
           session.models.entries.sortedByDescending { it.value }.forEach { (model, tokens) ->
-
             Row(
-
               Modifier
-
                 .fillMaxWidth()
-
-                .padding(vertical = 6.dp),
-
+                .padding(vertical = FluentSpacingDefaults.s),
               horizontalArrangement = Arrangement.SpaceBetween
-
             ) {
-
               Text(
-
                 model,
-
-                style = MaterialTheme.typography.bodyMedium,
-
+                style = FluentTypeRamp.body2,
                 maxLines = 1,
-
                 overflow = TextOverflow.Ellipsis,
-
                 modifier = Modifier.weight(1f)
-
               )
-
               Spacer(Modifier.width(8.dp))
-
-              Text(formatTokens(tokens), style = MaterialTheme.typography.bodyMedium)
-
+              Text(formatTokens(tokens), style = FluentTypeRamp.body2)
             }
-
           }
-
         }
-
       }
-
       Text(
-
         "当前 Hub 未提供按会话和时间范围查询事件流水的接口；此页展示已有 stats 快照，不会虚构历史趋势。",
-
-        style = MaterialTheme.typography.bodySmall,
-
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-
+        style = FluentTypeRamp.caption1,
+        color = LocalFluentColors.current.neutralForeground2
       )
-
     }
-
   }
-
 }
-
-
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProjectsScreen(stats: StatsDto?, onBack: () -> Unit, onHome: (() -> Unit)? = null) {
   val haptics = rememberAppHaptics()
-
+  val listState = rememberLazyListState()
+  val scrolled = rememberScrolledFlag(listState)
   var periodKey by remember { mutableStateOf("today") }
   val period = when (periodKey) {
     "month" -> stats?.periods?.month
@@ -827,35 +485,23 @@ fun ProjectsScreen(stats: StatsDto?, onBack: () -> Unit, onHome: (() -> Unit)? =
     .map { (key, project) -> key to project }
     .filter { (_, project) -> project.tokens > 0L || project.costUsd > 0.0 }
     .sortedByDescending { it.second.tokens }
-
   Column(Modifier.fillMaxSize()) {
-    TopAppBar(
-      title = { Text("项目") },
-      navigationIcon = {
-        IconButton(onClick = {
-          haptics.perform(HapticEvent.Tap)
-          onBack()
-        }) {
-          Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-        }
-      },
-      actions = { NavigateHomeAction(onHome) }
+    FluentTopBar(
+      title = "项目",
+      onBack = { haptics.perform(HapticEvent.Tap); onBack() },
+      onHome = onHome,
+      scrolled = scrolled
     )
-    Row(
-      Modifier.padding(horizontal = 16.dp),
-      horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-      listOf("today" to "今日", "month" to "本月", "allTime" to "全部").forEach { (key, label) ->
-        FilterChip(
-          selected = periodKey == key,
-          onClick = {
-            haptics.perform(HapticEvent.Selection)
-            periodKey = key
-          },
-          label = { Text(label) }
-        )
-      }
-    }
+    val periodKeys = listOf("today", "month", "allTime")
+    FluentTabStrip(
+      options = listOf("今日", "本月", "全部"),
+      selectedIndex = periodKeys.indexOf(periodKey).coerceAtLeast(0),
+      onSelect = { index ->
+        haptics.perform(HapticEvent.Selection)
+        periodKey = periodKeys[index]
+      },
+      contentPadding = FluentSpacingDefaults.l,
+    )
     Spacer(Modifier.height(8.dp))
     val showIncomplete = periodKey == "allTime" && stats?.projectsIncomplete == true
     if (projects.isEmpty()) {
@@ -863,8 +509,8 @@ fun ProjectsScreen(stats: StatsDto?, onBack: () -> Unit, onHome: (() -> Unit)? =
         AppCard(modifier = Modifier.padding(horizontal = 16.dp)) {
           Text(
             "部分设备未上报全部时间的项目汇总，统计可能不完整。",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = FluentTypeRamp.body2,
+            color = LocalFluentColors.current.neutralForeground2
           )
         }
         Spacer(Modifier.height(12.dp))
@@ -873,6 +519,7 @@ fun ProjectsScreen(stats: StatsDto?, onBack: () -> Unit, onHome: (() -> Unit)? =
       return
     }
     LazyColumn(
+      state = listState,
       contentPadding = PaddingValues(16.dp),
       verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -881,8 +528,8 @@ fun ProjectsScreen(stats: StatsDto?, onBack: () -> Unit, onHome: (() -> Unit)? =
           AppCard {
             Text(
               "部分设备未上报全部时间的项目汇总，统计可能不完整。",
-              style = MaterialTheme.typography.bodyMedium,
-              color = MaterialTheme.colorScheme.onSurfaceVariant
+              style = FluentTypeRamp.body2,
+              color = LocalFluentColors.current.neutralForeground2
             )
           }
         }
@@ -891,9 +538,9 @@ fun ProjectsScreen(stats: StatsDto?, onBack: () -> Unit, onHome: (() -> Unit)? =
         AppCard {
           Text(
             project.label?.takeIf { it.isNotBlank() } ?: key,
-            style = MaterialTheme.typography.titleMedium
+            style = FluentTypeRamp.title3
           )
-          Spacer(Modifier.height(6.dp))
+          Spacer(Modifier.height(FluentSpacingDefaults.s))
           Text(
             buildString {
               append(formatTokens(project.tokens))
@@ -905,11 +552,11 @@ fun ProjectsScreen(stats: StatsDto?, onBack: () -> Unit, onHome: (() -> Unit)? =
                 append(clients.joinToString(" / "))
               }
             },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = FluentTypeRamp.caption1,
+            color = LocalFluentColors.current.neutralForeground2
           )
           if (project.clients.isNotEmpty()) {
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(FluentSpacingDefaults.m))
             ShareBarList(
               project.clients.entries
                 .sortedByDescending { it.value }
@@ -928,924 +575,653 @@ fun ProjectsScreen(stats: StatsDto?, onBack: () -> Unit, onHome: (() -> Unit)? =
     }
   }
 }
-
-@OptIn(ExperimentalMaterial3Api::class)
-
 @Composable
-
 fun PricingScreen(state: HubUiState, viewModel: HubViewModel, onBack: () -> Unit, onHome: (() -> Unit)? = null) {
-
   val haptics = rememberAppHaptics()
-
+  val colors = LocalFluentColors.current
+  val listState = rememberLazyListState()
+  val scrolled = rememberScrolledFlag(listState)
   var editing by remember { mutableStateOf<PricingDto?>(null) }
-
   var showNew by remember { mutableStateOf(false) }
 
-
-
-  androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
-
+  Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
-
-      TopAppBar(
-
-        title = { Text("定价") },
-
-        navigationIcon = {
-
-          IconButton(onClick = {
+      FluentTopBar(
+        title = "定价",
+        onBack = {
           haptics.perform(HapticEvent.Tap)
           onBack()
-        }) {
-
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-
-          }
-
         },
-
+        onHome = onHome,
+        scrolled = scrolled,
         actions = {
-          NavigateHomeAction(onHome)
-          IconButton(onClick = {
-            haptics.perform(HapticEvent.Refresh)
-            viewModel.refreshPricing()
-          }) {
-            Icon(Icons.Default.Refresh, contentDescription = "刷新")
-          }
-        }
-
-      )
-
-      LazyColumn(
-
-        contentPadding = PaddingValues(16.dp),
-
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-
-      ) {
-
-        item {
-
-          Text(
-
-            "修改价格只影响未来产生的用量记录；已写入历史事件的费用快照不会重算。",
-
-            style = MaterialTheme.typography.bodySmall,
-
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-
-          )
-
-        }
-
-        item {
-
-          Button(
-
+          FluentIconButton(
+            icon = FluentIcons.ArrowSync,
+            contentDescription = "刷新定价",
             onClick = {
-              haptics.perform(HapticEvent.Confirm)
-              viewModel.fetchAllUpstream()
+              haptics.perform(HapticEvent.Refresh)
+              viewModel.refreshPricing()
             },
-
-            modifier = Modifier.fillMaxWidth()
-
-          ) { Text("批量从上游拉取全部") }
-
+            tint = colors.neutralForeground1
+          )
         }
-
+      )
+      LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+          start = FluentSpacingDefaults.l,
+          end = FluentSpacingDefaults.l,
+          top = FluentSpacingDefaults.m,
+          bottom = FluentSpacingDefaults.xl
+        ),
+        verticalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.m)
+      ) {
+        item {
+          Text(
+            "修改价格只影响未来产生的用量记录；已写入历史事件的费用快照不会重算。",
+            style = FluentTypeRamp.caption1,
+            color = colors.neutralForeground2
+          )
+        }
+        // Fluent has no floating action button: a persistent circular surface that
+        // floats over content is Material's affordance.  The two admin actions
+        // belong in the command row at the top of the list, where the screen's
+        // primary and secondary verb sit next to each other.
+        item {
+          Row(horizontalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.s)) {
+            FluentButton(
+              label = "新增模型",
+              onClick = {
+                haptics.perform(HapticEvent.Tap)
+                showNew = true
+              },
+              leadingIcon = FluentIcons.Add
+            )
+            FluentButton(
+              label = "批量从上游拉取全部",
+              onClick = {
+                haptics.perform(HapticEvent.Confirm)
+                viewModel.fetchAllUpstream()
+              },
+              variant = FluentButtonVariant.Outline
+            )
+          }
+        }
         if (state.pricing.isEmpty()) {
-
           item {
-
             EmptyState(text = "Hub 尚未配置任何模型定价。可手动新增，或在设备有模型记录后批量拉取。")
-
           }
-
         } else {
-
-          items(state.pricing, key = { it.model }) { pricing ->
-
-            AppCard(onClick = {
-              haptics.perform(HapticEvent.Tap)
-              editing = pricing
-            }) {
-
-              Row(
-
-                Modifier.fillMaxWidth(),
-
-                horizontalArrangement = Arrangement.SpaceBetween,
-
-                verticalAlignment = Alignment.CenterVertically
-
-              ) {
-
-                Column(Modifier.weight(1f)) {
-
-                  Text(pricing.model, style = MaterialTheme.typography.titleMedium)
-
-                  Text(
-
-                    "${pricing.source} · ${pricing.updatedAt ?: "未知时间"}",
-
-                    style = MaterialTheme.typography.bodySmall,
-
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-
-                  )
-
-                }
-
-                IconButton(onClick = {
-                  haptics.perform(HapticEvent.Refresh)
-                  viewModel.fetchUpstream(pricing.model)
-                }) {
-
-                  Icon(Icons.Default.Refresh, contentDescription = "从上游拉取")
-
-                }
-
+          item {
+            FluentCardList {
+              state.pricing.forEachIndexed { index, pricing ->
+                PricingRow(
+                  pricing = pricing,
+                  dividerAbove = index > 0,
+                  onEdit = {
+                    haptics.perform(HapticEvent.Tap)
+                    editing = pricing
+                  },
+                  onFetch = {
+                    haptics.perform(HapticEvent.Refresh)
+                    viewModel.fetchUpstream(pricing.model)
+                  }
+                )
               }
-
-              Spacer(Modifier.height(8.dp))
-
-              Text(
-
-                "输入 ${pricing.inputPricePerMillion} · 输出 ${pricing.outputPricePerMillion}",
-
-                style = MaterialTheme.typography.bodyMedium
-
-              )
-
-              Text(
-
-                "缓存读 ${pricing.cacheReadPricePerMillion} · 缓存写 ${pricing.cacheWritePricePerMillion} / 百万 token",
-
-                style = MaterialTheme.typography.bodySmall,
-
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-
-              )
-
             }
-
           }
-
         }
-
       }
-
     }
-
-    FloatingActionButton(
-
-      onClick = {
-        haptics.perform(HapticEvent.Tap)
-        showNew = true
-      },
-
-      modifier = Modifier
-
-        .align(Alignment.BottomEnd)
-
-        .padding(20.dp)
-
-    ) {
-
-      Icon(Icons.Default.Add, contentDescription = "新增")
-
-    }
-
   }
-
-
 
   if (showNew || editing != null) {
-
     PricingEditorDialog(
-
       existing = editing,
-
       onDismiss = { showNew = false; editing = null },
-
       onSave = { model, request ->
-
         viewModel.savePricing(model, request)
-
         showNew = false
-
         editing = null
-
       }
-
     )
-
   }
-
   state.batchResult?.let { result ->
-
     BatchResultDialog(result.results) { viewModel.clearBatchResult() }
-
   }
+}
 
+@Composable
+private fun PricingRow(
+  pricing: PricingDto,
+  dividerAbove: Boolean,
+  onEdit: () -> Unit,
+  onFetch: () -> Unit
+) {
+  val colors = LocalFluentColors.current
+  FluentListRow(
+    primary = pricing.model,
+    secondary = "${pricing.source} · ${pricing.updatedAt ?: "未知时间"}",
+    tertiary = "输入 ${pricing.inputPricePerMillion} · 输出 ${pricing.outputPricePerMillion} · " +
+      "缓存读 ${pricing.cacheReadPricePerMillion} · 缓存写 ${pricing.cacheWritePricePerMillion} / 百万 token",
+    disclosure = true,
+    dividerAbove = dividerAbove,
+    trailing = {
+      FluentIconButton(
+        icon = FluentIcons.ArrowSync,
+        contentDescription = "从上游拉取 ${pricing.model}",
+        onClick = onFetch,
+        tint = colors.brandForeground1,
+        targetSize = 40.dp,
+        iconSize = 18.dp
+      )
+    },
+    onClick = onEdit
+  )
 }
 
 
 
 @Composable
-
 private fun PricingEditorDialog(
-
   existing: PricingDto?,
-
   onDismiss: () -> Unit,
-
   onSave: (String, PricingRequestDto) -> Unit
-
 ) {
   val haptics = rememberAppHaptics()
-
   var model by remember(existing) { mutableStateOf(existing?.model.orEmpty()) }
-
   var input by remember(existing) { mutableStateOf(existing?.inputPricePerMillion?.toString().orEmpty()) }
-
   var output by remember(existing) { mutableStateOf(existing?.outputPricePerMillion?.toString().orEmpty()) }
-
   var cacheRead by remember(existing) { mutableStateOf(existing?.cacheReadPricePerMillion?.toString().orEmpty()) }
-
   var cacheWrite by remember(existing) { mutableStateOf(existing?.cacheWritePricePerMillion?.toString().orEmpty()) }
-
   val values = listOf(input, output, cacheRead, cacheWrite).map { it.toDoubleOrNull() }
-
   val valid = model.isNotBlank() && values.all { it != null && it >= 0.0 }
-
-  AlertDialog(
-
-    onDismissRequest = onDismiss,
-
-    title = { Text(if (existing == null) "新增模型定价" else "编辑模型定价") },
-
-    text = {
-
-      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-
-        OutlinedTextField(
-
-          model,
-
-          { model = it },
-
-          label = { Text("模型") },
-
-          enabled = existing == null,
-
-          singleLine = true
-
-        )
-
-        PriceField("输入 / 百万", input) { input = it }
-
-        PriceField("输出 / 百万", output) { output = it }
-
-        PriceField("缓存读取 / 百万", cacheRead) { cacheRead = it }
-
-        PriceField("缓存写入 / 百万", cacheWrite) { cacheWrite = it }
-
-        if (!valid) {
-
-          Text(
-
-            "模型不能为空，四项价格必须是非负数字。",
-
-            color = MaterialTheme.colorScheme.error,
-
-            style = MaterialTheme.typography.bodySmall
-
-          )
-
-        }
-
-      }
-
-    },
-
-    confirmButton = {
-
-      TextButton(
-
-        enabled = valid,
-
-        onClick = {
-        haptics.perform(HapticEvent.Confirm)
-        onSave(
-
-            model.trim(),
-
-            PricingRequestDto(values[0]!!, values[1]!!, values[2]!!, values[3]!!)
-
-          )
-
-        }
-
-      ) { Text("保存") }
-
-    },
-
-    dismissButton = { TextButton(onClick = {
+  val error = if (valid) null else "模型不能为空，四项价格必须是非负数字。"
+  FluentDialog(
+    onDismissRequest = {
       haptics.perform(HapticEvent.Tap)
       onDismiss()
-    }) { Text("取消") } }
-
-  )
-
+    },
+    title = if (existing == null) "新增模型定价" else "编辑模型定价",
+    subtitle = "价格单位：美元 / 百万 token。",
+    confirmText = "保存",
+    onConfirm = if (valid) {
+      {
+        haptics.perform(HapticEvent.Confirm)
+        onSave(
+          model.trim(),
+          PricingRequestDto(values[0]!!, values[1]!!, values[2]!!, values[3]!!)
+        )
+      }
+    } else {
+      null
+    },
+    dismissText = "取消"
+  ) {
+    // Five fields plus a keyboard is more than a short phone has: the body
+    // scrolls inside a capped panel rather than pushing the buttons off-screen.
+    Column(
+      Modifier
+        .heightIn(max = 420.dp)
+        .verticalScroll(rememberScrollState()),
+      verticalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.m)
+    ) {
+      FluentTextField(
+        value = model,
+        onValueChange = { model = it },
+        label = "模型",
+        enabled = existing == null,
+        errorText = error
+      )
+      PriceField("输入 / 百万", input, { input = it })
+      PriceField("输出 / 百万", output, { output = it })
+      PriceField("缓存读取 / 百万", cacheRead, { cacheRead = it })
+      PriceField("缓存写入 / 百万", cacheWrite, { cacheWrite = it })
+    }
+  }
 }
 
-
-
 @Composable
-
 private fun PriceField(label: String, value: String, onChange: (String) -> Unit) {
-
-  OutlinedTextField(value, onChange, label = { Text(label) }, singleLine = true)
-
+  FluentTextField(
+    value = value,
+    onValueChange = onChange,
+    label = label,
+    keyboardType = KeyboardType.Decimal,
+    placeholder = "0.00"
+  )
 }
 
-
-
 @Composable
-
 private fun BatchResultDialog(results: List<BatchPricingResultDto>, dismiss: () -> Unit) {
   val haptics = rememberAppHaptics()
-
-  AlertDialog(
-
-    onDismissRequest = dismiss,
-
-    title = { Text("批量拉取结果") },
-
-    text = {
-
-      Column(Modifier.verticalScroll(rememberScrollState())) {
-
-        results.forEach { result ->
-
-          Text("${result.model}: ${if (result.ok) "成功" else result.message ?: result.error ?: "失败"}")
-
-        }
-
-      }
-
-    },
-
-    confirmButton = { TextButton(onClick = {
+  FluentDialog(
+    onDismissRequest = {
       haptics.perform(HapticEvent.Tap)
       dismiss()
-    }) { Text("关闭") } }
-
-  )
-
-}
-
-
-
-@OptIn(ExperimentalMaterial3Api::class)
-
-@Composable
-
-fun SettingsScreen(
-
-  state: ConnectionUiState,
-
-  viewModel: ConnectionViewModel,
-
-  restartRealtime: () -> Unit,
-
-  onBack: () -> Unit, onHome: (() -> Unit)? = null,
-
-  preferencesViewModel: PreferencesViewModel = hiltViewModel()
-
-) {
-
-  val uriHandler = LocalUriHandler.current
-
-  val prefs by preferencesViewModel.preferences.collectAsStateWithLifecycle()
-
-  val haptics = rememberAppHaptics()
-
-
-
-  Column(Modifier.fillMaxSize()) {
-
-    TopAppBar(
-
-      title = { Text("设置") },
-
-      navigationIcon = {
-
-        IconButton(onClick = {
-
-          haptics.perform(HapticEvent.Tap)
-
-          onBack()
-
-        }) {
-
-          Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-
-        }
-
-      },
-      actions = { NavigateHomeAction(onHome) }
-    )
-
+    },
+    title = "批量拉取结果",
+    subtitle = "${results.count { it.ok }} / ${results.size} 个模型更新成功",
+    confirmText = "关闭"
+  ) {
     Column(
-
       Modifier
-
-        .fillMaxSize()
-
-        .verticalScroll(rememberScrollState())
-
-        .padding(16.dp),
-
-      verticalArrangement = Arrangement.spacedBy(14.dp)
-
+        .heightIn(max = 420.dp)
+        .verticalScroll(rememberScrollState()),
+      verticalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.xs)
     ) {
-
-      AppCard {
-
-        Text("外观", style = MaterialTheme.typography.titleMedium)
-
-        Text(
-
-          "主题色会应用到按钮、导航与强调色。选择「系统」可跟随壁纸动态取色（Android 12+）。",
-
-          style = MaterialTheme.typography.bodySmall,
-
-          color = MaterialTheme.colorScheme.onSurfaceVariant
-
+      results.forEach { result ->
+        // ok / failure is carried by a word, not only by the row's colour.
+        val outcome = if (result.ok) "成功" else result.message ?: result.error ?: "失败"
+        FluentListRow(
+          primary = result.model,
+          secondary = outcome,
+          dividerAbove = result != results.first(),
+          contentPadding = 0.dp
         )
-
-        Spacer(Modifier.height(12.dp))
-
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-
-          listOf(
-
-            listOf(ThemeSeedId.System, ThemeSeedId.Blue, ThemeSeedId.Green, ThemeSeedId.Purple),
-
-            listOf(ThemeSeedId.Teal, ThemeSeedId.Orange, ThemeSeedId.Rose)
-
-          ).forEach { rowSeeds ->
-
-            Row(
-
-              Modifier.fillMaxWidth(),
-
-              horizontalArrangement = Arrangement.spacedBy(12.dp)
-
-            ) {
-
-              rowSeeds.forEach { seed ->
-
-                val selected = prefs.themeSeed == seed
-
-                val swatch = themeSeedSwatch(seed)
-
-                Column(
-
-                  horizontalAlignment = Alignment.CenterHorizontally,
-
-                  modifier = Modifier
-
-                    .weight(1f)
-
-                    .clickable {
-
-                      preferencesViewModel.setThemeSeed(seed)
-
-                      haptics.perform(HapticEvent.Selection)
-
-                    }
-
-                ) {
-
-                  Box(
-
-                    Modifier
-
-                      .size(40.dp)
-
-                      .clip(CircleShape)
-
-                      .background(swatch)
-
-                      .then(
-
-                        if (selected) {
-
-                          Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
-
-                        } else {
-
-                          Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
-
-                        }
-
-                      )
-
-                  )
-
-                  Spacer(Modifier.height(4.dp))
-
-                  Text(
-
-                    seed.labelZh,
-
-                    style = MaterialTheme.typography.labelSmall,
-
-                    color = if (selected) {
-
-                      MaterialTheme.colorScheme.primary
-
-                    } else {
-
-                      MaterialTheme.colorScheme.onSurfaceVariant
-
-                    },
-
-                    maxLines = 1
-
-                  )
-
-                }
-
-              }
-
-              // keep second row spacing balanced when only 3 chips
-
-              if (rowSeeds.size < 4) {
-
-                repeat(4 - rowSeeds.size) { Spacer(Modifier.weight(1f)) }
-
-              }
-
-            }
-
-          }
-
-        }
-
       }
-
-
-
-            AppCard {
-        Text("首页额度账号数", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(4.dp))
-        Text(
-          "总览页最多展示多少个额度账号（1–12）",
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSurfaceVariant
+    }
+  }
+}
+@Composable
+fun SettingsScreen(
+  state: ConnectionUiState,
+  viewModel: ConnectionViewModel,
+  restartRealtime: () -> Unit,
+  onBack: () -> Unit, onHome: (() -> Unit)? = null,
+  hubRates: Map<String, Double> = emptyMap(),
+  hubRatesDate: String? = null,
+  preferencesViewModel: PreferencesViewModel = hiltViewModel()
+) {
+  val uriHandler = LocalUriHandler.current
+  val prefs by preferencesViewModel.preferences.collectAsStateWithLifecycle()
+  val haptics = rememberAppHaptics()
+  val scrollState = rememberScrollState()
+  val scrolled = rememberScrolledFlag(scrollState)
+  Column(Modifier.fillMaxSize()) {
+    FluentTopBar(
+      title = "设置",
+      onBack = { haptics.perform(HapticEvent.Tap); onBack() },
+      onHome = onHome,
+      scrolled = scrolled
+    )
+    Column(
+      Modifier
+        .fillMaxSize()
+        .verticalScroll(scrollState)
+        .padding(16.dp),
+      verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+      AppCard {
+        SectionHeader(
+          title = "外观",
+          subtitle = "主题色会应用到按钮、导航与强调色。选择「系统」时，Android 12+ 会跟随壁纸取色。"
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(FluentSpacingDefaults.m))
+        // Light / dark / system, which the web and desktop settings both expose and
+        // the client did not: `isSystemInDarkTheme()` was the only rule, so a user on
+        // a light-system-but-dark-app preference had no way to say so, and the accent
+        // seed had been doing double duty as the mode.
+        Text(
+          "外观模式",
+          style = FluentTypeRamp.caption1,
+          fontWeight = FontWeight.SemiBold,
+          color = LocalFluentColors.current.neutralForeground2
+        )
+        Spacer(Modifier.height(FluentSpacingDefaults.xs))
+        val themeModes = ThemeMode.entries
+        FluentTabStrip(
+          options = themeModes.map { it.labelZh },
+          selectedIndex = themeModes.indexOf(prefs.themeMode).coerceAtLeast(0),
+          onSelect = { index ->
+            preferencesViewModel.setThemeMode(themeModes[index])
+            haptics.perform(HapticEvent.Selection)
+          }
+        )
+        Spacer(Modifier.height(FluentSpacingDefaults.l))
+        Text(
+          "主题色",
+          style = FluentTypeRamp.caption1,
+          fontWeight = FontWeight.SemiBold,
+          color = LocalFluentColors.current.neutralForeground2
+        )
+        Spacer(Modifier.height(FluentSpacingDefaults.xs))
+        Column(verticalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.s)) {
+          listOf(
+            listOf(ThemeSeedId.System, ThemeSeedId.Blue, ThemeSeedId.Green, ThemeSeedId.Purple),
+            listOf(ThemeSeedId.Teal, ThemeSeedId.Orange, ThemeSeedId.Rose)
+          ).forEach { rowSeeds ->
+            Row(
+              Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.m)
+            ) {
+              rowSeeds.forEach { seed ->
+                val selected = prefs.themeSeed == seed
+                val swatch = themeSeedSwatch(seed)
+                val colors = LocalFluentColors.current
+                val interaction = remember { MutableInteractionSource() }
+                val pressed by interaction.collectIsPressedAsState()
+                // `selectable(role = RadioButton)` is the point of this widget: the
+                // old version carried selection in ring weight and tint only, so a
+                // screen reader heard a plain row.  The ring, the ✓ glyph and the
+                // label colour all still encode it for sighted use (WCAG 1.4.1).
+                Column(
+                  horizontalAlignment = Alignment.CenterHorizontally,
+                  modifier = Modifier
+                    .weight(1f)
+                    .clip(FluentShapeDefaults.controlCorner)
+                    .background(
+                      if (pressed) colors.subtleBackgroundPressed else Color.Transparent
+                    )
+                    .selectable(
+                      selected = selected,
+                      role = Role.RadioButton,
+                      interactionSource = interaction,
+                      indication = null
+                    ) {
+                      preferencesViewModel.setThemeSeed(seed)
+                      haptics.perform(HapticEvent.Selection)
+                    }
+                    .then(
+                      Modifier.fluentFocusRing(interaction, FluentShapeDefaults.controlCorner)
+                    )
+                    .padding(vertical = FluentSpacingDefaults.xs)
+                ) {
+                  Box(
+                    Modifier
+                      .size(44.dp)
+                      .clip(CircleShape)
+                      .background(swatch)
+                      .border(
+                        width = if (selected) 2.5.dp else 1.dp,
+                        color = if (selected) colors.brandForeground1 else colors.neutralStroke1,
+                        shape = CircleShape
+                      ),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    if (selected) {
+                      Icon(
+                                                painter = painterResource(FluentIcons.Checkmark),
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = Color.White
+                      )
+                    }
+                  }
+                  Spacer(Modifier.height(FluentSpacingDefaults.xs))
+                  Text(
+                    seed.labelZh,
+                    style = FluentTypeRamp.caption2,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selected) colors.brandForeground1 else colors.neutralForeground2,
+                    maxLines = 1
+                  )
+                }
+              }
+              // Balance the second row so seven seeds still read as one grid.
+              if (rowSeeds.size < 4) {
+                repeat(4 - rowSeeds.size) { Spacer(Modifier.weight(1f)) }
+              }
+            }
+          }
+        }
+      }
+      AppCard {
+        SectionHeader(
+          title = "首页额度账号数",
+          subtitle = "总览页最多展示多少个额度账号（1–12）"
+        )
+        Spacer(Modifier.height(FluentSpacingDefaults.m))
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(12.dp)
+          horizontalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.m)
         ) {
-          OutlinedButton(
+          FluentButton(
+            label = "减少",
             onClick = {
               preferencesViewModel.setHomeLimitAccountCount(prefs.homeLimitAccountCount - 1)
               haptics.perform(HapticEvent.Selection)
             },
-            enabled = prefs.homeLimitAccountCount > 1
-          ) { Text("−") }
+            variant = FluentButtonVariant.Outline,
+            enabled = prefs.homeLimitAccountCount > 1,
+            contentDescription = "减少首页额度账号数"
+          )
           Text(
             prefs.homeLimitAccountCount.toString(),
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold
+            style = FluentTypeRamp.title2,
+            fontWeight = FontWeight.SemiBold,
+            color = LocalFluentColors.current.neutralForeground1
           )
-          OutlinedButton(
+          FluentButton(
+            label = "增加",
             onClick = {
               preferencesViewModel.setHomeLimitAccountCount(prefs.homeLimitAccountCount + 1)
               haptics.perform(HapticEvent.Selection)
             },
-            enabled = prefs.homeLimitAccountCount < 12
-          ) { Text("+") }
+            variant = FluentButtonVariant.Outline,
+            enabled = prefs.homeLimitAccountCount < 12,
+            contentDescription = "增加首页额度账号数"
+          )
         }
       }
-
       AppCard {
-
-        Text("触感反馈", style = MaterialTheme.typography.titleMedium)
-
+        SectionHeader(
+          title = "显示币种",
+          subtitle = "费用按 Hub 提供的展示汇率折算；汇率缺失时回退为美元。"
+        )
+        Spacer(Modifier.height(FluentSpacingDefaults.s))
+        val currencies = DisplayCurrency.entries
+        FluentTabStrip(
+          options = currencies.map { it.code },
+          selectedIndex = currencies.indexOf(prefs.currency).coerceAtLeast(0),
+          onSelect = { index ->
+            preferencesViewModel.setCurrency(currencies[index])
+            haptics.perform(HapticEvent.Selection)
+          }
+        )
+        Spacer(Modifier.height(FluentSpacingDefaults.xs))
         Text(
-
-          "标准：按钮轻触反馈。增强：切换、成功、错误等使用更丰富的震动模式。",
-
-          style = MaterialTheme.typography.bodySmall,
-
-          color = MaterialTheme.colorScheme.onSurfaceVariant
-
+          if (hubRates.isEmpty()) "尚未取得汇率，费用以 US$ 显示。"
+          else "汇率日期 ${hubRatesDate ?: "未知"} · 可用币种 ${hubRates.keys.joinToString()}",
+          style = FluentTypeRamp.caption2,
+          color = LocalFluentColors.current.neutralForeground3
         )
-
-        Spacer(Modifier.height(10.dp))
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-
-          HapticsMode.entries.forEach { mode ->
-
-            FilterChip(
-
-              selected = prefs.hapticsMode == mode,
-
-              onClick = {
-
-                preferencesViewModel.setHapticsMode(mode)
-
-                if (mode != HapticsMode.Off) {
-
-                  haptics.perform(
-
-                    if (mode == HapticsMode.Enhanced) HapticEvent.Confirm else HapticEvent.Tap,
-
-                    forceMode = mode
-
-                  )
-
-                }
-
-              },
-
-              label = { Text(mode.labelZh) }
-
-            )
-
-          }
-
-        }
-
-        if (prefs.hapticsMode == HapticsMode.Enhanced) {
-
-          Spacer(Modifier.height(8.dp))
-
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-
-            OutlinedButton(onClick = { haptics.perform(HapticEvent.Success) }) { Text("试听成功") }
-
-            OutlinedButton(onClick = { haptics.perform(HapticEvent.Error) }) { Text("试听错误") }
-
-            OutlinedButton(onClick = { haptics.perform(HapticEvent.Refresh) }) { Text("试听刷新") }
-
-          }
-
-        }
-
       }
-
-
-
       AppCard {
-
-        Text("Hub 连接", style = MaterialTheme.typography.titleMedium)
-
-        Spacer(Modifier.height(12.dp))
-
-        OutlinedTextField(
-
-          state.hubUrl,
-
-          viewModel::updateUrl,
-
-          label = { Text("Hub URL") },
-
-          placeholder = { Text("https://hub.example.com") },
-
-          singleLine = true,
-
-          modifier = Modifier.fillMaxWidth()
-
+        SectionHeader(
+          title = "触感反馈",
+          subtitle = "标准：按钮轻触反馈。增强：切换、成功、错误等使用更丰富的震动模式。"
         )
-
-        Spacer(Modifier.height(10.dp))
-
-        OutlinedTextField(
-
-          state.secret,
-
-          viewModel::updateSecret,
-
-          label = { Text("共享密钥") },
-
-          visualTransformation = if (state.secret.isEmpty()) {
-
-            VisualTransformation.None
-
-          } else {
-
-            PasswordVisualTransformation()
-
-          },
-
-          singleLine = true,
-
-          modifier = Modifier.fillMaxWidth()
-
-        )
-
-        Spacer(Modifier.height(10.dp))
-
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clickable {
-              haptics.perform(HapticEvent.Selection)
-              viewModel.updateAllowInsecureHttp(!state.allowInsecureHttp)
-            },
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Column(modifier = Modifier.weight(1f)) {
-            Text("允许远程 HTTP 连接", style = MaterialTheme.typography.bodyMedium)
-            Text(
-              "用于无 TLS 的外网穿透或局域网；数据在传输中不会加密。",
-              style = MaterialTheme.typography.bodySmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-          }
-          Spacer(Modifier.width(8.dp))
-          Switch(
-            checked = state.allowInsecureHttp,
-            onCheckedChange = { checked ->
-              haptics.perform(HapticEvent.Selection)
-              viewModel.updateAllowInsecureHttp(checked)
+        Spacer(Modifier.height(FluentSpacingDefaults.s))
+        val hapticsModes = HapticsMode.entries
+        FluentTabStrip(
+          options = hapticsModes.map { it.labelZh },
+          selectedIndex = hapticsModes.indexOf(prefs.hapticsMode).coerceAtLeast(0),
+          onSelect = { index ->
+            val mode = hapticsModes[index]
+            preferencesViewModel.setHapticsMode(mode)
+            if (mode != HapticsMode.Off) {
+              haptics.perform(
+                if (mode == HapticsMode.Enhanced) HapticEvent.Confirm else HapticEvent.Tap,
+                forceMode = mode
+              )
             }
-          )
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-
-          Button(
-
-            onClick = {
-
-              haptics.perform(HapticEvent.Confirm)
-
-              viewModel.testConnection()
-
-            },
-
-            enabled = !state.testing
-
-          ) { Text(if (state.testing) "测试中" else "测试连接") }
-
-          OutlinedButton(onClick = {
-
-            haptics.perform(HapticEvent.Success)
-
-            viewModel.save()
-
-            restartRealtime()
-
-          }) { Text("加密保存") }
-
-        }
-
-        TextButton(onClick = {
-
-          haptics.perform(HapticEvent.Error)
-
-          viewModel.clear()
-
-        }) { Text("清除本机连接") }
-
-      }
-
-
-
-      AppCard {
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-
-          Icon(Icons.Outlined.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-
-          Spacer(Modifier.width(10.dp))
-
-          Text("关于", style = MaterialTheme.typography.titleMedium)
-
-        }
-
-        Spacer(Modifier.height(10.dp))
-
-        Text(
-
-          "本软件遵循 MIT License 开源协议。",
-
-          style = MaterialTheme.typography.bodyMedium
-
-        )
-
-        Spacer(Modifier.height(6.dp))
-
-        Text(
-
-          "当前 Android 版本：${BuildConfig.VERSION_NAME}",
-
-          style = MaterialTheme.typography.bodySmall,
-
-          color = MaterialTheme.colorScheme.onSurfaceVariant
-
-        )
-
-        state.health?.version?.let {
-
-          Text(
-
-            "当前连接 Hub 版本：$it",
-
-            style = MaterialTheme.typography.bodySmall,
-
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-
-          )
-
-        }
-
-        Spacer(Modifier.height(4.dp))
-
-        TextButton(
-
-          onClick = {
-
-            haptics.perform(HapticEvent.Tap)
-
-            uriHandler.openUri("https://github.com/IGNGserver/token-monitor-suite/releases/latest")
-
           }
-
-        ) { Text("检查并下载最新 Android 版本") }
-
+        )
+        if (prefs.hapticsMode == HapticsMode.Enhanced) {
+          Spacer(Modifier.height(FluentSpacingDefaults.l))
+          Row(horizontalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.s)) {
+            FluentButton(
+              label = "试听成功",
+              onClick = { haptics.perform(HapticEvent.Success) },
+              variant = FluentButtonVariant.Outline
+            )
+            FluentButton(
+              label = "试听错误",
+              onClick = { haptics.perform(HapticEvent.Error) },
+              variant = FluentButtonVariant.Outline
+            )
+            FluentButton(
+              label = "试听刷新",
+              onClick = { haptics.perform(HapticEvent.Refresh) },
+              variant = FluentButtonVariant.Outline
+            )
+          }
+        }
       }
-
+      AppCard {
+        SectionHeader(
+          title = "Hub 连接",
+          subtitle = "只读连到一台 Docker Compose Hub；密钥以系统加密存储保存在本机。"
+        )
+        Spacer(Modifier.height(FluentSpacingDefaults.m))
+        FluentTextField(
+          value = state.hubUrl,
+          onValueChange = viewModel::updateUrl,
+          label = "Hub URL",
+          placeholder = "https://hub.example.com",
+          keyboardType = KeyboardType.Uri
+        )
+        Spacer(Modifier.height(FluentSpacingDefaults.l))
+        // `isPassword` only once a secret exists: masking an empty field reads as
+        // a broken input, which is what the previous conditional did here.
+        FluentTextField(
+          value = state.secret,
+          onValueChange = viewModel::updateSecret,
+          label = "共享密钥",
+          isPassword = state.secret.isNotEmpty(),
+          supportingText = "用于 Hub 的 Bearer 鉴权；保存后不会回显。"
+        )
+        Spacer(Modifier.height(FluentSpacingDefaults.l))
+        // The row is a `FluentListRow` with no `onClick`, so the toggle is the only
+        // owner of the value.  The previous version put a `clickable` on the row
+        // *and* an `onCheckedChange` on the switch, which is two writers to one
+        // setting on a 48 dp boundary between them.
+        FluentListRow(
+          primary = "允许远程 HTTP 连接",
+          secondary = "用于无 TLS 的外网穿透或局域网；数据在传输中不会加密。",
+          trailing = {
+            FluentToggle(
+              checked = state.allowInsecureHttp,
+              onCheckedChange = { checked ->
+                haptics.perform(HapticEvent.Selection)
+                viewModel.updateAllowInsecureHttp(checked)
+              },
+              label = "允许远程 HTTP 连接"
+            )
+          },
+          contentPadding = 0.dp
+        )
+        Spacer(Modifier.height(FluentSpacingDefaults.l))
+        Row(horizontalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.s)) {
+          FluentButton(
+            label = if (state.testing) "测试中" else "测试连接",
+            onClick = {
+              haptics.perform(HapticEvent.Confirm)
+              viewModel.testConnection()
+            },
+            enabled = !state.testing
+          )
+          FluentButton(
+            label = "加密保存",
+            onClick = {
+              haptics.perform(HapticEvent.Success)
+              viewModel.save()
+              restartRealtime()
+            },
+            variant = FluentButtonVariant.Outline
+          )
+        }
+        Spacer(Modifier.height(FluentSpacingDefaults.s))
+        FluentButton(
+          label = "清除本机连接",
+          onClick = {
+            haptics.perform(HapticEvent.Error)
+            viewModel.clear()
+          },
+          variant = FluentButtonVariant.Quiet
+        )
+      }
+      AppCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(
+                        painter = painterResource(FluentIcons.Info),
+            contentDescription = null,
+            tint = LocalFluentColors.current.brandForeground1
+          )
+          Spacer(Modifier.width(FluentSpacingDefaults.s))
+          Text(
+            "关于",
+            style = FluentTypeRamp.title3,
+            color = LocalFluentColors.current.neutralForeground1
+          )
+        }
+        Spacer(Modifier.height(FluentSpacingDefaults.s))
+        Text(
+          "本软件遵循 MIT License 开源协议。",
+          style = FluentTypeRamp.body2,
+          color = LocalFluentColors.current.neutralForeground1
+        )
+        Spacer(Modifier.height(FluentSpacingDefaults.xs))
+        Text(
+          "当前 Android 版本：${BuildConfig.VERSION_NAME}",
+          style = FluentTypeRamp.caption1,
+          color = LocalFluentColors.current.neutralForeground2
+        )
+        state.health?.version?.let {
+          Text(
+            "当前连接 Hub 版本：$it",
+            style = FluentTypeRamp.caption1,
+            color = LocalFluentColors.current.neutralForeground2
+          )
+        }
+        Spacer(Modifier.height(FluentSpacingDefaults.xs))
+        FluentButton(
+          label = "检查并下载最新 Android 版本",
+          onClick = {
+            haptics.perform(HapticEvent.Tap)
+            uriHandler.openUri("https://github.com/IGNGserver/token-monitor-suite/releases/latest")
+          },
+          variant = FluentButtonVariant.Quiet
+        )
+      }
     }
-
   }
-
 }
-
-
 
 fun availableSessions(stats: StatsDto?): List<Pair<String, SessionDto>> {
-
   val periods = listOf(stats?.periods?.today, stats?.periods?.month, stats?.periods?.allTime)
-
   return periods
-
     .firstOrNull { !it?.sessions.isNullOrEmpty() }
-
     ?.sessions
-
     .orEmpty()
-
     .toList()
-
     .sortedByDescending { it.second.lastUsedAt.orEmpty() }
-
 }
-
-
-
-
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StatusScreen(stats: StatsDto?, onBack: () -> Unit, onHome: (() -> Unit)? = null) {
   val haptics = rememberAppHaptics()
-
+  val listState = rememberLazyListState()
+  val scrolled = rememberScrolledFlag(listState)
   val providers = stats?.limits?.providers.orEmpty()
   val devices = stats?.devices.orEmpty()
   val okCount = providers.count { !it.status.isNullOrBlank() && it.status.equals("ok", ignoreCase = true) }
   val warnCount = providers.size - okCount
   val staleCount = devices.count { it.stale == true }
   Column(Modifier.fillMaxSize()) {
-    TopAppBar(
-      title = { Text("服务状态") },
-      navigationIcon = {
-        IconButton(onClick = {
-          haptics.perform(HapticEvent.Tap)
-          onBack()
-        }) {
-          Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-        }
-      },
-      actions = { NavigateHomeAction(onHome) }
+    FluentTopBar(
+      title = "服务状态",
+      onBack = { haptics.perform(HapticEvent.Tap); onBack() },
+      onHome = onHome,
+      scrolled = scrolled
     )
     if (providers.isEmpty() && devices.isEmpty()) {
       EmptyState(text = "暂无服务状态数据。")
       return
     }
     LazyColumn(
+      state = listState,
       contentPadding = PaddingValues(16.dp),
       verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -1867,10 +1243,10 @@ fun StatusScreen(stats: StatsDto?, onBack: () -> Unit, onHome: (() -> Unit)? = n
           AppCard {
             Text(
               device.hostname?.takeIf { it.isNotBlank() } ?: device.deviceId.orEmpty().ifBlank { "设备" },
-              style = MaterialTheme.typography.titleMedium,
+              style = FluentTypeRamp.title3,
               fontWeight = FontWeight.SemiBold
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(FluentSpacingDefaults.s))
             val bits = buildList {
               devicePlatformLabel(device.platform, device.osName, device.osVersion)
                 .takeIf { it.isNotBlank() && it != "—" }
@@ -1883,8 +1259,8 @@ fun StatusScreen(stats: StatsDto?, onBack: () -> Unit, onHome: (() -> Unit)? = n
             if (bits.isNotEmpty()) {
               Text(
                 bits.joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                style = FluentTypeRamp.caption1,
+                color = LocalFluentColors.current.neutralForeground2
               )
             }
           }
@@ -1906,8 +1282,9 @@ fun StatusScreen(stats: StatsDto?, onBack: () -> Unit, onHome: (() -> Unit)? = n
 @Composable
 private fun SummaryChip(label: String, value: String, modifier: Modifier = Modifier) {
   AppCard(modifier = modifier) {
-    Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(label, style = FluentTypeRamp.caption1, color = LocalFluentColors.current.neutralForeground2)
     Spacer(Modifier.height(4.dp))
-    Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+    Text(value, style = FluentTypeRamp.title2, fontWeight = FontWeight.SemiBold)
   }
 }
+

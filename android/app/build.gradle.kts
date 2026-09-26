@@ -86,8 +86,6 @@ dependencies {
   implementation(libs.compose.ui)
   implementation(libs.compose.ui.tooling.preview)
   implementation(libs.compose.material3)
-  implementation(libs.compose.material)
-  implementation(libs.compose.material.icons)
   implementation(libs.androidx.security.crypto)
   implementation(libs.hilt.android)
   implementation(libs.androidx.hilt.navigation.compose)
@@ -99,7 +97,6 @@ dependencies {
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.vico.compose)
-  implementation(libs.vico.compose.m3)
   implementation(libs.vico.core)
 
   testImplementation(libs.junit)
@@ -180,4 +177,14 @@ val runUnitTests = registerJunitCoreTask(
   "Runs all compiled local unit tests via JUnitCore (Windows argfile workaround)."
 )
 
-tasks.withType<Test>().configureEach { enabled = false }
+// The JUnitCore tasks above exist because a Windows classpath overflows the command
+// line; they were also *disabling* Gradle's own `test` task, which made `./gradlew test`
+// a silent no-op — a green run that ran nothing.  Both paths now work: `test` is the
+// standard entry point (and what CI calls), the JUnitCore tasks remain for a Windows
+// shell that cannot carry the classpath.
+tasks.withType<Test>().configureEach {
+  enabled = true
+  testLogging {
+    events("passed", "skipped", "failed")
+  }
+}

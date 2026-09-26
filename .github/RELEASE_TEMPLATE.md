@@ -4,21 +4,22 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Qoder tracked alongside Qoder CN:** The international edition is now collected as its own client, so a machine running both installers reports them separately, each with its own profile root, watch paths and source diagnostics. Both stay opt-in under Settings → Collection → Tracked tools.
-- **Qoder credits:** Qoder bills in credits rather than tokens, and its transcripts carry an exact per-request credit amount. Credits are now reported and shown per tool beside the token and cost figures, which remain estimates and are now marked with `~` so the difference is visible rather than implied.
+- **Fluent 2 Scrollbars:** Added standard thin scrollbar styling and rounded overlay pill design across all scrollable containers in the shared UI and desktop shell.
 
 ### Fixed
-- **Qoder token totals grew with session length:** Every request was billed for the whole conversation preceding it, so a long session's total rose roughly with the square of its request count. One real machine reported 2.97 billion tokens for a day of 8,593 requests whose conversation held about 5.6 million tokens of content. Each message is now counted once per session.
-- **The Qoder evidence probe could read the developer's own profile:** It merged a fixture environment over the ambient one, so a "no data on this machine" check still reported PASS against a real install.
+- **Preserve expanded details and scroll on refresh:** Auto-refresh now maintains `<details>` expansion state (usage breakdowns, device details, action menus) and desktop scroll position without collapsing lists or bouncing the view.
+- **Desktop local-mode management error fallback:** Replaced the unconfigured Hub error cards in Accounts and Management panels with a clean empty state and quick settings link.
+- **Button and tab click focus shadow:** Removed the harsh browser 4px box-shadow glow on click, retaining subtle Fluent 2 focus-visible outlines for keyboard navigation.
+- **Switch component deformation:** Fixed deformed circular switches by enforcing standard 40x20px pill dimensions and preventing vertical stretch.
 <!-- app-update-notes:en:end -->
 
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.11-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.47.0-rev.11-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.47.0-rev.11.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-Setup-0.47.0-rev.11.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.47.0-rev.11.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.47.0-rev.11.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.12-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.47.0-rev.12-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.47.0-rev.12.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-Setup-0.47.0-rev.12.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.47.0-rev.12.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.47.0-rev.12.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -56,21 +57,22 @@ open-source: https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **国际版 Qoder 纳入跟踪，与中国版并列：** 国际版现在作为独立客户端采集，因此同时安装两者的机器会将二者分开上报，各自拥有独立的配置目录、监听路径与来源诊断。两者仍需在 设置 → 采集 → 跟踪的工具 中启用（默认关闭）。
-- **Qoder Credits：** Qoder 按 Credits 而不是 Token 计费，其 transcript 中每个请求都带有精确的 Credits 数量。现在会按工具上报并展示 Credits，与仍属估算的 Token、成本并列展示，并用 `~` 标注，让这一区别直接可见而不需读者推断。
+- **全站 Fluent 2 滚动条规范：** 网页端与桌面端统一引入细长胶囊圆角滚动条，适配深浅色主题，替换浏览器原生粗灰方块滑块。
 
 ### 修复
-- **Qoder 的 Token 总量随会话长度增长：** 此前每个请求都按其之前的整段对话计费，因此长会话的总量约随请求数的平方增长。在一台真实机器上，一天 8593 个请求报告了 29.7 亿 Token，而对话实际内容约 560 万。现在每条消息在一个 session 内只计一次。
-- **Qoder 取证探针会读到开发者自己的 profile：** 该诊断探针把测试用环境叠加到进程环境之上，导致「本机无数据」的检查仍可能对真实安装报出 PASS。
+- **刷新时展开列表收回与页面跳动：** 自动刷新时完整保留表格详情、设备状态等折叠面板的展开状态与桌面端滚动容器位置。
+- **本地模式下管理分组报错：** 桌面端处于本地运行时，账号与管理面板优雅降级显示引导提示，不再报错“仪表板加载失败”。
+- **按钮与选项卡点击阴影：** 消除鼠标点击时出现的浏览器高对比度扩散外阴影，对齐 Fluent 2 自然的按压过渡效果。
+- **开关（Switch）形态畸变：** 修复因最小点击尺寸冲突导致的开关异形拉长，恢复规范的 40x20px 胶囊比例。
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.11-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.47.0-rev.11-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.47.0-rev.11.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-Setup-0.47.0-rev.11.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.47.0-rev.11.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.47.0-rev.11.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.12-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.47.0-rev.12-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.47.0-rev.12.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-Setup-0.47.0-rev.12.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.47.0-rev.12.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.47.0-rev.12.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -103,7 +105,7 @@ https://github.com/junhoyeo/tokscale
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v0.47.0-rev.9...v0.47.0-rev.11">v0.47.0-rev.9...v0.47.0-rev.11</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/IGNGserver/token-monitor-suite/compare/v0.47.0-rev.9...v0.47.0-rev.12">v0.47.0-rev.9...v0.47.0-rev.12</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -121,21 +123,22 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh-TW:start -->
 ### 新增
-- **國際版 Qoder 納入追蹤，與中國版並列：** 國際版現在作為獨立客戶端蒐集，因此同時安裝兩者的機器會將二者分開上報，各自擁有獨立的設定目錄、監看路徑與來源診斷。兩者仍需在 設定 → 收集 → 追蹤的工具 中啟用（預設關閉）。
-- **Qoder Credits：** Qoder 按 Credits 而不是 Token 計費，其 transcript 中每個請求都帶有精確的 Credits 數量。現在會按工具上報並顯示 Credits，與仍屬估算的 Token、成本並列，並以 `~` 標註，讓這個區別直接可見而不需讀者推斷。
+- **全站 Fluent 2 捲軸規範：** 網頁端與桌面端統一引入細長膠囊圓角捲軸，適配深淺色主題，替換瀏覽器原生粗灰方塊滑塊。
 
-### 修复
-- **Qoder 的 Token 總量隨會話長度增長：** 先前每個請求都按其之前的整段對話計費，因此長會話的總量約隨請求數的平方增長。在一台真實機器上，一天 8593 個請求回報了 29.7 億 Token，而對話實際內容約 560 萬。現在每則訊息在一個 session 內只計一次。
-- **Qoder 取證探針會讀到開發者自己的 profile：** 該診斷探針把測試用環境疊加到行程環境之上，導致「本機無資料」的檢查仍可能對真實安裝回報 PASS。
+### 修復
+- **重新整理時展開清單收回與畫面跳動：** 自動重新整理時完整保留表格詳情、設備狀態等摺疊面板的展開狀態與桌面端捲動位置。
+- **本機模式下管理分組報錯：** 桌面端處於本機執行時，帳號與管理面板優雅降級顯示引導提示，不再報錯「儀表板載入失敗」。
+- **按鈕與選項卡點擊陰影：** 消除滑鼠點擊時出現的瀏覽器高對比度擴散外陰影，對齊 Fluent 2 自然的按壓過渡效果。
+- **開關（Switch）形態畸變：** 修復因最小點擊尺寸衝突導致的開關異形拉長，恢復規範的 40x20px 膠囊比例。
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.11-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.47.0-rev.11-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.47.0-rev.11.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-Setup-0.47.0-rev.11.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.47.0-rev.11.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.47.0-rev.11.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.12-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.47.0-rev.12-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.47.0-rev.12.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-Setup-0.47.0-rev.12.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.47.0-rev.12.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.47.0-rev.12.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12.AppImage)
 
 </details>
 
@@ -148,21 +151,22 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ko:start -->
 ### 추가됨
-- **Qoder 국제판 추적, Qoder CN과 분리:** 국제판이 독립 클라이언트로 수집되어, 두 설치본을 모두 사용하는 기기는 각각 따로 보고됩니다. 프로필 루트, 감시 경로, 출처 진단도 각각 독립입니다. 둘 다 설정 → 수집 → 추적 도구에서 활성화합니다(기본 꺼짐).
-- **Qoder 크레딧:** Qoder는 토큰이 아니라 크레딧으로 과금하며, transcript의 각 요청에는 정확한 크레딧 값이 들어 있습니다. 이제 도구를 기준으로 크레딧을 보고하고 표시하며, 계속 추정치인 토큰·비용 옆에 `~` 표기를 붙여 그 차이를 눈으로 확인할 수 있습니다.
+- **Fluent 2 스크롤바 표준 적용:** 웹 및 데스크톱 환경 전체에 Fluent 2 표준의 얇은 캡슐형 오버레이 스크롤바를 도입했습니다.
 
 ### 수정됨
-- **Qoder 토큰 합계가 세션 길이에 따라 커지던 문제:** 모든 요청이 그 앞의 대화 전체에 대해 과금되어, 긴 세션의 합계가 요청 수의 제곱에 가까웠습니다. 실제 기기에서 하루 8,593개 요청이 29.7억 토큰으로 보고됐지만 실제 대화 내용은 약 560만 토큰이었습니다. 이제 한 메시지는 세션당 정확히 한 번만 계산됩니다.
-- **Qoder 증거 프로브가 개발자 자신의 profile을 읽을 수 있던 문제:** 진단 프로브가 픽처 환경을 실제 환경 위에 덮어써 합쳤기 때문에,「이 기기에는 데이터 없음」검사가 실제 설치본에 대해 PASS를 보고할 수 있었습니다.
+- **새로고침 시 펼쳐진 목록 접힘 및 스크롤 튐 수정:** 자동 새로고침 시 `<details>` 요소의 펼침 상태와 데스크톱 스크롤 위치를 유지합니다.
+- **로컬 모드 관리 패널 오류 수정:** 데스크톱 로컬 모드에서 계정 및 관리 화면 접근 시 대시보드 로드 오류 대신 안내 화면이 표시됩니다.
+- **버튼 및 탭 클릭 그림자 제거:** 클릭 시 발생하던 브라우저의 4px 외곽선 그림자를 제거하고 자연스러운 피드백을 적용했습니다.
+- **스위치 컨트롤 왜곡 수정:** 스위치 크기 충돌로 인해 세로로 늘어나던 문제를 해결하고 40x20px 표준 비율을 복원했습니다.
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.11-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.47.0-rev.11-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.47.0-rev.11.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-Setup-0.47.0-rev.11.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.47.0-rev.11.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.47.0-rev.11.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.12-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.47.0-rev.12-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.47.0-rev.12.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-Setup-0.47.0-rev.12.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.47.0-rev.12.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.47.0-rev.12.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12.AppImage)
 
 </details>
 
@@ -175,21 +179,22 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ja:start -->
 ### 追加
-- **Qoder 国際版を Qoder CN と並べて追跡：** 国際版を独立したクライアントとして収集するようにしました。両方のインストーラーが入っているマシンでは別々に報告され、プロファイルルート・監視パス・ソース診断も各自のものです。どちらも 設定 → 収集 → 追跡するツール で有効化するオプトイン（デフォルト無効）です。
-- **Qoder のクレジット：** Qoder はトークンではなくクレジットで課金され、transcript の各リクエストに正確なクレジット値が含まれています。ツール単位で報告・表示するようになり、推定のままのトークンとコストの旁边に `~` を付けたので、その違いを読者が推測せずに済みます。
+- **Fluent 2 スクロールバーの標準化:** Web およびデスクトップ全体で Fluent 2 仕様のピル型オーバーレイスクロールバーを導入しました。
 
 ### 修正
-- **Qoder のトークン合計がセッション長に応じて膨らむ問題：** 各リクエストがそれ以前の会話全体に対して課金されていたため、長いセッションでは合計がリクエスト数の二乗に近づいていました。実機あるマシンでは 1 日 8,593 リクエストが 29.7 億トークンと報告されていましたが、会話の実内容は約 560 万トークンです。これからは 1 つのメッセージはセッションにつき 1 度だけ計上されます。
-- **Qoder 検証プローブが開発者自身の profile を読み得た問題：** 診断プローブがフィクスチャ環境を既存環境に上書き合成していたため、「このマシンにデータなし」の確認が実際のインストールに対して PASS を返すことがありました。
+- **更新時の展開リストの閉じとスクロール跳びの防止:** 自動更新時に `<details>` の展開状態とスクロール位置を完全に維持するようにしました。
+- **ローカルモード時の管理パネルエラー改善:** Hub 未接続時にエラーカードではなく、適切な空状態と設定リンクを表示するようにしました。
+- **ボタンやタブクリック時の選択影の除去:** クリック時に表示されていたブラウザの 4px 拡散枠を抑制し、Fluent 2 の自然なインタラクションに合わせました。
+- **スイッチコントロールの歪み修正:** 最小サイズ競合による縦長円形の歪みを解消し、40x20px の標準カプセル比率に修正しました。
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.11-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.47.0-rev.11-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.47.0-rev.11.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-Setup-0.47.0-rev.11.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.47.0-rev.11.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.47.0-rev.11.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.11/Token-Monitor-0.47.0-rev.11.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.47.0-rev.12-arm64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.47.0-rev.12-x64.dmg](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.47.0-rev.12.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-Setup-0.47.0-rev.12.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.47.0-rev.12.exe](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.47.0-rev.12.AppImage](https://github.com/IGNGserver/token-monitor-suite/releases/download/v0.47.0-rev.12/Token-Monitor-0.47.0-rev.12.AppImage)
 
 </details>
 

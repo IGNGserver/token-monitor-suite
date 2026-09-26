@@ -1,4 +1,18 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-  <style name="Theme.TokenMonitor" parent="android:style/Theme.Material.Light.NoActionBar" />
+  <!--
+    The client draws its own chrome, so the platform theme only has to survive the
+    window before Compose's first frame.  It used to inherit
+    `android:style/Theme.Material.Light.NoActionBar` — a Material *2* platform theme
+    with a light window background and no night variant, which is what flashed white
+    on every cold start in dark mode.  DeviceDefault is the neutral platform theme
+    and pairs with values-night, so the pre-Compose frame matches the Fluent surface.
+  -->
+  <style name="Theme.TokenMonitor" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+    <item name="android:windowBackground">@color/window_background</item>
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:navigationBarColor">@android:color/transparent</item>
+    <item name="android:windowLightStatusBar">true</item>
+    <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
+    <item name="android:navigationBarDividerColor" tools:targetApi="28">@android:color/transparent</item>
+  </style>
 </resources>
-

@@ -2,6 +2,13 @@ package com.igng.tokenmonitor.android.data.repository
 
 import com.igng.tokenmonitor.android.data.local.ConnectionConfig
 import com.igng.tokenmonitor.android.data.local.ConnectionStorage
+import com.igng.tokenmonitor.android.data.model.AccountRequestDto
+import com.igng.tokenmonitor.android.data.model.AccountsResponseDto
+import com.igng.tokenmonitor.android.data.model.OAuthExchangeRequestDto
+import com.igng.tokenmonitor.android.data.model.OAuthStartDto
+import com.igng.tokenmonitor.android.data.model.RatesResponseDto
+import com.igng.tokenmonitor.android.data.model.SubscriptionsRequestDto
+import com.igng.tokenmonitor.android.data.model.SubscriptionsResponseDto
 import com.igng.tokenmonitor.android.data.model.BatchPricingResponseDto
 import com.igng.tokenmonitor.android.data.model.DevicesResponseDto
 import com.igng.tokenmonitor.android.data.model.HealthDto
@@ -65,7 +72,8 @@ class HubRepository @Inject constructor(
   }
   suspend fun capabilities(): HubResult<HubAuthorizationDto> = withConnection { apiFactory.create(it).capabilities() }
   suspend fun stats(): HubResult<StatsDto> = withConnection { apiFactory.create(it).stats() }
-  suspend fun history(): HubResult<HistoryDto> = withConnection { apiFactory.create(it).history() }
+  suspend fun history(deviceId: String? = null): HubResult<HistoryDto> =
+    withConnection { apiFactory.create(it).history(deviceId) }
   suspend fun devices(): HubResult<DevicesResponseDto> = withConnection { apiFactory.create(it).devices() }
   suspend fun usageRange(
     startDate: String,
@@ -78,6 +86,32 @@ class HubRepository @Inject constructor(
   suspend fun putPricing(model: String, request: PricingRequestDto): HubResult<PricingResponseDto> = withConnection { apiFactory.create(it).putPricing(model, request) }
   suspend fun fetchUpstream(model: String): HubResult<PricingResponseDto> = withConnection { apiFactory.create(it).fetchUpstream(model) }
   suspend fun fetchAllUpstream(): HubResult<BatchPricingResponseDto> = withConnection { apiFactory.create(it).fetchAllUpstream() }
+
+  suspend fun rates(): HubResult<RatesResponseDto> = withConnection { apiFactory.create(it).rates() }
+
+  suspend fun accounts(): HubResult<AccountsResponseDto> = withConnection { apiFactory.create(it).accounts() }
+  suspend fun addAccount(request: AccountRequestDto): HubResult<AccountsResponseDto> =
+    withConnection { apiFactory.create(it).addAccount(request) }
+  suspend fun patchAccount(id: String, request: AccountRequestDto): HubResult<AccountsResponseDto> =
+    withConnection { apiFactory.create(it).patchAccount(id, request) }
+  suspend fun deleteAccount(id: String): HubResult<AccountsResponseDto> =
+    withConnection { apiFactory.create(it).deleteAccount(id) }
+  suspend fun refreshAccount(id: String): HubResult<AccountsResponseDto> =
+    withConnection { apiFactory.create(it).refreshAccount(id) }
+  suspend fun startOAuth(provider: String): HubResult<OAuthStartDto> =
+    withConnection { apiFactory.create(it).startOAuth(mapOf("provider" to provider)) }
+  suspend fun exchangeOAuth(request: OAuthExchangeRequestDto): HubResult<AccountsResponseDto> =
+    withConnection { apiFactory.create(it).exchangeOAuth(request) }
+
+  suspend fun subscriptions(): HubResult<SubscriptionsResponseDto> =
+    withConnection { apiFactory.create(it).subscriptions() }
+  suspend fun putSubscriptions(request: SubscriptionsRequestDto): HubResult<SubscriptionsResponseDto> =
+    withConnection { apiFactory.create(it).putSubscriptions(request) }
+
+  suspend fun renameDevice(id: String, hostname: String): HubResult<DevicesResponseDto> =
+    withConnection { apiFactory.create(it).renameDevice(id, mapOf("hostname" to hostname)) }
+  suspend fun deleteDevice(id: String): HubResult<DevicesResponseDto> =
+    withConnection { apiFactory.create(it).deleteDevice(id) }
 
   fun statsEvents(): Flow<SseStatsDto> = callbackFlow {
     val config = connection()

@@ -1,5 +1,13 @@
 package com.igng.tokenmonitor.android.ui.devices
 
+import androidx.compose.runtime.mutableStateOf
+import com.igng.tokenmonitor.android.ui.HubUiState
+import com.igng.tokenmonitor.android.ui.components.FluentButtonVariant
+import com.igng.tokenmonitor.android.ui.components.FluentButton
+import com.igng.tokenmonitor.android.ui.components.TrendMetric
+import com.igng.tokenmonitor.android.ui.components.DailyTrendChart
+import com.igng.tokenmonitor.android.ui.components.FluentTextField
+import com.igng.tokenmonitor.android.ui.components.FluentIcons
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,54 +20,65 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.outlined.Devices
-import androidx.compose.material3.ExperimentalMaterial3Api
-import com.igng.tokenmonitor.android.ui.components.agentRuntimeLabel
-import com.igng.tokenmonitor.android.ui.components.clientStatusLabel
-import com.igng.tokenmonitor.android.ui.components.devicePlatformLabel
-import com.igng.tokenmonitor.android.ui.components.deviceConnectionLabel
-import com.igng.tokenmonitor.android.ui.components.deviceCountsAsOnline
-import com.igng.tokenmonitor.android.ui.components.wslStatusLabel
-import com.igng.tokenmonitor.android.ui.components.ClientBranding
-import com.igng.tokenmonitor.android.data.model.PeriodDto
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import com.igng.tokenmonitor.android.data.model.DeviceDto
+import com.igng.tokenmonitor.android.data.model.PeriodDto
 import com.igng.tokenmonitor.android.ui.components.AppCard
+import com.igng.tokenmonitor.android.ui.components.ClientBranding
 import com.igng.tokenmonitor.android.ui.components.CompactMetricCard
 import com.igng.tokenmonitor.android.ui.components.DeviceComparisonChart
-import com.igng.tokenmonitor.android.ui.components.EmptyState
 import com.igng.tokenmonitor.android.ui.components.DevicesSkeleton
+import com.igng.tokenmonitor.android.ui.components.EmptyState
+import com.igng.tokenmonitor.android.ui.components.FluentCardList
+import com.igng.tokenmonitor.android.ui.components.FluentListRow
+import com.igng.tokenmonitor.android.ui.components.FluentPageHeader
+import com.igng.tokenmonitor.android.ui.components.FluentStaggeredIn
+import com.igng.tokenmonitor.android.ui.components.FluentTabStrip
+import com.igng.tokenmonitor.android.ui.components.FluentTopBar
 import com.igng.tokenmonitor.android.ui.components.LimitsSection
 import com.igng.tokenmonitor.android.ui.components.MetricHeroCard
 import com.igng.tokenmonitor.android.ui.components.SectionHeader
 import com.igng.tokenmonitor.android.ui.components.ShareBarList
 import com.igng.tokenmonitor.android.ui.components.StatusDot
-import com.igng.tokenmonitor.android.ui.components.formatTokensShort
+import com.igng.tokenmonitor.android.ui.components.agentRuntimeLabel
+import com.igng.tokenmonitor.android.ui.components.clientStatusLabel
+import com.igng.tokenmonitor.android.ui.components.deviceConnectionLabel
+import com.igng.tokenmonitor.android.ui.components.deviceCountsAsOnline
+import com.igng.tokenmonitor.android.ui.components.fleetOnlineCount
+import com.igng.tokenmonitor.android.ui.components.fleetSorted
+import com.igng.tokenmonitor.android.ui.components.devicePlatformLabel
 import com.igng.tokenmonitor.android.ui.components.formatRelativeTime
+import com.igng.tokenmonitor.android.ui.components.formatTokensShort
 import com.igng.tokenmonitor.android.ui.components.formatUsd
+import com.igng.tokenmonitor.android.ui.components.rememberScrolledFlag
 import com.igng.tokenmonitor.android.ui.components.topShareEntries
+import com.igng.tokenmonitor.android.ui.components.wslStatusLabel
+import com.igng.tokenmonitor.android.ui.haptics.HapticEvent
+import com.igng.tokenmonitor.android.ui.haptics.rememberAppHaptics
+import com.igng.tokenmonitor.android.ui.theme.FluentShapeDefaults
+import com.igng.tokenmonitor.android.ui.theme.FluentSpacingDefaults
+import com.igng.tokenmonitor.android.ui.theme.FluentTypeRamp
+import com.igng.tokenmonitor.android.ui.theme.LocalFluentColors
+
+private val periodOptions = listOf("今日", "本月", "全部")
+private val periodKeys = listOf("today", "month", "allTime")
 
 @Composable
 fun DevicesScreen(
@@ -67,168 +86,145 @@ fun DevicesScreen(
   navController: NavHostController,
   isLoading: Boolean = false
 ) {
-  val sorted = devices.sortedWith(
-    compareBy<DeviceDto> { it.stale }.thenByDescending { it.periods.today.totalTokens }
-  )
+  val colors = LocalFluentColors.current
+  val haptics = rememberAppHaptics()
+  val listState = rememberLazyListState()
+  val scrolled = rememberScrolledFlag(listState)
+  val sorted = fleetSorted(devices)
   val activeDevices = sorted.filterNot { it.stale }
+  val onlineCount = fleetOnlineCount(devices)
+
   Column(Modifier.fillMaxSize()) {
-    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-      Text("设备", style = MaterialTheme.typography.headlineSmall)
-      Text(
-        if (devices.isEmpty()) "暂无上报设备"
-        else "${devices.count { deviceCountsAsOnline(it.stale, it.clientStatus) }} 在线 · ${devices.size} 台合计",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-      )
-    }
+    FluentPageHeader(
+      title = "设备",
+      subtitle = if (devices.isEmpty()) "暂无上报设备" else "$onlineCount 在线 · ${devices.size} 台合计"
+    )
     when {
       isLoading && devices.isEmpty() -> DevicesSkeleton()
-      sorted.isEmpty() -> EmptyState(title = "无设备", text = "还没有设备上报到 Hub。", icon = Icons.Outlined.Devices)
-      else -> {
-        LazyColumn(
-          modifier = Modifier.fillMaxSize(),
-          contentPadding = PaddingValues(16.dp),
-          verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+      sorted.isEmpty() -> EmptyState(
+        title = "无设备",
+        text = "还没有设备上报到 Hub。",
+        icon = FluentIcons.PhoneLaptop
+      )
+      else -> LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+          start = FluentSpacingDefaults.l,
+          end = FluentSpacingDefaults.l,
+          top = FluentSpacingDefaults.xs,
+          bottom = FluentSpacingDefaults.xxxl
+        ),
+        verticalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.m)
+      ) {
         item {
           AppCard {
             SectionHeader(
               title = "今日对比",
               subtitle = "按设备 Token 用量"
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(FluentSpacingDefaults.m))
             DeviceComparisonChart(devices = activeDevices, limit = 10, showCost = true)
           }
         }
-        items(sorted, key = { it.deviceId.orEmpty() }) { device ->
-          AppCard(
-            onClick = {
-              navController.navigate("device/${Uri.encode(device.deviceId.orEmpty())}")
-            }
-          ) {
-            Row(
-              Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
-              ) {
-                StatusDot(active = !device.stale)
-                Spacer(Modifier.width(10.dp))
-                Column {
-                  Text(
-                    device.hostname ?: device.deviceId.orEmpty(),
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                  )
-                  Text(
-                    buildString {
-                      append(devicePlatformLabel(device.platform, device.osName, device.osVersion))
-                      append(" · ")
-                      append(deviceConnectionLabel(device.stale, device.clientStatus))
-                      agentRuntimeLabel(device.agentRuntime).takeIf { it.isNotBlank() }?.let {
-                        append(" · ")
-                        append(it)
-                      }
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                  )
+
+        // One container, hairline-separated rows: Fluent groups homogeneous
+        // collections this way so the list reads as a set, not as N cards.
+        item {
+          FluentCardList {
+            sorted.forEachIndexed { index, device ->
+              DeviceRow(
+                device = device,
+                dividerAbove = index > 0,
+                onClick = {
+                  haptics.perform(HapticEvent.Tap)
+                  navController.navigate("device/${Uri.encode(device.deviceId.orEmpty())}")
                 }
-              }
-              Column(horizontalAlignment = Alignment.End) {
-                Text(
-                  formatTokensShort(device.periods.today.totalTokens),
-                  style = MaterialTheme.typography.titleMedium,
-                  fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                  formatUsd(device.periods.today.costUsd, compact = true),
-                  style = MaterialTheme.typography.labelMedium,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-              }
+              )
             }
-            Spacer(Modifier.height(10.dp))
-            val fraction = run {
-              val max = sorted.maxOfOrNull { it.periods.today.totalTokens }?.coerceAtLeast(1L) ?: 1L
-              device.periods.today.totalTokens.toFloat() / max.toFloat()
-            }
-            com.igng.tokenmonitor.android.ui.components.ShareProgressBar(
-              fraction = fraction,
-              color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-              "上次上报 ${formatRelativeTime(device.receivedAt)}",
-              style = MaterialTheme.typography.labelSmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
           }
-        }
         }
       }
     }
   }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DeviceRow(device: DeviceDto, dividerAbove: Boolean, onClick: () -> Unit) {
+  val colors = LocalFluentColors.current
+  FluentListRow(
+    primary = device.hostname ?: device.deviceId.orEmpty(),
+    secondary = buildString {
+      append(devicePlatformLabel(device.platform, device.osName, device.osVersion))
+      append(" · ")
+      append(deviceConnectionLabel(device.stale, device.clientStatus))
+      agentRuntimeLabel(device.agentRuntime).takeIf { it.isNotBlank() }?.let {
+        append(" · ")
+        append(it)
+      }
+    },
+    tertiary = "上次上报 ${formatRelativeTime(device.receivedAt)}",
+    leading = { StatusDot(active = !device.stale, size = 8.dp) },
+    trailingPrimary = formatTokensShort(device.periods.today.totalTokens),
+    trailingSecondary = formatUsd(device.periods.today.costUsd, compact = true),
+    disclosure = true,
+    dividerAbove = dividerAbove,
+    onClick = onClick
+  )
+}
+
 @Composable
 fun DeviceDetailScreen(
   device: DeviceDto?,
   onBack: () -> Unit,
-  onHome: (() -> Unit)? = null
+  onHome: (() -> Unit)? = null,
+  hubState: HubUiState? = null,
+  canManage: Boolean = false,
+  onRenameDevice: (String, String) -> Unit = { _, _ -> },
+  onDeleteDevice: (String) -> Unit = {}
 ) {
-  var periodKey by rememberSaveable { mutableStateOf("today") }
+  val colors = LocalFluentColors.current
+  var periodIndex by rememberSaveable { mutableIntStateOf(0) }
+  val scrollState = rememberScrollState()
+  val scrolled = rememberScrolledFlag(scrollState)
+
   Column(Modifier.fillMaxSize()) {
-    TopAppBar(
-      title = { Text("设备详情") },
-      navigationIcon = {
-        IconButton(onClick = onBack) {
-          Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-        }
-      },
-      actions = {
-        if (onHome != null) {
-          IconButton(onClick = onHome) {
-            Icon(Icons.Filled.Home, contentDescription = "首页")
-          }
-        }
+    FluentTopBar(
+      title = device?.hostname ?: "设备详情",
+      onBack = onBack,
+      onHome = onHome,
+      scrolled = scrolled,
+      subtitle = device?.let {
+        devicePlatformLabel(it.platform, it.osName, it.osVersion)
       }
     )
     if (device == null) {
       EmptyState(text = "设备已从当前 Hub 快照中移除。")
-      return
+      return@Column
     }
-    val selectedPeriod: PeriodDto = when (periodKey) {
-      "month" -> device.periods.month
-      "allTime" -> device.periods.allTime
+    val selectedPeriod: PeriodDto = when (periodIndex) {
+      1 -> device.periods.month
+      2 -> device.periods.allTime
       else -> device.periods.today
     }
-    val periodLabel = when (periodKey) {
-      "month" -> "本月"
-      "allTime" -> "全部"
-      else -> "今日"
-    }
+    val periodLabel = periodOptions[periodIndex]
+
     Column(
       Modifier
         .fillMaxSize()
-        .verticalScroll(rememberScrollState())
-        .padding(16.dp),
-      verticalArrangement = Arrangement.spacedBy(14.dp)
+        .verticalScroll(scrollState)
+        .padding(horizontal = FluentSpacingDefaults.l, vertical = FluentSpacingDefaults.m),
+      verticalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.m)
     ) {
+      // Identity block
       Row(verticalAlignment = Alignment.CenterVertically) {
-        StatusDot(active = !device.stale)
-        Spacer(Modifier.width(10.dp))
+        StatusDot(active = !device.stale, size = 10.dp)
+        Spacer(Modifier.width(FluentSpacingDefaults.m))
         Column {
           Text(
             device.hostname ?: device.deviceId.orEmpty(),
-            style = MaterialTheme.typography.headlineSmall
+            style = FluentTypeRamp.title1,
+            color = colors.neutralForeground1
           )
           Text(
             buildString {
@@ -240,79 +236,85 @@ fun DeviceDetailScreen(
                 append(it)
               }
             },
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = FluentTypeRamp.caption1,
+            color = colors.neutralForeground2
           )
           Text(
             "上次上报 ${formatRelativeTime(device.receivedAt)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = FluentTypeRamp.caption2,
+            color = colors.neutralForeground3
           )
         }
       }
+
       if (device.clientStatus.isNotEmpty()) {
         AppCard {
           SectionHeader(title = "工具状态", subtitle = "来自采集端 clientStatus")
-          Spacer(Modifier.height(10.dp))
+          Spacer(Modifier.height(FluentSpacingDefaults.s))
           device.clientStatus.entries
             .sortedBy { it.key }
             .forEach { (client, state) ->
               Row(
                 Modifier
                   .fillMaxWidth()
-                  .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
+                  .semantics {
+                    contentDescription =
+                      "${ClientBranding.label(client)} ${clientStatusLabel(state)}"
+                  }
+                  .padding(vertical = FluentSpacingDefaults.xs),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
               ) {
                 Text(
                   ClientBranding.label(client),
-                  style = MaterialTheme.typography.bodyMedium
+                  style = FluentTypeRamp.body2,
+                  color = colors.neutralForeground1
                 )
                 Text(
                   clientStatusLabel(state),
-                  style = MaterialTheme.typography.labelMedium,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                  style = FluentTypeRamp.caption1,
+                  color = colors.neutralForeground2
                 )
               }
             }
         }
       }
+
       device.wslStatus?.state?.takeIf { it.isNotBlank() }?.let { state ->
         AppCard {
           SectionHeader(title = "WSL 状态", subtitle = wslStatusLabel(state))
-          Spacer(Modifier.height(8.dp))
+          Spacer(Modifier.height(FluentSpacingDefaults.s))
           val detected = device.wslStatus?.detected.orEmpty()
           val withData = device.wslStatus?.withData.orEmpty()
           if (detected.isNotEmpty()) {
             Text(
               "已检测：" + detected.joinToString { ClientBranding.label(it) },
-              style = MaterialTheme.typography.bodySmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant
+              style = FluentTypeRamp.caption1,
+              color = colors.neutralForeground2
             )
           }
           if (withData.isNotEmpty()) {
+            Spacer(Modifier.height(FluentSpacingDefaults.xxs))
             Text(
               "有数据：" + withData.joinToString { ClientBranding.label(it) },
-              style = MaterialTheme.typography.bodySmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant
+              style = FluentTypeRamp.caption1,
+              color = colors.neutralForeground2
             )
           }
         }
       }
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf(
-          "today" to "今日",
-          "month" to "本月",
-          "allTime" to "全部"
-        ).forEach { (key, label) ->
-          FilterChip(
-            selected = periodKey == key,
-            onClick = { periodKey = key },
-            label = { Text(label) }
-          )
-        }
-      }
+
+      // Period selection drives every block below it, so it sits above them.
+      FluentTabStrip(
+        options = periodOptions,
+        selectedIndex = periodIndex,
+        onSelect = { periodIndex = it },
+        modifier = Modifier.fillMaxWidth()
+      )
+
       MetricHeroCard(title = periodLabel, period = selectedPeriod)
-      Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+
+      Row(horizontalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.s)) {
         CompactMetricCard(
           title = "本月",
           period = device.periods.month,
@@ -324,36 +326,40 @@ fun DeviceDetailScreen(
           modifier = Modifier.weight(1f)
         )
       }
+
       val clients = topShareEntries(
         selectedPeriod.clients,
         selectedPeriod.clientCosts,
+        selectedPeriod.clientEstimated,
+        selectedPeriod.clientCredits,
         limit = 6
       )
       if (clients.isNotEmpty()) {
         AppCard {
           SectionHeader(title = "${periodLabel}客户端", subtitle = "本设备 · 可展开模型")
-          Spacer(Modifier.height(12.dp))
           clients.forEach { entry ->
+            Spacer(Modifier.height(FluentSpacingDefaults.m))
             ShareBarList(listOf(entry))
             if (entry.key != "其他") {
               val nested = selectedPeriod.clientModels[entry.key].orEmpty()
               val nestedCosts = selectedPeriod.clientModelCosts[entry.key].orEmpty()
               val modelEntries = topShareEntries(nested, nestedCosts, limit = 6)
               if (modelEntries.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(FluentSpacingDefaults.s))
                 Text(
                   "${ClientBranding.label(entry.key)} 模型",
-                  style = MaterialTheme.typography.labelMedium,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                  style = FluentTypeRamp.caption2,
+                  fontWeight = FontWeight.SemiBold,
+                  color = colors.neutralForeground3
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(FluentSpacingDefaults.xs))
                 ShareBarList(modelEntries, brandClients = false)
               }
             }
-            Spacer(Modifier.height(10.dp))
           }
         }
       }
+
       val models = topShareEntries(
         selectedPeriod.models,
         selectedPeriod.modelCosts,
@@ -362,11 +368,104 @@ fun DeviceDetailScreen(
       if (models.isNotEmpty()) {
         AppCard {
           SectionHeader(title = "${periodLabel}模型", subtitle = "本设备汇总")
-          Spacer(Modifier.height(12.dp))
+          Spacer(Modifier.height(FluentSpacingDefaults.m))
           ShareBarList(models, brandClients = false)
         }
       }
-      LimitsSection(device.limits, title = "本设备限额")
+
+      // The device's own trend.  Without `deviceId` the history document is the whole
+      // fleet aggregated, so this page previously had no answer to "what did *this*
+      // machine do".
+      hubState?.let { snapshot ->
+        val own = snapshot.deviceHistories[device.deviceId]
+        if (own != null && own.daily.isNotEmpty()) {
+          AppCard {
+            SectionHeader(
+              title = "本机历史",
+              subtitle = "近 ${own.daily.size} 天，按本机上报聚合"
+            )
+            Spacer(Modifier.height(FluentSpacingDefaults.m))
+            DailyTrendChart(
+              days = own.daily.takeLast(30),
+              metric = TrendMetric.Tokens
+            )
+          }
+        }
+      }
+
+      DeviceAdminRow(
+        device = device,
+        canRename = canManage && hubState?.authorization?.capabilities?.deviceRename != false,
+        canDelete = canManage && hubState?.authorization?.capabilities?.deviceDelete != false,
+        onRename = { name -> device.deviceId?.let { onRenameDevice(it, name) } },
+        onDelete = { device.deviceId?.let { onDeleteDevice(it) } }
+      )
+
+      // No per-device limits block here, deliberately: the Hub deletes `limits` from
+      // every device record (`delete device.limits` in src/hub/server.js) because quota
+      // is Hub-owned account state, so a device section could only ever render empty.
+      // The fleet-wide `LimitsSection` on 服务状态 is the real surface.
+    }
+  }
+}
+
+/**
+ * Rename / delete, gated the same way the web gates them: the Hub advertises
+ * `deviceRename` / `deviceDelete`, and the write itself needs the admin scope.
+ *
+ * Deleting asks for confirmation *in place* — a second tap on the same control —
+ * rather than a system dialog, because the destructive target is right there on
+ * screen and a generic "are you sure" that does not name the device is noise.
+ */
+@Composable
+private fun DeviceAdminRow(
+  device: DeviceDto,
+  canRename: Boolean,
+  canDelete: Boolean,
+  onRename: (String) -> Unit,
+  onDelete: () -> Unit
+) {
+  if (!canRename && !canDelete) return
+  val colors = LocalFluentColors.current
+  var hostname by remember(device.deviceId) { mutableStateOf(device.hostname.orEmpty()) }
+  var confirmingDelete by remember(device.deviceId) { mutableStateOf(false) }
+  AppCard {
+    SectionHeader(
+      title = "设备管理",
+      subtitle = "重命名或从 Hub 移除这台设备；移除后它的历史与当前快照都会删除。"
+    )
+    Spacer(Modifier.height(FluentSpacingDefaults.m))
+    if (canRename) {
+      FluentTextField(
+        value = hostname,
+        onValueChange = { hostname = it },
+        label = "显示名称",
+        supportingText = "只影响展示，不影响设备 ID。"
+      )
+      Spacer(Modifier.height(FluentSpacingDefaults.m))
+      FluentButton(
+        label = "保存名称",
+        onClick = { onRename(hostname.trim()) },
+        enabled = hostname.isNotBlank()
+      )
+    }
+    if (canDelete) {
+      Spacer(Modifier.height(FluentSpacingDefaults.m))
+      FluentButton(
+        label = if (confirmingDelete) "确认删除这台设备" else "删除设备",
+        onClick = {
+          if (confirmingDelete) onDelete() else confirmingDelete = true
+        },
+        variant = if (confirmingDelete) FluentButtonVariant.Filled else FluentButtonVariant.Outline
+      )
+      if (confirmingDelete) {
+        Spacer(Modifier.height(FluentSpacingDefaults.xs))
+        Text(
+          "删除不可撤销：这台设备的历史记录会一并移除，需要它重新上报才会回来。",
+          style = FluentTypeRamp.caption2,
+          color = colors.errorForeground
+        )
+      }
     }
   }
 }

@@ -146,8 +146,8 @@ export function renderUsageMetricRows(rows, { kind, showIcon = false, emptyKey =
     const hasMetrics = row.metrics && row.metrics.totalTokens > 0;
     const detail = hasMetrics ? `<div class="usage-row-detail"><div class="usage-detail-label">${escapeHtml(tr('usage.breakdown'))}</div>${renderTokenMix(row.metrics)}</div>` : '';
     return detail
-      ? `<details class="usage-table-row"><summary>${usageRowSummary(row, { icon: showIcon, detail: true })}</summary>${detail}</details>`
-      : `<article class="usage-table-row">${usageRowSummary(row, { icon: showIcon })}</article>`;
+      ? `<details class="usage-table-row" data-row-key="${escapeHtml(row.key || row.name || '')}"><summary>${usageRowSummary(row, { icon: showIcon, detail: true })}</summary>${detail}</details>`
+      : `<article class="usage-table-row" data-row-key="${escapeHtml(row.key || row.name || '')}">${usageRowSummary(row, { icon: showIcon })}</article>`;
   }).join('')}</div>`;
 }
 

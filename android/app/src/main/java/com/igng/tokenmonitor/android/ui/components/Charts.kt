@@ -1,7 +1,10 @@
 package com.igng.tokenmonitor.android.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,56 +12,80 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.igng.tokenmonitor.android.ui.theme.ChartPalette
+import com.igng.tokenmonitor.android.ui.theme.FluentChartPalette
+import com.igng.tokenmonitor.android.ui.theme.FluentMotion
+import com.igng.tokenmonitor.android.ui.theme.FluentShapeDefaults
+import com.igng.tokenmonitor.android.ui.theme.FluentSpacingDefaults
+import com.igng.tokenmonitor.android.ui.theme.FluentTypeRamp
+import com.igng.tokenmonitor.android.ui.theme.LocalFluentColors
+
+// ─── Fluent 2 data visualisation ────────────────────────────────────────────
+//
+// Three deliberate departures from the previous Material-flavoured charts:
+//
+//   1. Marks are squared, not pill-rounded.  Fluent's bar grammar uses a small
+//      control radius (2dp) — a full pill makes thin bars look like capsules and
+//      destroys the linear reading of length.
+//   2. Bars are 4dp, not 8–12dp.  A thinner mark keeps the *label* as the
+//      dominant element and lets more rows fit without the chart shouting.
+//   3. Adjacent segments are separated by a real gap rather than abutting,
+//      so a donut's slice count is readable without consulting the legend.
 
 @Composable
 fun DonutChart(
   entries: List<ShareEntry>,
   modifier: Modifier = Modifier,
   chartSize: Dp = 148.dp,
-  strokeWidth: Dp = 22.dp,
+  strokeWidth: Dp = 18.dp,
   centerPrimary: String? = null,
   centerSecondary: String? = null,
   showLegend: Boolean = true,
   brandClients: Boolean = true
 ) {
+  val colors = LocalFluentColors.current
   val total = entries.sumOf { it.tokens }.coerceAtLeast(1L)
-  val colors = ChartPalette
-  val track = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+  val palette = FluentChartPalette
+  // Fluent's "empty track" is a stroke-coloured ring, not a tinted surface.
+  val track = colors.neutralStroke3
   val resetKey = entries.joinToString("|") { "${it.key}:${it.tokens}" }
-  val grow = animateGrowProgress(resetKey = resetKey, durationMillis = 1000)
+  val grow = animateGrowProgress(resetKey = resetKey, durationMillis = FluentMotion.slower)
 
-  fun sliceColor(index: Int, key: String): Color {
-    return if (brandClients) ClientBranding.color(key) else colors[index % colors.size]
-  }
+  fun sliceColor(index: Int, key: String): Color =
+    if (brandClients) ClientBranding.color(key) else palette[index % palette.size]
 
-  val rowModifier = if (showLegend) {
-    modifier.fillMaxWidth()
-  } else {
-    // Compact trailing usage (e.g. hero card): wrap chart only, avoid empty stretch.
-    modifier
-  }
+  val rowModifier = if (showLegend) modifier.fillMaxWidth() else modifier
 
   Row(
     modifier = rowModifier,
     verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = if (showLegend) Arrangement.spacedBy(16.dp) else Arrangement.Center
+    horizontalArrangement = if (showLegend) {
+      Arrangement.spacedBy(FluentSpacingDefaults.l)
+    } else {
+      Arrangement.Center
+    }
   ) {
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(chartSize)) {
       Canvas(Modifier.size(chartSize)) {
@@ -76,15 +103,18 @@ fun DonutChart(
           style = Stroke(width = stroke, cap = StrokeCap.Butt)
         )
         if (entries.isEmpty() || grow <= 0f) return@Canvas
+        // One gap per boundary, expressed in degrees and clamped so a slice can
+        // never be eaten entirely on a many-way split.
+        val gap = if (entries.size > 1) 2f else 0f
         var start = -90f
         entries.forEachIndexed { index, entry ->
           val fullSweep = (entry.tokens.toFloat() / total.toFloat()) * 360f
-          val sweep = fullSweep * grow
+          val sweep = (fullSweep - gap).coerceAtLeast(0.6f) * grow
           if (sweep > 0f) {
             drawArc(
               color = sliceColor(index, entry.key),
-              startAngle = start,
-              sweepAngle = sweep.coerceAtLeast(0.8f * grow.coerceAtLeast(0.01f)),
+              startAngle = start + gap / 2f,
+              sweepAngle = sweep,
               useCenter = false,
               topLeft = topLeft,
               size = arcSize,
@@ -98,16 +128,17 @@ fun DonutChart(
         if (centerPrimary != null) {
           Text(
             centerPrimary,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
+            style = FluentTypeRamp.title2,
+            color = colors.neutralForeground1,
             maxLines = 1
           )
         }
         if (centerSecondary != null) {
+          Spacer(Modifier.height(FluentSpacingDefaults.xxs))
           Text(
             centerSecondary,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = FluentTypeRamp.caption2,
+            color = colors.neutralForeground3,
             maxLines = 1
           )
         }
@@ -117,29 +148,36 @@ fun DonutChart(
     if (showLegend) {
       Column(
         modifier = Modifier.weight(1f),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.xs)
       ) {
         entries.forEachIndexed { index, entry ->
           Row(verticalAlignment = Alignment.CenterVertically) {
             if (brandClients) {
               ClientMonogram(entry.key, size = 18.dp)
             } else {
-              Canvas(Modifier.size(10.dp)) {
-                drawCircle(sliceColor(index, entry.key))
-              }
+              // Fluent legend keys are small rounded squares, matching the
+              // squared mark geometry rather than introducing a new shape.
+              Box(
+                Modifier
+                  .size(10.dp)
+                  .clip(FluentShapeDefaults.smallCorner)
+                  .background(sliceColor(index, entry.key))
+              )
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(FluentSpacingDefaults.s))
             Text(
               if (brandClients) ClientBranding.label(entry.key) else entry.key,
-              style = MaterialTheme.typography.bodySmall,
+              style = FluentTypeRamp.caption1,
+              color = colors.neutralForeground1,
               maxLines = 1,
               overflow = TextOverflow.Ellipsis,
               modifier = Modifier.weight(1f)
             )
             Text(
               formatPercent(entry.tokens, total),
-              style = MaterialTheme.typography.labelSmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant
+              style = FluentTypeRamp.caption1,
+              fontWeight = FontWeight.SemiBold,
+              color = colors.neutralForeground2
             )
           }
         }
@@ -157,21 +195,29 @@ fun ShareBarList(
   onEntryClick: ((ShareEntry) -> Unit)? = null
 ) {
   val total = entries.sumOf { it.tokens }.coerceAtLeast(1L)
-  val colors = ChartPalette
-  Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+  val palette = FluentChartPalette
+  Column(
+    modifier = modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.m)
+  ) {
     entries.forEachIndexed { index, entry ->
-      val color = if (brandClients) ClientBranding.color(entry.key) else colors[index % colors.size]
+      val color =
+        if (brandClients) ClientBranding.color(entry.key) else palette[index % palette.size]
       val clickable = onEntryClick != null && entry.key != "其他"
       ShareBarRow(
         name = if (brandClients) ClientBranding.label(entry.key) else entry.key,
         tokens = entry.tokens,
         costUsd = entry.costUsd,
+        estimated = entry.estimated,
+        credits = entry.credits,
         fraction = entry.tokens.toFloat() / total.toFloat(),
         color = color,
         showCost = showCost,
         leading = if (brandClients) {
           { ClientMonogram(entry.key, size = 22.dp) }
-        } else null,
+        } else {
+          null
+        },
         onClick = if (clickable) ({ onEntryClick?.invoke(entry) }) else null
       )
     }
@@ -185,85 +231,129 @@ fun ShareBarRow(
   costUsd: Double,
   fraction: Float,
   color: Color,
+  estimated: Boolean = false,
+  credits: Double? = null,
   showCost: Boolean = true,
   leading: (@Composable () -> Unit)? = null,
   onClick: (() -> Unit)? = null
 ) {
-  val rowModifier = if (onClick != null) {
-    Modifier
-      .fillMaxWidth()
-      .clickable(onClick = onClick)
-  } else {
-    Modifier.fillMaxWidth()
-  }
-  Column(modifier = rowModifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-    Row(
-      Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
+  val colors = LocalFluentColors.current
+  val cost = rememberCostFormatter()
+  val interaction = remember { MutableInteractionSource() }
+  val pressed by interaction.collectIsPressedAsState()
+
+  val body: @Composable () -> Unit = {
+    Column(
+      Modifier
+        .fillMaxWidth()
+        .background(if (onClick != null && pressed) colors.subtleBackgroundPressed else Color.Transparent)
+        .padding(vertical = FluentSpacingDefaults.xs),
+      verticalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.xs)
     ) {
       Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.weight(1f)
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
       ) {
-        if (leading != null) {
-          leading()
-          Spacer(Modifier.width(8.dp))
-        } else {
-          Canvas(Modifier.size(8.dp)) { drawCircle(color) }
-          Spacer(Modifier.width(8.dp))
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.weight(1f)
+        ) {
+          if (leading != null) {
+            leading()
+            Spacer(Modifier.width(FluentSpacingDefaults.s))
+          } else {
+            Box(
+              Modifier
+                .size(8.dp)
+                .clip(FluentShapeDefaults.smallCorner)
+                .background(color)
+            )
+            Spacer(Modifier.width(FluentSpacingDefaults.s))
+          }
+          Text(
+            name,
+            style = FluentTypeRamp.body2,
+            color = colors.neutralForeground1,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
+          )
         }
+        Spacer(Modifier.width(FluentSpacingDefaults.s))
+        // A credits-only row (Qoder) has no token figure to show, and printing `0`
+        // there states a falsehood.  The unit is named in the text itself, never by
+        // a symbol borrowed from currency.
         Text(
-          name,
-          style = MaterialTheme.typography.bodyMedium,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-          modifier = Modifier.weight(1f, fill = false)
+          if (credits != null && credits > 0.0 && tokens == 0L) {
+            formatCredits(credits)
+          } else {
+            estimatedValue(formatTokensShort(tokens), estimated)
+          },
+          style = FluentTypeRamp.body2,
+          fontWeight = FontWeight.SemiBold,
+          color = colors.neutralForeground1
         )
+        if (showCost && !(credits != null && credits > 0.0 && tokens == 0L)) {
+          Spacer(Modifier.width(FluentSpacingDefaults.s))
+          Text(
+            estimatedValue(cost.format(costUsd, compact = true), estimated),
+            style = FluentTypeRamp.caption1,
+            color = colors.neutralForeground3
+          )
+        }
       }
-      Spacer(Modifier.width(8.dp))
-      Text(
-        formatTokensShort(tokens),
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.onSurface
-      )
-      if (showCost) {
-        Spacer(Modifier.width(8.dp))
-        Text(
-          formatUsd(costUsd, compact = true),
-          style = MaterialTheme.typography.labelMedium,
-          color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-      }
+      ShareProgressBar(fraction = fraction, color = color)
     }
-    ShareProgressBar(fraction = fraction, color = color)
   }
+
+  Box(
+    if (onClick != null) {
+      Modifier
+        .fillMaxWidth()
+        .heightIn(min = FluentTouchMin)
+        .clip(FluentShapeDefaults.controlCorner)
+        .clickable(
+          interactionSource = interaction,
+          indication = null,
+          role = Role.Button,
+          onClick = onClick
+        )
+    } else {
+      Modifier.fillMaxWidth()
+    }
+  ) { body() }
 }
 
+/**
+ * Fluent progress bar: 4dp thick with a 2dp end radius.  The previous 8dp pill
+ * read as a capsule at list-row widths and overstated small fractions.
+ */
 @Composable
 fun ShareProgressBar(
   fraction: Float,
   color: Color,
   modifier: Modifier = Modifier,
-  height: Dp = 8.dp
+  height: Dp = 4.dp
 ) {
-  val track = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-  val animated = animateGrowFraction(fraction, durationMillis = 900)
+  val colors = LocalFluentColors.current
+  val track = colors.neutralForeground3.copy(alpha = 0.18f)
+  val animated = animateGrowFraction(fraction, durationMillis = FluentMotion.slow)
   Canvas(
     modifier
       .fillMaxWidth()
       .height(height)
   ) {
     val h = size.height
-    drawRoundRect(
-      color = track,
-      cornerRadius = androidx.compose.ui.geometry.CornerRadius(h / 2f, h / 2f)
-    )
+    val r = CornerRadius(2.dp.toPx(), 2.dp.toPx())
+    drawRoundRect(color = track, cornerRadius = r)
     if (animated > 0f) {
+      // Fluent never renders a zero-length mark as nothing: clamp to the full
+      // cap so a 0.3% share stays visible and countable.
       drawRoundRect(
         color = color,
         size = Size((size.width * animated).coerceAtLeast(h), h),
-        cornerRadius = androidx.compose.ui.geometry.CornerRadius(h / 2f, h / 2f)
+        cornerRadius = r
       )
     }
   }
@@ -273,31 +363,36 @@ fun ShareProgressBar(
 fun SegmentedTokenBar(
   segments: List<Pair<String, Long>>,
   modifier: Modifier = Modifier,
-  height: Dp = 12.dp
+  height: Dp = 10.dp
 ) {
+  val colors = LocalFluentColors.current
   val total = segments.sumOf { it.second }.coerceAtLeast(1L)
-  val colors = ChartPalette
+  val palette = FluentChartPalette
   val resetKey = segments.joinToString("|") { "${it.first}:${it.second}" }
-  val grow = animateGrowProgress(resetKey = resetKey, durationMillis = 900)
-  Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+  val grow = animateGrowProgress(resetKey = resetKey, durationMillis = FluentMotion.slower)
+  Column(
+    modifier = modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.s)
+  ) {
     Canvas(Modifier.fillMaxWidth().height(height)) {
-      val r = size.height / 2f
+      val r = CornerRadius(2.dp.toPx(), 2.dp.toPx())
+      val gap = if (segments.count { it.second > 0L } > 1) 2f else 0f
       var x = 0f
       segments.forEachIndexed { index, (_, value) ->
         val fraction = value.toFloat() / total.toFloat()
-        val w: Float = size.width * fraction * grow
+        val w: Float = (size.width * fraction * grow) - gap
         if (w > 0f) {
           drawRoundRect(
-            color = colors[index % colors.size],
+            color = palette[index % palette.size],
             topLeft = Offset(x, 0f),
             size = Size(w, size.height),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r)
+            cornerRadius = r
           )
-          x += w
         }
+        x += size.width * fraction * grow
       }
     }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(FluentSpacingDefaults.xs)) {
       segments.forEachIndexed { index, (name, value) ->
         if (value <= 0L) return@forEachIndexed
         Row(
@@ -306,11 +401,25 @@ fun SegmentedTokenBar(
           verticalAlignment = Alignment.CenterVertically
         ) {
           Row(verticalAlignment = Alignment.CenterVertically) {
-            Canvas(Modifier.size(8.dp)) { drawCircle(colors[index % colors.size]) }
-            Spacer(Modifier.width(8.dp))
-            Text(name, style = MaterialTheme.typography.bodySmall)
+            Box(
+              Modifier
+                .size(8.dp)
+                .clip(FluentShapeDefaults.smallCorner)
+                .background(palette[index % palette.size])
+            )
+            Spacer(Modifier.width(FluentSpacingDefaults.s))
+            Text(
+              name,
+              style = FluentTypeRamp.caption1,
+              color = colors.neutralForeground2
+            )
           }
-          Text(formatTokensShort(value), style = MaterialTheme.typography.bodySmall)
+          Text(
+            formatTokensShort(value),
+            style = FluentTypeRamp.caption1,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.neutralForeground1
+          )
         }
       }
     }

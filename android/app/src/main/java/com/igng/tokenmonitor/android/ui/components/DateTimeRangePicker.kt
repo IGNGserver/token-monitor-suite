@@ -1,11 +1,20 @@
 package com.igng.tokenmonitor.android.ui.components
 
+import com.igng.tokenmonitor.android.ui.components.FluentIcons
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -18,17 +27,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -43,7 +43,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -51,8 +53,15 @@ import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.igng.tokenmonitor.android.ui.haptics.HapticEvent
 import com.igng.tokenmonitor.android.ui.haptics.rememberAppHaptics
+import com.igng.tokenmonitor.android.ui.theme.FluentElevationDefaults
+import com.igng.tokenmonitor.android.ui.theme.FluentMotion
+import com.igng.tokenmonitor.android.ui.theme.FluentShapeDefaults
+import com.igng.tokenmonitor.android.ui.theme.FluentSpacingDefaults
+import com.igng.tokenmonitor.android.ui.theme.FluentTypeRamp
+import com.igng.tokenmonitor.android.ui.theme.LocalFluentColors
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -65,6 +74,28 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+
+// ─── Fluent 2 date & time range dialog ──────────────────────────────────────
+//
+// Fluent's picker is a *flyout*, not a Material tonal surface: `surfaceFlyout`
+// at `largeCorner` (12dp) under `level16` elevation, with the commit commands in
+// a bar pinned to the bottom edge and separated from the content by a hairline.
+// Selection grammar matches the tab strip — squared (`controlCorner`) cells,
+// brand fill for the endpoint, a light brand tint for the span, and a neutral
+// stroke ring for "today" so today never competes with the selection.
+
+/** Fluent day cells are 40dp minimum; the row keeps a hair of breathing room. */
+private val FluentDayCellSize = 40.dp
+private val FluentDayRowHeight = 44.dp
+private val FluentCellFontSize = 14.sp
+
+/** Fluent command-bar text buttons: quiet padding, `controlCorner` hit shape. */
+private val FluentCommandPadding = PaddingValues(
+  start = FluentSpacingDefaults.m,
+  end = FluentSpacingDefaults.m,
+  top = FluentSpacingDefaults.xs,
+  bottom = FluentSpacingDefaults.xs
+)
 
 @Composable
 fun DateTimeRangePickerDialog(
@@ -79,6 +110,7 @@ fun DateTimeRangePickerDialog(
   val startSeed = initialStartDate ?: now.toLocalDate()
   val endSeed = initialEndDate ?: now.toLocalDate()
   val haptics = rememberAppHaptics()
+  val colors = LocalFluentColors.current
 
   var startDate by remember { mutableStateOf(startSeed) }
   var endDate by remember { mutableStateOf(endSeed) }
@@ -94,49 +126,69 @@ fun DateTimeRangePickerDialog(
     "${fmt.format(startDate)} ${"%02d".format(startHour)}:00 → ${fmt.format(endDate)} ${"%02d".format(endHour)}:00"
   }
 
-  AlertDialog(
-    onDismissRequest = onDismiss,
-    confirmButton = {
-      TextButton(
-        onClick = {
-          val startOk = startDate.atTime(startHour, 0)
-          val endOk = endDate.atTime(endHour, 0)
-          if (endOk.isBefore(startOk)) {
-            errorText = "结束时间必须晚于开始时间"
-            haptics.perform(HapticEvent.Error)
-            return@TextButton
-          }
-          haptics.perform(HapticEvent.Confirm)
-          onConfirm(startDate, endDate, startHour, endHour)
+  // A modal enters with scale + fade on the deceleration curve (Fluent's rule:
+  // arriving content settles, leaving content is simply gone).  The transform is
+  // on a graphics layer rather than an `AnimatedVisibility`, so the dialog window
+  // is measured at its final size on the very first frame.
+  var revealed by remember { mutableStateOf(false) }
+  LaunchedEffect(Unit) { revealed = true }
+  // No manual `fluentMotionEnabled()` gate here: `animate*AsState` already honours the
+  // platform animator-duration scale, which is exactly why the helpers that *do* need
+  // a manual gate are the ones that bypass it — an `infiniteRepeatable` shimmer and an
+  // `Animatable.animateTo` inside `LaunchedEffect`.
+  val appearance by animateFloatAsState(
+    targetValue = if (revealed) 1f else 0f,
+    animationSpec = tween(FluentMotion.gentle, easing = FluentMotion.decelerate),
+    label = "pickerAppearance"
+  )
+
+  Dialog(onDismissRequest = onDismiss) {
+    Column(
+      Modifier
+        .graphicsLayer {
+          alpha = appearance
+          scaleX = 0.94f + 0.06f * appearance
+          scaleY = 0.94f + 0.06f * appearance
         }
-      ) { Text("确定") }
-    },
-    dismissButton = {
-      TextButton(onClick = {
-        haptics.perform(HapticEvent.Tap)
-        onDismiss()
-      }) { Text("取消") }
-    },
-    title = { Text("自定义时间范围") },
-    text = {
+        .fillMaxWidth()
+        .shadow(
+          elevation = FluentElevationDefaults.level16,
+          shape = FluentShapeDefaults.largeCorner,
+          clip = false
+        )
+        .clip(FluentShapeDefaults.largeCorner)
+        .background(colors.surfaceFlyout)
+        .border(0.5.dp, colors.neutralStroke3, FluentShapeDefaults.largeCorner)
+    ) {
       Column(
         Modifier
           .fillMaxWidth()
           .verticalScroll(rememberScrollState())
+          .padding(
+            start = FluentSpacingDefaults.l,
+            end = FluentSpacingDefaults.l,
+            top = FluentSpacingDefaults.l,
+            bottom = FluentSpacingDefaults.m
+          )
       ) {
         Text(
-          "点选起止日期（可同一天），滚轮设置小时；结束小时含在内。",
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.onSurfaceVariant
+          "自定义时间范围",
+          style = FluentTypeRamp.title2,
+          color = colors.neutralForeground1
         )
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(FluentSpacingDefaults.s))
+        Text(
+          "点选起止日期（可同一天），滚轮设置小时；结束小时含在内。",
+          style = FluentTypeRamp.caption1,
+          color = colors.neutralForeground2
+        )
+        Spacer(Modifier.height(FluentSpacingDefaults.xs))
         Text(
           rangeLabel,
-          style = MaterialTheme.typography.titleSmall,
-          fontWeight = FontWeight.SemiBold,
-          color = MaterialTheme.colorScheme.primary
+          style = FluentTypeRamp.title3,
+          color = colors.brandForeground1
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(FluentSpacingDefaults.l))
         RangeCalendar(
           month = visibleMonth,
           startDate = startDate,
@@ -160,26 +212,33 @@ fun DateTimeRangePickerDialog(
             }
           }
         )
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(FluentSpacingDefaults.l))
         Text(
           "小时",
-          style = MaterialTheme.typography.labelLarge,
-          color = MaterialTheme.colorScheme.onSurface
+          style = FluentTypeRamp.caption1,
+          fontWeight = FontWeight.SemiBold,
+          letterSpacing = 0.5.sp,
+          color = colors.neutralForeground3
         )
-        Spacer(Modifier.height(8.dp))
-        Surface(
-          shape = RoundedCornerShape(16.dp),
-          color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f),
-          modifier = Modifier.fillMaxWidth()
+        Spacer(Modifier.height(FluentSpacingDefaults.s))
+        // The hour rail sits in a nested container: Fluent steps a level down in
+        // the background ladder (bg3) instead of tinting with brand colour.
+        Box(
+          Modifier
+            .fillMaxWidth()
+            .clip(FluentShapeDefaults.cardCorner)
+            .background(colors.neutralLayerInner)
+            .border(0.5.dp, colors.neutralStroke3, FluentShapeDefaults.cardCorner)
+            .padding(vertical = FluentSpacingDefaults.s)
         ) {
           Row(
             Modifier
               .fillMaxWidth()
-              .padding(vertical = 8.dp),
+              .padding(horizontal = FluentSpacingDefaults.s),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            ComposeHourWheel(
+            HourRail(
               label = "开始",
               value = startHour,
               onValueChange = {
@@ -189,11 +248,11 @@ fun DateTimeRangePickerDialog(
             )
             Box(
               Modifier
-                .height(1.dp)
-                .width(24.dp)
-                .background(MaterialTheme.colorScheme.outlineVariant)
+                .width(0.5.dp)
+                .height(72.dp)
+                .background(colors.neutralStroke3)
             )
-            ComposeHourWheel(
+            HourRail(
               label = "结束",
               value = endHour,
               onValueChange = {
@@ -204,16 +263,61 @@ fun DateTimeRangePickerDialog(
           }
         }
         if (errorText.isNotBlank()) {
-          Spacer(Modifier.height(10.dp))
+          Spacer(Modifier.height(FluentSpacingDefaults.s))
           Text(
             errorText,
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodySmall
+            style = FluentTypeRamp.caption1,
+            color = colors.errorForeground
           )
         }
       }
+
+      // Hairline + command bar: Fluent docks the commands on the surface edge,
+      // right-aligned, primary ahead of secondary.
+      Box(
+        Modifier
+          .fillMaxWidth()
+          .height(0.5.dp)
+          .background(colors.neutralStroke3)
+      )
+      Row(
+        Modifier
+          .fillMaxWidth()
+          .padding(
+            start = FluentSpacingDefaults.s,
+            end = FluentSpacingDefaults.s,
+            top = FluentSpacingDefaults.xxs,
+            bottom = FluentSpacingDefaults.xs
+          ),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        FluentButton(
+          label = "确定",
+          onClick = {
+            val startOk = startDate.atTime(startHour, 0)
+            val endOk = endDate.atTime(endHour, 0)
+            if (endOk.isBefore(startOk)) {
+              errorText = "结束时间必须晚于开始时间"
+              haptics.perform(HapticEvent.Error)
+              return@FluentButton
+            }
+            haptics.perform(HapticEvent.Confirm)
+            onConfirm(startDate, endDate, startHour, endHour)
+          }
+        )
+        Spacer(Modifier.width(FluentSpacingDefaults.xxs))
+        FluentButton(
+          label = "取消",
+          onClick = {
+            haptics.perform(HapticEvent.Tap)
+            onDismiss()
+          },
+          variant = FluentButtonVariant.Subtle
+        )
+      }
     }
-  )
+  }
 }
 
 @Composable
@@ -224,20 +328,27 @@ private fun RangeCalendar(
   onMonthChange: (YearMonth) -> Unit,
   onDayClick: (LocalDate) -> Unit
 ) {
-  val locale = Locale.CHINA
-  val weekdays = remember(locale) {
-    listOf(
-      DayOfWeek.MONDAY,
-      DayOfWeek.TUESDAY,
-      DayOfWeek.WEDNESDAY,
-      DayOfWeek.THURSDAY,
-      DayOfWeek.FRIDAY,
-      DayOfWeek.SATURDAY,
-      DayOfWeek.SUNDAY
-    ).map { it.getDisplayName(DateTextStyle.NARROW, locale) }
+  val colors = LocalFluentColors.current
+  // Two different locales, on purpose.
+  //
+  // The *letters* stay Chinese because the interface is Chinese: an English device
+  // showing "S M T W T F S" above an otherwise-Chinese calendar would be a worse
+  // result than the current one.  The *week start* is the opposite case — it is a
+  // CLDR fact about the user's calendar, and the previous code hardcoded Monday,
+  // which put Sunday-start users a day off on every row.
+  //
+  // Same source of truth as the 本周 preset (`DateRanges.firstDayOfWeek`), so the
+  // calendar grid and the week window cannot disagree.
+  val labelLocale = Locale.CHINA
+  val weekFirstDay = com.igng.tokenmonitor.android.ui.core.DateRanges.firstDayOfWeek()
+  val weekdayOrder = remember(weekFirstDay) {
+    (0..6).map { offset ->
+      DayOfWeek.of(((weekFirstDay.value - 1 + offset) % 7) + 1)
+    }
   }
+  val weekdays = weekdayOrder.map { it.getDisplayName(DateTextStyle.NARROW, labelLocale) }
   val firstOfMonth = month.atDay(1)
-  val lead = (firstOfMonth.dayOfWeek.value + 6) % 7 // Monday = 0
+  val lead = (firstOfMonth.dayOfWeek.value - weekFirstDay.value + 7) % 7
   val daysInMonth = month.lengthOfMonth()
   val cells = remember(month) {
     buildList {
@@ -247,14 +358,14 @@ private fun RangeCalendar(
     }
   }
   val monthTitle = remember(month) {
-    DateTimeFormatter.ofPattern("yyyy年M月", locale).format(month.atDay(1))
+    DateTimeFormatter.ofPattern("yyyy年M月", labelLocale).format(month.atDay(1))
   }
   val rangeStart = if (startDate.isAfter(endDate)) endDate else startDate
   val rangeEnd = if (startDate.isAfter(endDate)) startDate else endDate
   val dayTextStyle = remember {
     TextStyle(
-      fontSize = 14.sp,
-      fontWeight = FontWeight.Medium,
+      fontSize = FluentCellFontSize,
+      fontWeight = FontWeight.Normal,
       textAlign = TextAlign.Center,
       platformStyle = PlatformTextStyle(includeFontPadding = false),
       lineHeightStyle = LineHeightStyle(
@@ -270,44 +381,68 @@ private fun RangeCalendar(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      IconButton(onClick = { onMonthChange(month.minusMonths(1)) }) {
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "上一月")
-      }
+      FluentIconButton(
+        icon = FluentIcons.ChevronLeft,
+        contentDescription = "上一月",
+        onClick = { onMonthChange(month.minusMonths(1)) },
+        tint = colors.neutralForeground2
+      )
       Text(
         monthTitle,
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.SemiBold
+        style = FluentTypeRamp.title3,
+        color = colors.neutralForeground1
       )
-      IconButton(onClick = { onMonthChange(month.plusMonths(1)) }) {
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "下一月")
-      }
+      FluentIconButton(
+        icon = FluentIcons.ChevronRight,
+        contentDescription = "下一月",
+        onClick = { onMonthChange(month.plusMonths(1)) },
+        tint = colors.neutralForeground2
+      )
     }
-    Spacer(Modifier.height(4.dp))
+    Spacer(Modifier.height(FluentSpacingDefaults.xs))
     Row(Modifier.fillMaxWidth()) {
       weekdays.forEach { label ->
         Text(
           label,
           modifier = Modifier.weight(1f),
           textAlign = TextAlign.Center,
-          style = MaterialTheme.typography.labelMedium,
-          color = MaterialTheme.colorScheme.onSurfaceVariant
+          style = FluentTypeRamp.caption2,
+          color = colors.neutralForeground3
         )
       }
     }
-    Spacer(Modifier.height(4.dp))
+    Spacer(Modifier.height(FluentSpacingDefaults.xxs))
     cells.chunked(7).forEach { week ->
       Row(
         Modifier
           .fillMaxWidth()
-          .height(44.dp),
+          .height(FluentDayRowHeight),
         verticalAlignment = Alignment.CenterVertically
       ) {
         week.forEach { date ->
+          // Two fixes at once.  The cell used a bare `clickable`, i.e. Material's
+          // default ripple, which stacked a *second* state layer on top of the
+          // Fluent press/selected fills below; and it announced nothing, so a
+          // screen reader heard an unnamed box for every day of the month.
+          val cellInteraction = remember(date) { MutableInteractionSource() }
           Box(
             modifier = Modifier
               .weight(1f)
               .fillMaxHeight()
-              .then(if (date != null) Modifier.clickable { onDayClick(date) } else Modifier),
+              .then(
+                if (date != null) {
+                  Modifier
+                    .fluentClickable(
+                      interaction = cellInteraction,
+                      onClick = { onDayClick(date) }
+                    )
+                    .semantics {
+                      contentDescription = cellDescription(date)
+                    }
+                } else {
+                  Modifier
+                }
+              ),
             contentAlignment = Alignment.Center
           ) {
             if (date != null) {
@@ -317,14 +452,15 @@ private fun RangeCalendar(
               val isEndpoint = isStart || isEnd
               val today = date == LocalDate.now()
               val multiDay = rangeStart != rangeEnd
-              val stripColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+              val stripColor = colors.brandBackground.copy(alpha = 0.12f)
 
-              // Range connector through geometric center keeps circles aligned with highlight.
+              // Range band through the geometric centre, kept square so it reads
+              // as a span of days rather than as one rounded pill.
               if (inRange && multiDay) {
                 Row(
                   Modifier
                     .fillMaxWidth()
-                    .height(34.dp)
+                    .height(FluentDayCellSize)
                     .align(Alignment.Center)
                 ) {
                   Box(
@@ -342,16 +478,34 @@ private fun RangeCalendar(
                 }
               }
 
+              val cellBackground by animateColorAsState(
+                targetValue = if (isEndpoint) colors.brandBackground else Color.Transparent,
+                animationSpec = tween(FluentMotion.normal, easing = FluentMotion.standard),
+                label = "dayCellBackground"
+              )
+              val cellForeground by animateColorAsState(
+                targetValue = when {
+                  isEndpoint -> colors.foregroundOnAccent
+                  today -> colors.brandForeground1
+                  else -> colors.neutralForeground1
+                },
+                animationSpec = tween(FluentMotion.normal, easing = FluentMotion.standard),
+                label = "dayCellForeground"
+              )
+
               Box(
                 modifier = Modifier
                   .align(Alignment.Center)
-                  .size(34.dp)
-                  .clip(CircleShape)
-                  .background(
-                    when {
-                      isEndpoint -> MaterialTheme.colorScheme.primary
-                      today -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                      else -> Color.Transparent
+                  .size(FluentDayCellSize)
+                  .clip(FluentShapeDefaults.controlCorner)
+                  .background(cellBackground)
+                  .then(
+                    // "Today" is a ring, never a fill: it must not out-shout the
+                    // selected endpoint it may coincide with.
+                    if (today && !isEndpoint) {
+                      Modifier.border(1.5.dp, colors.neutralStroke1, FluentShapeDefaults.controlCorner)
+                    } else {
+                      Modifier
                     }
                   ),
                 contentAlignment = Alignment.Center
@@ -359,12 +513,8 @@ private fun RangeCalendar(
                 Text(
                   text = date.dayOfMonth.toString(),
                   style = dayTextStyle.copy(
-                    fontWeight = if (isEndpoint || today) FontWeight.SemiBold else FontWeight.Medium,
-                    color = when {
-                      isEndpoint -> MaterialTheme.colorScheme.onPrimary
-                      today -> MaterialTheme.colorScheme.primary
-                      else -> MaterialTheme.colorScheme.onSurface
-                    }
+                    fontWeight = if (isEndpoint || today) FontWeight.SemiBold else FontWeight.Normal,
+                    color = cellForeground
                   )
                 )
               }
@@ -376,12 +526,18 @@ private fun RangeCalendar(
   }
 }
 
+/**
+ * Scrollable hour rail on the tab selection grammar: the centred hour takes
+ * `brandForeground1` + semibold weight on a light brand band, the rest stay
+ * tertiary.  The snap/scroll plumbing is unchanged from the Material version.
+ */
 @Composable
-private fun ComposeHourWheel(
+private fun HourRail(
   label: String,
   value: Int,
   onValueChange: (Int) -> Unit
 ) {
+  val colors = LocalFluentColors.current
   val itemHeight = 40.dp
   val visibleCount = 3
   // Index layout: [top spacer][h0..h23][bottom spacer]
@@ -431,10 +587,10 @@ private fun ComposeHourWheel(
   Column(horizontalAlignment = Alignment.CenterHorizontally) {
     Text(
       label,
-      style = MaterialTheme.typography.labelMedium,
-      color = MaterialTheme.colorScheme.onSurfaceVariant
+      style = FluentTypeRamp.caption1,
+      color = colors.neutralForeground3
     )
-    Spacer(Modifier.height(6.dp))
+    Spacer(Modifier.height(FluentSpacingDefaults.xs))
     Box(
       modifier = Modifier
         .height(itemHeight * visibleCount)
@@ -445,8 +601,8 @@ private fun ComposeHourWheel(
         Modifier
           .fillMaxWidth()
           .height(itemHeight)
-          .clip(RoundedCornerShape(12.dp))
-          .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f))
+          .clip(FluentShapeDefaults.controlCorner)
+          .background(colors.brandBackground.copy(alpha = 0.12f))
           .align(Alignment.Center)
       )
       LazyColumn(
@@ -476,12 +632,12 @@ private fun ComposeHourWheel(
               Text(
                 text = "%02d:00".format(hour),
                 textAlign = TextAlign.Center,
-                fontSize = if (selected) 18.sp else 15.sp,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                fontSize = FluentCellFontSize,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 color = if (selected) {
-                  MaterialTheme.colorScheme.primary
+                  colors.brandForeground1
                 } else {
-                  MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                  colors.neutralForeground3
                 },
                 style = TextStyle(
                   platformStyle = PlatformTextStyle(includeFontPadding = false)
@@ -498,3 +654,14 @@ private fun ComposeHourWheel(
   }
 }
 
+/**
+ * A date cell's accessible name.  Weekday and day-of-month are what a sighted user
+ * reads off a grid, and they are exactly what a bare number does not convey — the
+ * same cell also carries "start"/"end" as a fill colour, which is colour-only.
+ */
+internal fun cellDescription(date: LocalDate): String =
+  date.format(DateTimeFormatter.ofPattern("yyyy 年 M 月 d 日 EEEE", Locale.CHINA)) +
+    when (date.dayOfWeek) {
+      DayOfWeek.SATURDAY, DayOfWeek.SUNDAY -> "，周末"
+      else -> ""
+    }

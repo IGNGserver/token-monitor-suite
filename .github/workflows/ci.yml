@@ -32,6 +32,38 @@ jobs:
           cache: npm
       - run: npm ci
       # Keep CI on the same gate developers use locally: this includes the
-      # product-scope, shared-UI boundary and renderer CSS guards in addition
-      # to lint and the Node test suite.
+      # product-scope, shared-UI boundary, renderer CSS and Android Fluent guards
+      # in addition to lint and the Node test suite.
       - run: npm run verify
+
+  # The Android client is a separate toolchain, so it gets its own job rather than
+  # a step that can only be reached after npm ci on three OSes. This exists because
+  # the whole Fluent 2 client migration (~6.6k changed lines) shipped with no PR
+  # gate at all: `runUnitTests` only ran on a release tag, so nothing ever compiled
+  # the UI layer on a pull request.
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Compile the client
+        run: |
+          chmod +x android/gradlew
+          ./android/gradlew --no-daemon -p android :app:compileDebugKotlin :app:compileDebugUnitTestKotlin
+      - name: Run Android JVM tests
+        # `testDebugUnitTest`, not the JUnitCore `runUnitTests` task: the latter exists as a
+        # Windows argfile workaround and hard-codes AGP intermediate paths.
+        run: ./android/gradlew --no-daemon -p android :app:testDebugUnitTest
+      # The Fluent colour and component contracts are Node scripts, but they read
+      # the Kotlin source, so they belong next to the client they guard as well as
+      # inside `npm run verify`.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run verify:android

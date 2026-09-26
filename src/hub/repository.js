@@ -224,6 +224,11 @@ function createRepository(pool) {
     ]);
     await executor.execute(`INSERT INTO device_ingest_state (device_id, snapshot_json)
       VALUES (?, ?) ON DUPLICATE KEY UPDATE snapshot_json = VALUES(snapshot_json)`, [record.deviceId, JSON.stringify(storedRecord)]);
+    // The ingest baseline mirrors the display snapshot on the regular path; the
+    // `transferred` flag survives the refresh because it is only written by
+    // transferDeviceData and cleared by an explicit re-anchor there.
+    await executor.execute(`INSERT INTO device_ingest_baseline (device_id, snapshot_json, transferred)
+      VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE snapshot_json = VALUES(snapshot_json)`, [record.deviceId, JSON.stringify(storedRecord)]);
   }
 
   async function countDevices(executor = pool) {
@@ -538,6 +543,64 @@ function createRepository(pool) {
     }
   }
 
+  async function getIngestBaseline(deviceId, executor = pool) {
+    // Missing row = pre-baseline database (or a device that predates 007), where
+    // the display snapshot WAS the baseline; falling back keeps both identical.
+    const [rows] = await executor.execute(
+      'SELECT snapshot_json, transferred FROM device_ingest_baseline WHERE device_id = ?',
+      [deviceId]
+    );
+    if (rows.length === 0) return { snapshot: (await getDeviceRecord(deviceId, executor)) || null, transferred: false };
+    return { snapshot: parseJson(rows[0].snapshot_json, null), transferred: Number(rows[0].transferred) === 1 };
+  }
+
+  async function saveIngestBaseline(deviceId, snapshot, { transferred = undefined } = {}, executor = pool) {
+    // `transferred` is a tri-state: undefined leaves the stored flag untouched
+    // (the regular ingest path), while true/false write it explicitly.
+    if (transferred === undefined) {
+      await executor.execute(`INSERT INTO device_ingest_baseline (device_id, snapshot_json, transferred)
+        VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE snapshot_json = VALUES(snapshot_json)`, [
+        deviceId,
+        JSON.stringify(snapshot)
+      ]);
+      return;
+    }
+    await executor.execute(`INSERT INTO device_ingest_baseline (device_id, snapshot_json, transferred)
+      VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE snapshot_json = VALUES(snapshot_json), transferred = VALUES(transferred)`, [
+      deviceId,
+      JSON.stringify(snapshot),
+      transferred ? 1 : 0
+    ]);
+  }
+
+  async function moveDeviceUsageEvents(previousDeviceId, nextDeviceId, executor = pool) {
+    await executor.execute('UPDATE usage_events SET device_id = ? WHERE device_id = ?', [nextDeviceId, previousDeviceId]);
+  }
+
+  async function mergeDeviceSessions(fromDeviceId, toDeviceId, executor = pool) {
+    // Sessions present on both sides must sum, not overwrite: the primary key is
+    // (device_id, client, session_id), so a plain UPDATE would collide and abort
+    // the transfer. Move the rows that have no counterpart, then fold the rest
+    // into the target's counters.
+    await executor.execute(`UPDATE sessions s_from
+      JOIN sessions s_to ON s_to.device_id = ? AND s_to.client = s_from.client AND s_to.session_id = s_from.session_id
+      SET s_to.total_tokens = s_to.total_tokens + s_from.total_tokens,
+          s_to.input_tokens = s_to.input_tokens + s_from.input_tokens,
+          s_to.output_tokens = s_to.output_tokens + s_from.output_tokens,
+          s_to.cache_read_tokens = s_to.cache_read_tokens + s_from.cache_read_tokens,
+          s_to.cache_write_tokens = s_to.cache_write_tokens + s_from.cache_write_tokens,
+          s_to.reasoning_tokens = s_to.reasoning_tokens + s_from.reasoning_tokens,
+          s_to.message_count = s_to.message_count + s_from.message_count,
+          s_to.cost_usd = s_to.cost_usd + s_from.cost_usd,
+          s_to.started_at = LEAST(COALESCE(s_to.started_at, s_from.started_at), COALESCE(s_from.started_at, s_to.started_at)),
+          s_to.last_used_at = GREATEST(COALESCE(s_to.last_used_at, s_from.last_used_at), COALESCE(s_from.last_used_at, s_to.last_used_at))
+      WHERE s_from.device_id = ?`, [toDeviceId, fromDeviceId]);
+    await executor.execute(`UPDATE sessions s_from
+      LEFT JOIN sessions s_to ON s_to.device_id = ? AND s_to.client = s_from.client AND s_to.session_id = s_from.session_id
+      SET s_from.device_id = ?
+      WHERE s_from.device_id = ? AND s_to.device_id IS NULL`, [toDeviceId, toDeviceId, fromDeviceId]);
+  }
+
   async function deleteDevice(deviceId, executor = pool) {
     await executor.execute('DELETE FROM sessions WHERE device_id = ?', [deviceId]);
     // DELETE is a display operation, not a counter reset. Keep both the ingest
@@ -569,6 +632,7 @@ function createRepository(pool) {
     await executor.execute('UPDATE usage_events SET device_id = ? WHERE device_id = ?', [nextId, previousId]);
     await executor.execute('UPDATE sessions SET device_id = ? WHERE device_id = ?', [nextId, previousId]);
     await executor.execute('DELETE FROM device_ingest_state WHERE device_id = ?', [previousId]);
+    await executor.execute('DELETE FROM device_ingest_baseline WHERE device_id = ?', [previousId]);
     await executor.execute('DELETE FROM devices WHERE device_id = ?', [previousId]);
     return { renamed: true, deviceId: nextId, previousDeviceId: previousId };
   }
@@ -681,6 +745,8 @@ function createRepository(pool) {
     countDevices,
     deleteDevice,
     getDeviceRecord,
+    getIngestBaseline,
+    saveIngestBaseline,
     getHubAccount,
     getHubAccountForUpdate,
     getHubAccountCredential,
@@ -698,6 +764,8 @@ function createRepository(pool) {
     listKnownModels,
     listPricing,
     lockDevice,
+    mergeDeviceSessions,
+    moveDeviceUsageEvents,
     renameDevice,
     replaceHubAccountCredential,
     replaceSessions,

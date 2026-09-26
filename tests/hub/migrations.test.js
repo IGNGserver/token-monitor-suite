@@ -43,13 +43,17 @@ test('migration runner serializes DDL with a MySQL advisory lock and no false tr
   assert.deepEqual(lock.params, ['token-monitor-schema-migrations', 30]);
   assert.deepEqual(release.params, ['token-monitor-schema-migrations']);
   assert.equal(pool.calls.some((call) => call.kind === 'beginTransaction' || call.kind === 'rollback' || call.kind === 'commit'), false);
-  const ddl = pool.calls.filter((call) => call.kind === 'query' && call.sql.startsWith('CREATE TABLE'));
+  const ddlStatement = (sql) => {
+    const withoutComments = sql.split('\n').filter((line) => !line.trim().startsWith('--')).join('\n').trim();
+    return withoutComments.startsWith('CREATE TABLE') ? withoutComments : null;
+  };
+  const ddl = pool.calls.map((call) => call.kind === 'query' ? ddlStatement(call.sql) : null).filter(Boolean);
   const migrationDdlCount = migrationFiles().reduce((count, file) => {
     const sql = fs.readFileSync(path.join(__dirname, '../../migrations', file), 'utf8');
     return count + (sql.match(/CREATE TABLE IF NOT EXISTS/gi) || []).length;
   }, 1);
   assert.equal(ddl.length, migrationDdlCount);
-  assert.ok(ddl.every((call) => call.sql.includes('CREATE TABLE IF NOT EXISTS')));
+  assert.ok(ddl.every((call) => call.includes('CREATE TABLE IF NOT EXISTS')));
   assert.deepEqual(
     pool.calls.filter((call) => call.sql?.includes('INSERT INTO schema_migrations')).map((call) => call.params[0]),
     migrationFiles()

@@ -50,7 +50,6 @@ Create `.env` at the project root:
 TOKEN_MONITOR_HUB_URL=http://WINDOWS_HOST_IP:17321
 TOKEN_MONITOR_SECRET=YOUR_HUB_SECRET
 TOKEN_MONITOR_DEVICE_ID=wsl-agent
-TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode
 TOKEN_MONITOR_ALLOW_INSECURE_HTTP=1
 ```
 
@@ -62,12 +61,12 @@ available.
 
 ## 3. Choose one collection boundary
 
-The hub adds device totals; it does not deduplicate the same session across devices. Choose one of these configurations:
+The hub adds device totals; it does not deduplicate the same session across devices. Both collectors now track every supported tool, so the boundary is the machine, not the client id:
 
-- Recommended: keep Windows WSL scanning enabled and restrict the WSL agent to SQLite-backed tools that Windows cannot read reliably, for example `TOKEN_MONITOR_CLIENTS=opencode,hermes,zcode`.
-- Alternative: let the WSL agent collect every WSL tool, then turn off **Settings → Collection → Scan usage from running WSL distros** in the Windows desktop app.
+- Recommended: let the WSL agent own WSL usage, and turn off the Windows-side WSL scan by setting `TOKEN_MONITOR_WSL_SCAN=0` for the desktop app (the same key in `settings.json`; the old Settings toggle is gone).
+- Alternative: skip the agent and keep the built-in Windows `\\wsl$` scan. Codex/Claude-style JSONL sessions are read that way, but SQLite-backed tools inside WSL (OpenCode, Hermes, ZCode) are not.
 
-Do not let both collectors report the same Codex, Claude Code, or other file-based sessions.
+Do not run both collectors against the same WSL home: they would report every tool twice. Client-level narrowing (`TOKEN_MONITOR_CLIENTS`) no longer exists.
 
 ## 4. Verify and keep it running
 
@@ -89,5 +88,5 @@ For unattended use, run that command from your normal WSL service manager or log
 
 - **No second device:** verify the hub URL, that `TOKEN_MONITOR_SECRET` matches the Hub's single key, the insecure-HTTP opt-in when applicable, and Windows firewall access to the hub port.
 - **Request goes through a proxy:** add the Windows host IP to `NO_PROXY` and `no_proxy`, or unset the proxy variables for the agent process.
-- **Totals are doubled:** narrow `TOKEN_MONITOR_CLIENTS`, or disable the Windows desktop app's built-in WSL scan when the agent owns all WSL tools.
+- **Totals are doubled:** turn off the Windows desktop app's built-in WSL scan (`TOKEN_MONITOR_WSL_SCAN=0` for the desktop process). Client-level narrowing is gone, so the two collectors must be split by machine.
 - **The WSL status block still reports no usage for a tool:** that status describes the Windows-side `\\wsl$` scan only. The WSL agent appears as a separate synced device and is the authoritative source for these SQLite-backed tools.

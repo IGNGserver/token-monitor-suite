@@ -50,14 +50,14 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" /> | Kilo Code | VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — Linux & remote/WSL only | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` (imports Claude Code sessions; tokscale does not dedup them, so Claude totals can be inflated) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/` (`projects/`, `cli/db/db.sqlite`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage & `kiro-cli` DB | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code extension logs | ✅ | — | — |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/` (default `~/.dsh/sessions/`; `session.jsonl[.zstd]` and versioned `session.v<N>.jsonl[.zstd]`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder / Qoder CN | Local adapter, opt-in per edition: `~/.qoder/projects/` and `~/.qoder-cn/projects/` transcripts, plus `<platform-app-data>/Qoder/` & `QoderCN/SharedClientCache/cache/db/local.db` and `com.qoder.app.stable/` & `com.qodercn.app.stable/main.sqlite` when present; Qoder dashboard cookie (big-model credits via Qoder usage API) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder / Qoder CN | Local adapter per edition: `~/.qoder/projects/` and `~/.qoder-cn/projects/` transcripts, plus `<platform-app-data>/Qoder/` & `QoderCN/SharedClientCache/cache/db/local.db` and `com.qoder.app.stable/` & `com.qodercn.app.stable/main.sqlite` when present; Qoder dashboard cookie (big-model credits via Qoder usage API) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/gemini.png" width="28" alt="Gemini CLI" /> | Gemini CLI | `~/.gemini/tmp/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/roocode.png" width="28" alt="Roo Code" /> | Roo Code | VS Code globalStorage tasks (`.../rooveterinaryinc.roo-cline/tasks/`) | ✅ | — | — |
@@ -106,7 +106,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 
 #### Qoder / Qoder CN (local adapter)
 
-Qoder token usage is read from the app's own local files, not an API. The international and China editions are tracked as two separate clients — `qoder` and `qodercn` — because they keep separate profiles, and both are opt-in under Settings → Collection → Tracked tools (off by default). Three sources per edition are probed and whichever exist contribute:
+Qoder token usage is read from the app's own local files, not an API. The international and China editions are tracked as two separate clients — `qoder` and `qodercn` — because they keep separate profiles, and both are always tracked (there is no per-tool opt-in). Three sources per edition are probed and whichever exist contribute:
 
 - **Transcript tree — the primary source in current builds.** `~/.qoder/projects/**/*.jsonl` (international) or `~/.qoder-cn/projects/**/*.jsonl` (CN), one JSON line per request. It is watched for live updates and needs nothing but the filesystem. Point `TOKEN_MONITOR_QODER_TRANSCRIPTS_DIR` / `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` at a different root, or set Qoder CN's own `QODERCN_CONFIG_DIR` when the whole profile is relocated.
 - **Desktop message store.** `com.qoder.app.stable/main.sqlite` (international) or `com.qodercn.app.stable/main.sqlite` (CN) under the platform application-support directory; override with `TOKEN_MONITOR_QODER_MAIN_DB_PATH` / `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH`. Qoder CN 0.1.x used the international spelling, so both candidates are tried for the CN site.
@@ -182,8 +182,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **Breakdown views** — grouped by tool, device, model, session, project, or account limits
 - **One interface, two hosts** — the desktop app and the Hub's web dashboard render the same UI, so a machine without the app can still open the full dashboard in a browser
 - **Appearance controls** — interface theme switching (incl. a light mode), per-tool vendor colours, and native window backdrop
-- **Customizable tool list** — hide, pin, and reorder tools in the main dashboard without changing what gets tracked
-- **Desktop settings** — tracked tools, collection cadence, session archiving, data export, custom model pricing, start at login, and Discord Rich Presence
+- **Desktop settings** — language, window surface and motion, startup/tray behaviour, updates, the Hub connection, and device data transfer
 - **Discord Rich Presence** — broadcast today's tokens, cost, and top client (opt-in)
 
 ## Installation
@@ -304,7 +303,7 @@ This archive only covers days Token Monitor has already observed; data deleted b
 
 There are two places to configure Token Monitor; day-to-day use only needs the first:
 
-- **Desktop app (GUI)** — open Settings from the sidebar or the app menu. It covers language, currency, tracked tools, collection cadence, session archiving, data export, custom model pricing, window and appearance, start at login, updates, Discord Rich Presence, and the Hub connection. Quota accounts, subscriptions, and pricing are managed on the Hub (see the Accounts and Management views).
+- **Desktop app (GUI)** — open Settings from the sidebar or the app menu. It covers language, window surface and motion, startup and tray behaviour, updates, and the Hub connection; collection cadence and the other device-local keys live in `.env` / `settings.json`, and every supported tool is always tracked. Quota accounts, subscriptions, and pricing are managed on the Hub (see the Accounts and Management views).
 - **Headless agent & hub** — no UI; configured with a `.env` file at the project root (copy from `.env.example`), precedence CLI flag → env var → built-in default.
 
 See the [configuration reference](docs/configuration.md) for every setting and all environment variables.

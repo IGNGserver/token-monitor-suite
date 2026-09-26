@@ -6,7 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const rootDir = path.join(__dirname, '..', '..');
-const { DEFAULT_CLIENTS } = require('../../src/shared/clientTracking');
+const { TRACKED_CLIENTS } = require('../../src/shared/clientTracking');
 
 // Client id -> icon name mappings when they differ
 const CLIENT_TO_ICON = {
@@ -18,10 +18,14 @@ const CLIENT_TO_ICON = {
   'codebuff': 'codebuff',
   'freebuff': 'codebuff',
   'pi': 'pi',
-  'omp': 'pi'
+  'omp': 'pi',
+  // One README row covers both clients: MiMo Code's brand is `mimo-code`, and
+  // Qoder / Qoder CN share the `qoder` artwork.
+  'micode': 'mimo-code',
+  'qodercn': 'qoder'
 };
 
-test('README supported-tools table covers every default tracked client', () => {
+test('README supported-tools table covers every tracked client', () => {
   const readmeText = fs.readFileSync(path.join(rootDir, 'README.md'), 'utf8');
   const rows = readmeText.split('\n').filter((line) => line.startsWith('| <img'));
 
@@ -32,15 +36,15 @@ test('README supported-tools table covers every default tracked client', () => {
     }).filter(Boolean)
   );
 
-  const defaultClients = DEFAULT_CLIENTS.split(',').map((c) => c.trim()).filter(Boolean);
+  const trackedClients = TRACKED_CLIENTS.split(',').map((c) => c.trim()).filter(Boolean);
 
   const missing = [];
-  for (const client of defaultClients) {
+  for (const client of trackedClients) {
     const expectedIcon = CLIENT_TO_ICON[client] || client;
     if (!tableIconIds.has(expectedIcon)) {
       missing.push(client);
     }
   }
 
-  assert.deepEqual(missing, [], `Default clients missing from README table: ${missing.join(', ')}`);
+  assert.deepEqual(missing, [], `Tracked clients missing from README table: ${missing.join(', ')}`);
 });

@@ -2,10 +2,18 @@
 
 Token Monitor has two configuration surfaces:
 
-- **Desktop app (GUI)** — everything the desktop app does, configured from Settings. This is the only surface most people need.
-- **`.env`** — for the headless agent and the Docker Compose Hub, which have no UI.
+- **Desktop app (GUI)** — display, behaviour, and Hub connection, configured from Settings.
+- **`.env` / `settings.json`** — collection cadence, export, custom pricing, and the
+  other device-local keys; also the only surface for the headless agent and the
+  Docker Compose Hub, which have no UI.
 
-The desktop app reads `.env` values as *first-run defaults*; once you change a setting in the GUI, the saved value takes over. The agent and Docker Compose Hub follow the precedence **CLI flag → env var (real or `.env`) → built-in default**.
+The desktop app reads `.env` values as *first-run defaults*; once a value is in
+`settings.json` it takes over. The agent and Docker Compose Hub follow the
+precedence **CLI flag → env var (real or `.env`) → built-in default**.
+
+**Every supported tool is always tracked.** There is no client-selection setting
+on any surface: the desktop app and the agent both collect the full wired list,
+so a persisted or `TOKEN_MONITOR_CLIENTS`-style subset is ignored and removed.
 
 ---
 
@@ -19,26 +27,23 @@ Shared preferences (both hosts):
 
 | Group | What it controls |
 |---|---|
-| Language & currency | Interface language and the display currency (USD, TWD, HKD, or CNY; daily auto rate or a manual override). |
-| Theme | Light / dark / system, applied to whichever host renders the page. |
-| Home limits | How many accounts the home screen's limit block shows. |
+| Preferences | Interface language, theme, and display currency (USD, TWD, HKD, or CNY; daily auto rate or a manual override). The browser host additionally sets the home-screen limit-account count and holds the Hub key. |
 | Accounts / Management | Hub-owned quota accounts (including OAuth sign-in), subscriptions, and model pricing. |
-| Connection & PWA | The web host's own panel: current origin, authorized role, live stream state, advertised capabilities, and the install prompt. |
 
 Device-local groups (desktop app only):
 
 | Group | What it controls |
 |---|---|
-| Collection | **Pause collection** (mirrored in the tray menu and the sidebar status), tracked tools, collection mode (`live` / `smart` / `interval`) and interval, project metadata, trend history and its interval, the file-watch toggle with its debounce, **Keep usage from deleted sessions**, `allTimeSince`, and — on Windows — the built-in WSL scan toggle. |
-| Collector engine | Which collector binary is in use (bundled or downloaded, with its version), plus actions to check npm for a newer one, download it, or fall back to the bundled copy. Absent where the updater is unsupported. |
-| Data export | Automatic export toggle, export folder, export interval, and export-now. |
-| Window & appearance | Native window backdrop (plus the Windows material choice and the macOS glass style), motion, tool icons, live indicator, compact token total, the Windows title-strip toggle, and zoom. |
-| Limit display | Presentation of received quota windows only: show source, mask account e-mails, remaining vs used bars. Accounts and credentials live on the Hub — the device does not discover local developer-tool accounts. |
-| Startup & updates | Start at login (with the Linux AppImage caveat), start hidden when launched at sign-in, keep running in the tray when the window is closed, automatic update downloads, check-for-updates now with the download / restart-to-install / ignore-this-version actions, Discord Rich Presence, export a redacted diagnostics bundle, and open the data folder. |
-| Device identity | The device ID this machine reports to the Hub. |
-| View & list preferences | Per-list visibility and order for views, tools, home modules, and home limit providers; the home limit bar count; the heatmap metric; and the active-days window. |
-| Currency & advanced | The exchange-rate override map and the theme colour map, both edited as JSON. |
-| Hub connection | **Local only** (no Hub) or **Connect to a hub** (Docker Compose Hub URL, upload interval, and the trusted-LAN HTTP opt-in). |
+| Display | Interface language, native window surface (Windows acrylic/mica included), and motion. |
+| Behaviour | Start at login (with the Linux AppImage caveat), start hidden when launched at sign-in, keep running in the tray when the window is closed, automatic update downloads, and check-for-updates / install-now actions. |
+| Connection | **Local only** (no Hub) or **Connect to a hub** (Docker Compose Hub URL, the single Hub key, the trusted-LAN HTTP opt-in, and the device ID). |
+| Device data transfer | Move this device's ledger, sessions, periods, and history onto another device on the same Hub. |
+
+Keys without a GUI keep their normal `settings.json` / `.env` behaviour:
+collection mode and interval, project metadata, trend history, the file-watch
+toggle and debounce, session archiving, data export, custom model pricing,
+per-list view preferences, and the JSON colour/rate maps. Tracked tools are not
+among them — that list is fixed and every supported tool is always collected.
 
 ### Central Hub accounts and quotas
 
@@ -52,7 +57,9 @@ return the stored credential.
 
 The device and headless agent collect local usage only. They do not inspect
 developer-tool login files, browser profiles, environment credentials, or local
-CLI accounts, and they do not upload account credentials. Incoming device
+CLI accounts, and they do not upload account credentials. In other words, the
+desktop app does not discover local developer-tool accounts; quota accounts are
+added to the Hub by the operator. Incoming device
 `limits` fields are ignored by the Hub; the `limits` object in `/api/stats` is
 the Hub's central result.
 
@@ -87,7 +94,6 @@ TOKEN_MONITOR_COLLECTION_MODE=live    # live, interval, or smart
 TOKEN_MONITOR_INTERVAL_MS=300000      # shared periodic collection interval
 TOKEN_MONITOR_WATCH=1                 # shared file-watch switch
 TOKEN_MONITOR_WATCH_DEBOUNCE_MS=1500  # shared source-event debounce
-TOKEN_MONITOR_CLIENTS=               # optional — defaults to all supported tools; empty disables tracking
 TOKEN_MONITOR_PROJECTS_ENABLED=      # optional — defaults off; 1 collects project metadata
 TOKEN_MONITOR_HISTORY_ENABLED=       # optional — defaults on; 0 skips trend history
 TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # optional — defaults on; 0 stops archiving deleted-session usage
@@ -107,11 +113,13 @@ rejected by default; prefer HTTPS whenever possible. In the single-user mode,
 all devices intentionally use the same Hub key. Split admin/viewer/device
 credentials remain available only for legacy deployments.
 
-The collection and upload controls above are shared by the desktop app's Hub client
-mode and the headless agent. A saved GUI value overrides the first-run
-`.env` default; the headless agent uses CLI flags first, then environment, then
-the shared built-in default. `smart` is useful on machines where a periodic,
-activity-aware scan is preferable to continuous file watching.
+The collection and upload controls above are shared by the desktop app's Hub
+client mode and the headless agent. The desktop app reads them from
+`settings.json` (seeded from `.env` on first run); the headless agent uses CLI
+flags first, then environment, then the shared built-in default. `smart` is
+useful on machines where a periodic, activity-aware scan is preferable to
+continuous file watching. The tracked-tool list is not configurable on either
+side: every supported tool is always collected.
 
 Provider credentials for quota accounts are entered manually in the Hub and
 are not read from a device's local developer-tool installation. Proxy settings
@@ -126,7 +134,7 @@ those are read from the environment but are not meant to be configured by hand.
 `qoder` quota accounts are manual Hub accounts. The `qoder` and `qodercn` local
 usage integrations are separate from them, and separate from each other: the
 international and China editions keep distinct profiles, so each is tracked as
-its own opt-in client. Each site probes three sources and uses whichever exist:
+its own client. Each site probes three sources and uses whichever exist:
 the transcript tree under its profile (`~/.qoder/projects`, or
 `QODERCN_CONFIG_DIR/projects` defaulting to `~/.qoder-cn/projects`), which is the
 primary source in current builds; the desktop `com.qoder.app.stable/main.sqlite`
@@ -157,8 +165,11 @@ The desktop app reads these as first-run defaults; the agent and Docker Compose 
 One-shot run (collect once and exit — useful for cron / launchd):
 
 ```bash
-npm run agent -- --clients=claude,codex,opencode --once
+npm run agent -- --once
 ```
+
+Every supported tool is collected; `--clients` and `TOKEN_MONITOR_CLIENTS` were
+removed and are ignored with a warning.
 
 ---
 

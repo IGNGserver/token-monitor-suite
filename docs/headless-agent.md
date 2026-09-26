@@ -59,9 +59,9 @@ posts snapshots without a GUI.
 
 The same collection controls are available through environment variables or
 agent flags. `live` watches source files, `interval` performs periodic scans,
-and `smart` uses periodic scans plus activity-aware scheduling. `TOKEN_MONITOR_CLIENTS`
-limits the tracked client IDs; `TOKEN_MONITOR_PROJECTS_ENABLED=1` enables
-project rollups; `TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED=0` disables the
+and `smart` uses periodic scans plus activity-aware scheduling. Every supported
+tool is always collected; `TOKEN_MONITOR_PROJECTS_ENABLED=1` enables project
+rollups; `TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED=0` disables the
 deleted-session archive; and `TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS` controls
 the upload cadence (`0` means upload each completed snapshot).
 

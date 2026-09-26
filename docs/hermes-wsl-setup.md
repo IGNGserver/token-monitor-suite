@@ -180,7 +180,7 @@ WSL agent 和 Windows 桌面端默认使用相同的主机名作为设备 ID。�
 
 Windows 桌面端内建的 WSL 扫描本来就会隔着 `\\wsl$` 读到 WSL 里走 JSONL 的工具（Codex、Claude 等）。如果 WSL agent 又上报同样的工具，由于用的是不同 deviceId，hub 会把两份相加（不去重），导致这些工具被算两次。Hermes 不受影响——它是 SQLite，隔着 `\\wsl$` 读不到，只有 WSL 内的 agent 读得到。
 
-**建议**：把 WSL agent 的 `TOKEN_MONITOR_CLIENTS` 只填 Windows 侧读不到的工具（比如就填 `hermes`），让 Windows 侧继续负责 Codex 那类 JSONL 工具，两边不重叠就不会重复。
+**建议**：不要让 Windows 侧和 WSL agent 同时采集同一个 WSL home。现在两个采集器都会采集全部受支持工具，无法再按客户端缩小范围；请二选一：让 WSL agent 负责 WSL 用量，并在 Windows 桌面端设置 `TOKEN_MONITOR_WSL_SCAN=0` 关闭内建 WSL 扫描；或者不运行 agent，只保留 Windows 侧扫描（此时 Hermes 等 SQLite 工具读不到）。
 
 ### 4. Windows 防火墙
 

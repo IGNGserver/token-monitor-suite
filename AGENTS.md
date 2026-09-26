@@ -88,25 +88,25 @@ Per-setting precedence for the agent and hub: `CLI flag → env var (real or .en
 
 ### Adding a tracked client
 
-The default client CSV lives in **one** place: `DEFAULT_CLIENTS` in `src/shared/clientTracking.js` (`src/electron/main.js` and `src/agent/agent.js` both derive from it). But adding a *new* client means touching several spots that must all agree on the id:
+The tracked client list lives in **one** place: `TRACKED_CLIENTS` in `src/shared/clientTracking.js`. It is the complete wired set, not a default: every runtime always collects it (there is no client-selection setting, and the old `TOKEN_MONITOR_CLIENTS` / `--clients` surface was removed), so adding a client also enrolls it everywhere on upgrade. Adding a *new* client means touching several spots that must all agree on the id:
 
 | Touch point | Where |
 |---|---|
-| Default client list | `DEFAULT_CLIENTS` in `src/shared/clientTracking.js` |
+| Tracked client list | `TRACKED_CLIENTS` in `src/shared/clientTracking.js` |
 | Watch paths | the `add(...)` call in `clientWatchCandidates()` (`src/shared/collector.js`) |
 | Name normalization | the `normalizeClientName()` branch in `src/shared/usage.js` |
 | UI labels / colours | `CLIENT_LABELS` / `CLIENT_COLORS` in `src/shared-ui/core/data.js`, plus the `ICON_ALIASES` entry if the file name differs from the id |
 | Discord RPC | `KNOWN_CLIENT_ASSETS` / `CLIENT_LABELS` in `src/electron/discordRpc.js` |
 | Icon assets | `src/shared-ui/icons/clients/<id>.svg` (the one tree both hosts serve) + `.github/assets/tools-icon/<id>.png` |
 | WSL discovery | marker(s) in `WSL_DATA_MARKERS` **and** the marker→id mapping in `MARKER_CLIENTS` (`src/shared/wslUsage.js`) — use the exact roots tokscale reads, including alternate roots. A marker without a `MARKER_CLIENTS` entry attributes to nothing, so a WSL home holding only that client's data would be skipped |
-| Docs & env examples | the supported-tools table in `README.md` and its translations (`README.*.md`) + the client CSV in `.env.example`. Every locale's prose tool/provider counts must match its own table — `tests/docs/readmeConsistency.test.js` fails on a stale count or a table that drifts between locales |
-| Guard tests | the expected-client lists in `tests/shared/clientTracking.test.js` |
+| Docs | the supported-tools table in `README.md` and its translations (`README.*.md`) + the Qoder/MiMo prose where a client's provenance is explained. Every locale's prose tool/provider counts must match its own table — `tests/docs/readmeConsistency.test.js` fails on a stale count or a table that drifts between locales |
+| Guard tests | the expected-client lists in `tests/shared/clientTracking.test.js` and the README icon mapping in `tests/docs/readmeToolTable.test.js` |
 | Android client | `CLIENT_LABELS` / `CLIENT_COLORS` in `ClientBranding.kt`, plus the brand SVG in `src/shared-ui/icons/clients/<id>.svg` — `npm run update:fluent-assets` converts it to `res/drawable/client_<id>.xml` and regenerates `ClientIcons.kt`. An SVG that needs filters, gradients or transforms is skipped *by design* and falls back to the letter monogram; nothing breaks, the mark just does not appear |
 
 Two caveats on top of the table:
 
 - Self-synced clients (cursor/antigravity) additionally go in `SELF_SYNCED_CLIENTS`; parse-local clients must NOT.
-- A tracked id is not necessarily the id tokscale spells. `tokscale --client` is a clap value-enum: an id outside it is a hard usage error (exit 2, empty stdout), so one unknown id fails the whole scan — every other client in the same call included. `TOKSCALE_CLIENT_RENAMES` / `TOKSCALE_CLIENT_ALIASES` in `collector.js` are therefore load-bearing: rename an id tokscale rejects (`deepseek-harness` → `dsh`), and alias an id whose usage tokscale splits across two (`pi` → `pi,omp`, since 4.14 moved Oh My Pi's `~/.omp` root to its own `omp` client). Every downstream consumer must fold those upstream ids back — `normalizeClientName` for usage rows, and `normalizeGraphClientIds` for the history graph, which tokscale keys by its own ids. `tests/shared/clientTracking.test.js` asserts every default client maps to an id the bundled tokscale actually accepts.
+- A tracked id is not necessarily the id tokscale spells. `tokscale --client` is a clap value-enum: an id outside it is a hard usage error (exit 2, empty stdout), so one unknown id fails the whole scan — every other client in the same call included. `TOKSCALE_CLIENT_RENAMES` / `TOKSCALE_CLIENT_ALIASES` in `collector.js` are therefore load-bearing: rename an id tokscale rejects (`deepseek-harness` → `dsh`), and alias an id whose usage tokscale splits across two (`pi` → `pi,omp`, since 4.14 moved Oh My Pi's `~/.omp` root to its own `omp` client). Every downstream consumer must fold those upstream ids back — `normalizeClientName` for usage rows, and `normalizeGraphClientIds` for the history graph, which tokscale keys by its own ids. `tests/shared/clientTracking.test.js` asserts every tracked client maps to an id the bundled tokscale actually accepts.
 
 ### Data flow contract
 

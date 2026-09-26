@@ -50,14 +50,14 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" /> | Kilo Code | VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — Linux 및 원격/WSL만 | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` (Claude Code 세션을 가져오며 tokscale이 중복 제거하지 않아 Claude 합계가 중복 계산될 수 있음) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/` (`projects/`, `cli/db/db.sqlite`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage 및 `kiro-cli` DB | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code 확장 로그 | ✅ | — | — |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/` (기본 `~/.dsh/sessions/`, `session.jsonl[.zstd]` 및 버전이 붙은 `session.v<N>.jsonl[.zstd]`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder / Qoder CN | 로컬 어댑터, 에디션별 옵트인: `~/.qoder/projects/`와 `~/.qoder-cn/projects/` transcript, 그리고 존재할 경우 `<platform-app-data>/Qoder/`와 `QoderCN/SharedClientCache/cache/db/local.db`, `com.qoder.app.stable/`과 `com.qodercn.app.stable/main.sqlite`; Qoder dashboard cookie (Qoder usage API로 big-model credits 조회) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder / Qoder CN | 로컬 어댑터, 에디션별 자동 추적: `~/.qoder/projects/`와 `~/.qoder-cn/projects/` transcript, 그리고 존재할 경우 `<platform-app-data>/Qoder/`와 `QoderCN/SharedClientCache/cache/db/local.db`, `com.qoder.app.stable/`과 `com.qodercn.app.stable/main.sqlite`; Qoder dashboard cookie (Qoder usage API로 big-model credits 조회) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/gemini.png" width="28" alt="Gemini CLI" /> | Gemini CLI | `~/.gemini/tmp/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/roocode.png" width="28" alt="Roo Code" /> | Roo Code | VS Code globalStorage tasks (`.../rooveterinaryinc.roo-cline/tasks/`) | ✅ | — | — |
@@ -106,7 +106,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 
 #### Qoder / Qoder CN(로컬 어댑터)
 
-Qoder 토큰 사용량은 API가 아닌 앱 자신의 로컬 파일에서 읽습니다. 국제판과 중국판은 프로필이 분리되어 있으므로 `qoder`와 `qodercn` 두 개의 독립된 클라이언트로 추적합니다. 둘 다 설정 → 수집 → 추적 도구에서 옵트인(기본 꺼짐)입니다. 각 에디션마다 세 개의 출처를 탐색하며, 실제로 존재하는 것만 기여합니다:
+Qoder 토큰 사용량은 API가 아닌 앱 자신의 로컬 파일에서 읽습니다. 국제판과 중국판은 프로필이 분리되어 있으므로 `qoder`와 `qodercn` 두 개의 독립된 클라이언트로 추적합니다. 둘 다 자동으로 추적됩니다(도구별 옵트인은 없습니다). 각 에디션마다 세 개의 출처를 탐색하며, 실제로 존재하는 것만 기여합니다:
 
 - **Transcript 디렉터리 — 현재 빌드의 주 출처.** `~/.qoder/projects/**/*.jsonl`(국제판) 또는 `~/.qoder-cn/projects/**/*.jsonl`(중국판), 요청당 JSON 한 줄. 실시간 업데이트를 위해 감시되며 파일 시스템 외에는 아무것도 필요로 하지 않습니다. 다른 루트를 지정하려면 `TOKEN_MONITOR_QODER_TRANSCRIPTS_DIR` / `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR`를, 프로필 전체를 옮긴 경우에는 Qoder CN 자체의 `QODERCN_CONFIG_DIR`을 설정하세요.
 - **데스크톱 메시지 저장소.** 플랫폼 애플리케이션 지원 디렉터리의 `com.qoder.app.stable/main.sqlite`(국제판) 또는 `com.qodercn.app.stable/main.sqlite`(중국판). `TOKEN_MONITOR_QODER_MAIN_DB_PATH` / `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH`로 재정의할 수 있습니다. Qoder CN 0.1.x는 국제판 표기를 사용했으므로 중국판은 두 후보를 순서대로 시도합니다.
@@ -182,8 +182,7 @@ Qoder 토큰 사용량은 API가 아닌 앱 자신의 로컬 파일에서 읽습
 - **분류 보기** — 도구, 기기, 모델, 세션, 프로젝트, 계정 한도별
 - **하나의 UI, 두 개의 호스트** — 데스크톱 앱과 Hub 웹 대시보드가 같은 UI를 렌더링하므로, 앱을 설치하지 않은 기기에서도 브라우저에서 전체 대시보드를 열 수 있습니다
 - **외관** — 테마(라이트 포함), 도구별 색, 네이티브 창 배경 효과
-- **도구 목록 커스터마이즈** — 추적은 유지한 채 숨기기, 고정, 순서 변경
-- **데스크톱 설정** — 추적 도구, 수집 주기, 세션 아카이브, 데이터 내보내기, 사용자 지정 모델 가격, 로그인 시 시작, Discord Rich Presence
+- **데스크톱 설정** — 언어, 창 소재와 모션, 시작/트레이 동작, 업데이트, 허브 연결, 기기 데이터 전송
 - **Discord Rich Presence** — 오늘 토큰·비용·주요 클라이언트 (옵트인)
 
 ## 설치
@@ -304,7 +303,7 @@ npm run pack         # 설치 없이 앱 디렉터리만 (로컬 테스트)
 
 Token Monitor 설정은 두 곳에 있으며, 일상 사용에는 앞의 것만 필요합니다.
 
-- **데스크톱 앱 (GUI)** — 사이드바나 앱 메뉴에서 설정을 엽니다. 언어, 통화, 추적 도구, 수집 주기, 세션 보관, 데이터 내보내기, 사용자 지정 모델 가격, 창과 모양, 로그인 시 시작, 업데이트, Discord Rich Presence, 허브 연결을 다룹니다. 할당량 계정, 구독, 가격은 허브에서 관리합니다("계정" 및 "관리" 보기 참조).
+- **데스크톱 앱 (GUI)** — 사이드바나 앱 메뉴에서 설정을 엽니다. 언어, 창 소재와 모션, 시작 및 트레이 동작, 업데이트, 허브 연결을 다룹니다. 수집 주기 등 기기 로컬 키는 `.env` / `settings.json`에 그대로 있습니다. 모든 지원 도구는 항상 수집됩니다. 할당량 계정, 구독, 가격은 허브에서 관리합니다("계정" 및 "관리" 보기 참조).
 - **Headless agent와 hub** — UI 없음. 프로젝트 루트의 `.env`(`.env.example` 복사)로 설정하며, 우선순위는 CLI 플래그 → 환경 변수 → 기본값입니다.
 
 모든 설정과 환경 변수의 자세한 내용은 [설정 레퍼런스](docs/configuration.md)를 참고하세요.

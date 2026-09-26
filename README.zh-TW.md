@@ -50,14 +50,14 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/kilocode.png" width="28" alt="Kilo Code" /> | Kilo Code | VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`）—— 僅 Linux 與遠端/WSL | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db`（會匯入 Claude Code 工作階段；tokscale 不去重，Claude 總量可能重複計算） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/`（`projects/`、`cli/db/db.sqlite`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`、Kiro IDE globalStorage 與 `kiro-cli` 資料庫 | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` 與 IDE / VS Code 擴充套件日誌 | ✅ | — | — |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek-harness.svg" width="28" alt="DeepSeek Harness" /> | DeepSeek Harness | `$DSH_HOME/sessions/`（預設 `~/.dsh/sessions/`；`session.jsonl[.zstd]` 及帶版本號的 `session.v<N>.jsonl[.zstd]`） | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder / Qoder CN | 本機介接，兩個版本各自選用啟用：`~/.qoder/projects/` 與 `~/.qoder-cn/projects/` transcript，以及存在時的 `<platform-app-data>/Qoder/` 與 `QoderCN/SharedClientCache/cache/db/local.db`、`com.qoder.app.stable/` 與 `com.qodercn.app.stable/main.sqlite`；Qoder dashboard cookie（透過 Qoder usage API 查詢 big-model credits） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder / Qoder CN | 本機介接，兩個版本各自讀取：`~/.qoder/projects/` 與 `~/.qoder-cn/projects/` transcript，以及存在時的 `<platform-app-data>/Qoder/` 與 `QoderCN/SharedClientCache/cache/db/local.db`、`com.qoder.app.stable/` 與 `com.qodercn.app.stable/main.sqlite`；Qoder dashboard cookie（透過 Qoder usage API 查詢 big-model credits） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/gemini.png" width="28" alt="Gemini CLI" /> | Gemini CLI | `~/.gemini/tmp/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/roocode.png" width="28" alt="Roo Code" /> | Roo Code | VS Code globalStorage tasks（`.../rooveterinaryinc.roo-cline/tasks/`） | ✅ | — | — |
@@ -106,7 +106,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 
 #### Qoder / Qoder CN（本機介接）
 
-Qoder 的 Token 用量來自應用程式自身的本機檔案，而非 API。國際版與中國版以兩個獨立客戶端追蹤 —— `qoder` 與 `qodercn`，因為兩者使用各自獨立的設定目錄；兩者都在 設定 → 收集 → 追蹤的工具 中選用啟用（預設關閉）。每個版本偵測三個來源，實際存在的那些都會貢獻資料：
+Qoder 的 Token 用量來自應用程式自身的本機檔案，而非 API。國際版與中國版以兩個獨立客戶端追蹤 —— `qoder` 與 `qodercn`，因為兩者使用各自獨立的設定目錄；兩者都會被自動追蹤（沒有逐工具的開關）。每個版本偵測三個來源，實際存在的那些都會貢獻資料：
 
 - **Transcript 目錄 —— 目前版本的主要來源。** `~/.qoder/projects/**/*.jsonl`（國際版）或 `~/.qoder-cn/projects/**/*.jsonl`（中國版），每個請求一行 JSON。它會被監看以即時更新，且只需要檔案系統。可用 `TOKEN_MONITOR_QODER_TRANSCRIPTS_DIR` / `TOKEN_MONITOR_QODER_CN_TRANSCRIPTS_DIR` 指向其他目錄；若整個設定目錄被搬移，則設定 Qoder CN 自帶的 `QODERCN_CONFIG_DIR`。
 - **桌面訊息庫。** 平台應用程式支援目錄下的 `com.qoder.app.stable/main.sqlite`（國際版）或 `com.qodercn.app.stable/main.sqlite`（中國版），可用 `TOKEN_MONITOR_QODER_MAIN_DB_PATH` / `TOKEN_MONITOR_QODER_CN_MAIN_DB_PATH` 覆寫。Qoder CN 0.1.x 使用國際版的拼法，因此中國版會依序嘗試兩個候選。
@@ -182,8 +182,7 @@ Qoder 的 Token 用量來自應用程式自身的本機檔案，而非 API。國
 - **分組檢視**：可依工具、裝置、模型、session、專案或帳戶額度分組查看用量
 - **一套介面，兩個宿主**：桌面應用程式與中樞的網頁儀表板渲染同一套 UI，沒裝應用程式的機器也能直接在瀏覽器開啟完整儀表板
 - **外觀控制**：介面主題切換（含淺色模式）、各工具廠商色，以及原生視窗背景效果
-- **工具列表自訂**：可隱藏、置頂和拖曳排序主列表中的工具，不影響實際追蹤
-- **桌面端設定**：追蹤工具、收集頻率、會話封存、資料匯出、自訂模型價格、開機啟動與 Discord Rich Presence
+- **桌面端設定**：語言、視窗材質與動效、開機啟動/托盤行為、更新、中樞連線，以及裝置資料移轉
 - **Discord Rich Presence**：將今日 Token、花費與主要工具廣播到你的 Discord 個人檔案（需手動開啟）
 
 ## 安裝
@@ -304,7 +303,7 @@ npm run pack         # 未封裝的 app 目錄（無安裝檔），方便本機�
 
 設定分兩處，日常使用只需要前者：
 
-- **桌面應用程式（GUI）**——從側邊欄或應用程式選單開啟設定。涵蓋語言、幣別、追蹤的工具、採集頻率、工作階段封存、資料匯出、自訂模型定價、視窗與外觀、登入時啟動、更新、Discord Rich Presence，以及中樞連線。額度帳號、訂閱與定價由中樞管理（見「帳號」與「管理」檢視）。
+- **桌面應用程式（GUI）**——從側邊欄或應用程式選單開啟設定。涵蓋語言、視窗材質與動效、開機啟動與托盤行為、更新，以及中樞連線；採集頻率等其他裝置本機鍵仍在 `.env` / `settings.json` 中設定，所有支援的工具一律採集。額度帳號、訂閱與定價由中樞管理（見「帳號」與「管理」檢視）。
 - **無頭代理與 hub**——沒有 UI，用專案根目錄的 `.env` 設定（從 `.env.example` 複製）；優先序為 CLI 旗標 → 環境變數 → 內建預設。
 
 每一項設定與所有環境變數的完整說明，請見[設定參考文件](docs/configuration.md)。
